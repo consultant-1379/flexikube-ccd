@@ -1,0 +1,17 @@
+---
+- name: Restart calico-node
+  hosts: master[0]
+  become: yes
+  roles:
+  - erikube-defaults
+  tasks:
+    - name: Rollout restart calico-node DS
+      shell: >
+        /usr/local/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf
+        rollout restart ds -n kube-system calico-node
+      register: output
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: (output.rc == 0)
+      become: yes
+      ignore_errors: no

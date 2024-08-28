@@ -1,0 +1,72 @@
+---
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/ecfe-XXXXXX
+  register: ecfetemp
+
+- name: Create Secrets for ecfe
+  template:
+    src: "ecfe-secrets-bgp.yml.j2"
+    dest: "{{ ecfetemp.stdout }}/ecfe-secrets-bgp.yml"
+  when: ecfe_secrets is defined and (ecfe_secrets | length > 0)
+
+- name: Apply ecfe Secrets template
+  shell: "{{ kubectl }} apply -f {{ ecfetemp.stdout }}/ecfe-secrets-bgp.yml"
+  register: output
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: output.rc == 0
+  when: ecfe_secrets is defined and (ecfe_secrets | length > 0)
+
+- name: Create ConfigMap for ecfe (BGP mode)
+  template:
+    src: "ecfe-config-map-bgp.yml.j2"
+    dest: "{{ ecfetemp.stdout }}/ecfe-config-map.yml"
+  when: ecfe_mode == "bgp" and ecfe_config_map_peers | length > 0
+
+- name: Create ConfigMap for ecfe (BFD mode)
+  template:
+    src: "ecfe-config-map-bfd.yml.j2"
+    dest: "{{ ecfetemp.stdout }}/ecfe-config-map.yml"
+  when: ecfe_mode == "bfd" and ecfe_config_map_peers | length > 0
+
+- name: Create ConfigMap for ecfe (RAW mode)
+  template:
+    src: "ecfe-config-map-raw.yml.j2"
+    dest: "{{ ecfetemp.stdout }}/ecfe-config-map.yml"
+  when: ecfe_config_map_raw != ""
+
+- name: Apply ecfe ConfigMap template
+  shell: "{{ kubectl }} apply -f {{ ecfetemp.stdout }}/ecfe-config-map.yml"
+  register: output
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: output.rc == 0
+  when: (ecfe_config_map_peers | length > 0) or
+        (ecfe_config_map_raw != "")
+
+- name: Create CRDs for ecfe
+  template:
+    src: "ecfe-crds.yml.j2"
+    dest: "{{ ecfetemp.stdout }}/ecfe-crds.yml"
+
+- name: Apply ecfe CRDs
+  shell: "{{ kubectl }} apply -f {{ ecfetemp.stdout }}/ecfe-crds.yml"
+  register: output
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: output.rc == 0
+
+- name: Get ecfe ConfigMap
+  shell: "cat {{ ecfetemp.stdout }}/ecfe-config-map.yml"
+  register: confoutput
+
+- set_fact:
+    config_data: "{{ (confoutput.stdout |from_yaml).data.config }}"
+
+- set_fact:
+     address_yaml: "{{ (config_data | from_yaml)['address-pools'] }}"
+
+- name: Delete temp directory
+  file:
+    name: "{{ ecfetemp.stdout }}"
+    state: absent

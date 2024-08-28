@@ -1,0 +1,469 @@
+#Delete PM Server 3pp Helm Chart
+- name: Delete helm chart for PM server 3pp components
+  hosts: master[0]
+  become: yes
+  ignore_errors: True
+  roles:
+    - erikube-defaults
+    - role: helm-chart-provisioner
+      vars:
+        - chart_name: eric-pm-server-3pp-components
+        - kube_namespace: monitoring
+        - state: purged
+      when:
+        - pm_monitoring_enabled | default(true) | bool
+
+# K8s uplift to 1.22 requires ingress to be recreated
+- name: Delete Alertmanager ingress
+  hosts: master[0]
+  become: yes
+  vars:
+    - ingress_name:  "eric-pm-server-alertmanager"
+  tasks:
+    - name: Delete ingress rule alertmanager if exists
+      include_role:
+        name: eric-pm-utils
+        tasks_from: delete-ingress
+      when:
+        - pm_server_alertmanager_ingress_enabled | default(false) | bool
+        - pm_monitoring_enabled | default(true) | bool
+
+- name: Create/Update local registry secret for PM monitoring
+  hosts: master[0]
+  become: yes
+  tasks:
+    - name: Create/Update PM monitoring secret for accessing local registry
+      shell: |
+        {{ kubectl }} create secret docker-registry local-registry-secret \
+        --docker-server={{ 'registry.eccd.local:5000' if local_registry_user is defined and local_registry_user != "" else 'null.eccd.local' }} \
+        --docker-username={{ local_registry_user if local_registry_user is defined and local_registry_user != "" else 'null' }} \
+        --docker-password={{ local_registry_password if local_registry_password is defined and local_registry_password != "" else 'nopassword' }} -n monitoring \
+        --dry-run=client -o yaml | {{ kubectl }} apply -f -
+      register: result
+      become: true
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: result.rc == 0
+      ignore_errors: True
+      when:
+        - pm_monitoring_enabled | default(true) | bool
+  vars:
+    - kubectl: "/usr/local/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf"
+    - kubectl_retry_count: 10
+    - kubectl_retry_delay: 10
+
+- name: Create ingress Alert Manager tls secrets
+  hosts: master[0]
+  become: yes
+  vars:
+    tls_hostname: "{{ pm_server_alertmanager_ingress_hostname | default('alertmanager.eccd.local') }}"
+    tls_secret:  "eric-pm-server-alertmanager-ingress-tls"
+    tls_cert: "{{ pm_server_alertmanager_ingress_cert | default('') }}"
+    tls_key:  "{{ pm_server_alertmanager_ingress_key | default('') }}"
+  tasks:
+    - name: Create tls secrets for alertmanger ingress rule
+      include_role:
+        name: eric-pm-utils
+        tasks_from: create-tls-secret
+      when:
+        - pm_server_alertmanager_ingress_enabled | default(false) | bool
+        - pm_monitoring_enabled | default(true) | bool
+
+- name: Delete ingress Alert Manager tls secrets
+  hosts: master[0]
+  become: yes
+  vars:
+    tls_secret:  "eric-pm-server-alertmanager-ingress-tls"
+  tasks:
+    - name: Delete tls secrets used for alert manager ingress rule if exists
+      include_role:
+        name: eric-pm-utils
+        tasks_from: delete-tls-secret
+      when:
+        - not(pm_server_alertmanager_ingress_enabled | default(false) | bool)
+
+- name: Upgrade PM Node Exporter
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+    - name: Set list of collectors when node exporter default collector is disabled
+      set_fact:
+        collectors_list:
+          - collector.disable-defaults
+          - collector.cpu
+          - collector.filesystem
+          - collector.loadavg
+          - collector.meminfo
+          - collector.mountstats
+          - collector.netclass
+          - collector.netdev
+          - collector.textfile
+          - collector.timex
+          - collector.uname
+          - collector.xfs
+      when: pm_server_nodeExporter_default_collectors_disabled | default(true) | bool
+
+    - name: Set list of collectors when node exporter default collector is not disabled
+      set_fact:
+        collectors_list:
+          - collector.mountstats
+      when: not pm_server_nodeExporter_default_collectors_disabled | default(true) | bool
+  vars:
+    - tarball_name: "{{ helm_charts.eric_pm_node_exporter.tarball }}"
+  roles:
+    - erikube-defaults
+    - role: helm-chart-provisioner
+      when: pm_monitoring_enabled | default(true) | bool
+      vars:
+        - chart_name: eric-pm-node-exporter
+        - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '1200s' }}"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - state: update-installed
+        - kube_namespace: "monitoring"
+        - productInfo:
+            images:
+              mainImage:
+                name: "{{ containers.monitoring.eric_pm_node_exporter.split(':')[0] }}"
+                tag: "{{ containers.monitoring.eric_pm_node_exporter.split(':')[1] }}"
+                repoPath: ""
+        - values:
+            global:
+              registry:
+                url: "{{ kube_image_prefix | regex_replace('\\/$', '') }}"
+              pullSecret: "local-registry-secret"
+              security:
+                tls:
+                  enabled: false
+            security:
+              tls:
+                enabled: false
+            imageCredentials:
+              mainImage:
+                repoPath: ""
+            podPriority:
+              nodeExporter:
+                priorityClassName : "system-cluster-critical"
+            tolerations:
+              - key: node-role.kubernetes.io/control-plane
+                effect: NoSchedule
+              - operator: Exists
+                effect: NoSchedule
+              - operator: Exists
+                effect: NoExecute
+              - key: CriticalAddonsOnly
+                operator: Exists
+            nodeExporter:
+              collectors: "{{ collectors_list }}"
+              extraArgs:
+                collector.textfile.directory: /host/var/lib/eccd/
+              service:
+                annotations:
+                  prometheus.io/scrape: "true"
+                hostNetwork: true
+            securityContext:
+              hostRootfsAccessEnabled: true
+            resources:
+              nodeExporter:
+                limits:
+                  cpu: "{{ pm_server_nodeExporter_cpu_limit | default('400m') }}"
+                  memory: "{{ pm_server_nodeExporter_memory_limit | default('500Mi') }}"
+                requests:
+                  cpu: "{{ pm_server_nodeExporter_cpu_requests | default('100m') }}"
+                  memory: "{{ pm_server_nodeExporter_memory_requests | default('100Mi') }}"
+
+- name: Delete helm chart for PM Kube State Metrics
+  hosts: master[0]
+  become: yes
+  ignore_errors: True
+  roles:
+    - erikube-defaults
+    - role: helm-chart-provisioner
+      vars:
+        - tarball_name: "{{ helm_charts.eric_pm_kube_state_metrics.name + '-' + helm_charts.eric_pm_kube_state_metrics.version + '.tgz' }}"
+        - chart_name: eric-pm-kube-state-metrics
+        - kube_namespace: monitoring
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - state: purged
+      when:
+        - pm_monitoring_enabled | default(true) | bool
+
+- name: Configure clusterrole and Service Account and clusterrolebinding for latest PM Kube State Metrics
+  hosts: master[0]
+  roles:
+   - role: eric-pm-kube-state-metrics
+     when: pm_monitoring_enabled | default(true) | bool
+
+- name: Upgrade PM Kube State Metrics
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+  vars:
+    - kube_image_prefix: "{{ docker_registry_host | default(default_registry) }}/"
+    - tarball_name: "{{ helm_charts.eric_pm_kube_state_metrics.tarball }}"
+  roles:
+    - erikube-defaults
+    - role: helm-chart-provisioner
+      when: pm_monitoring_enabled | default(true) | bool
+      vars:
+        - chart_name: eric-pm-kube-state-metrics
+        - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '1200s' }}"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - state: update-installed
+        - kube_namespace: "monitoring"
+        - productInfo:
+            images:
+              kubeStateMetrics:
+                name: "{{ containers.monitoring.eric_pm_kube_state_metrics.split(':')[0] }}"
+                tag: "{{ containers.monitoring.eric_pm_kube_state_metrics.split(':')[1] }}"
+                repoPath: ""
+        - values:
+            global:
+              registry:
+                url: "{{ kube_image_prefix | regex_replace('\\/$', '') }}"
+              pullSecret: "local-registry-secret"
+              security:
+                tls:
+                  enabled: false
+            security:
+              tls:
+                enabled: false
+            rbac:
+              appMonitoring:
+                enabled: false
+            imageCredentials:
+              kubeStateMetrics:
+                repoPath: ""
+            updateStrategy:
+              ericPmKubeStateMetrics:
+                rollingUpdate:
+                  maxUnavailable: 1
+            podPriority:
+              kubeStateMetrics:
+                priorityClassName : "system-cluster-critical"
+            kubeStateMetrics:
+              args:
+                metric-labels-allowlist: "nodes=[*], namespaces=[*], pods=[*]"
+              service:
+                annotations:
+                  prometheus.io/scrape: "true"
+            resources:
+              kubeStateMetrics:
+                limits:
+                  cpu: "{{ pm_server_kubeStateMetrics_cpu_limit | default('100m') }}"
+                  memory: "{{ pm_server_kubeStateMetrics_memory_limit | default('512Mi') }}"
+                requests:
+                  cpu: "{{ pm_server_kubeStateMetrics_cpu_requests | default('100m') }}"
+                  memory: "{{ pm_server_kubeStateMetrics_memory_requests | default('256Mi') }}"
+
+- name: Upgrade Alertmanager (Helm chart)
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+  vars:
+    - tarball_name: "{{ helm_charts.eric_pm_alertmanager.name + '-' + helm_charts.eric_pm_alertmanager.version + '.tgz' }}"
+  roles:
+    - erikube-defaults
+    - role: helm-chart-provisioner
+      when: pm_monitoring_enabled | default(true) | bool
+      vars:
+        - chart_name: eric-pm-alertmanager
+        - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '600s' }}"
+        - alert_webhook_listen_port: 9098
+        - alert_webhook_receiver: http://prometheus-webhook-snmp
+        - alert_repeat_interval: 4h
+        - isp_webhook_receiver: http://isp-logger
+        - isp_webhook_listen_port: 9199
+        - isp_repeat_interval: 120h
+        - kube_namespace: "monitoring"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - state: update-installed
+        - values:
+            imagePullSecrets:
+              - name: local-registry-secret
+            image:
+              repository: "{{ kube_image_prefix }}{{ containers.monitoring.alertmanager.split(':')[0] }}"
+              tag: "{{ containers.monitoring.alertmanager.split(':')[1] }}"
+              name: "{{ containers.monitoring.alertmanager.split(':')[0] }}"
+            tolerations:
+              - key: node.kubernetes.io/not-ready
+                operator: Exists
+                effect: NoExecute
+                tolerationSeconds: 10
+              - key: node.kubernetes.io/unreachable
+                operator: Exists
+                effect: NoExecute
+                tolerationSeconds: 10
+            resources:
+              limits:
+                cpu: "{{ pm_server_alertmanager_cpu_limit | default('100m') }}"
+                memory: "{{ pm_server_alertmanager_memory_limit | default('200Mi') }}"
+              requests:
+                cpu: "{{ pm_server_alertmanager_cpu_requests | default('10m') }}"
+                memory: "{{ pm_server_alertmanager_memory_requests | default('100Mi') }}"
+            ingress:
+              enabled: "{{ pm_server_alertmanager_ingress_enabled | default(false) | bool }}"
+              hosts:
+                - host: "{{ pm_server_alertmanager_ingress_hostname | default('alertmanager.eccd.local') }}"
+                  paths:
+                    - path: /
+                      pathType: ImplementationSpecific
+              tls:
+                - secretName: "eric-pm-server-alertmanager-ingress-tls"
+                  hosts:
+                    - "{{ pm_server_alertmanager_ingress_hostname | default('alertmanager.eccd.local') }}"
+            configmapReload:
+              enabled: true
+              image:
+                repository: "{{ kube_image_prefix }}{{ containers.monitoring.configmap_reload.split(':')[0] }}"
+                tag: "{{ containers.monitoring.configmap_reload.split(':')[1] }}"
+              resources:
+                limits:
+                  cpu: "{{ pm_server_configmapReloadForAlertManager_cpu_limit | default('200m') }}"
+                  memory: "{{ pm_server_configmapReloadForAlertManager_memory_limit | default('32Mi') }}"
+                requests:
+                  cpu: "{{ pm_server_configmapReloadForAlertManager_cpu_requests | default('100m') }}"
+                  memory: "{{ pm_server_configmapReloadForAlertManager_memory_requests | default('8Mi') }}"
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                  - ALL
+                privileged: false
+                readOnlyRootFilesystem: true
+            persistence:
+              enabled: false
+            config:
+              receivers:
+              - name: prometheus-webhook-snmp
+                webhook_configs:
+                  - url: '{{ alert_webhook_receiver }}:{{ alert_webhook_listen_port }}'
+                    send_resolved: true
+              - name: isp-monitor-webhook
+                webhook_configs:
+                  - url: '{{ isp_webhook_receiver }}:{{ isp_webhook_listen_port }}'
+                    send_resolved: true
+              route:
+                group_by: ['...']
+                group_wait: 10s
+                group_interval: 5m
+                receiver: prometheus-webhook-snmp
+                repeat_interval: "{{ alert_repeat_interval }}"
+                routes:
+                  - receiver: isp-monitor-webhook
+                    match:
+                      AlertType: ISP
+                    group_by: ['...']
+                    group_wait: 10s
+                    group_interval: 5m
+                    repeat_interval: "{{ isp_repeat_interval }}"
+            podAnnotations:
+              container.apparmor.security.beta.kubernetes.io/eric-pm-alertmanager: "runtime/default"
+              container.apparmor.security.beta.kubernetes.io/eric-pm-alertmanager-configmap-reload: "runtime/default"
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
+              privileged: false
+              readOnlyRootFilesystem: true
+            podSecurityContext:
+              seccompProfile:
+                type: RuntimeDefault
+              runAsNonRoot: true
+              runAsUser: 191663
+              runAsGroup: 191663
+              fsGroup: 191663
+
+- name: Delete helm chart for Pushgateway
+  hosts: master[0]
+  become: yes
+  ignore_errors: True
+  roles:
+    - erikube-defaults
+    - role: helm-chart-provisioner
+      vars:
+        - chart_name: eric-pm-pushgateway
+        - kube_namespace: monitoring
+        - state: purged
+      when:
+        - pm_monitoring_enabled | default(true) | bool
+
+- name: Upgrade node-cert-exporter (Helm chart)
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+  vars:
+    - tarball_name: "{{ helm_charts.node_cert_exporter.name + '-' + helm_charts.node_cert_exporter.version + '.tgz' }}"
+  roles:
+    - erikube-defaults
+    - role: helm-chart-provisioner
+      when: (node_certificate_exporter_enabled | default(true) | bool) and (pm_monitoring_enabled | default(true) | bool)
+      vars:
+        - chart_name: node-cert-exporter
+        - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '1200s' }}"
+        - kube_namespace: "monitoring"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - state: update-installed
+        - values:
+            global:
+              registry:
+                url: "{{ kube_image_prefix | regex_replace('\\/$', '') }}"
+            imagePullSecrets:
+              - name: local-registry-secret
+            image:
+              repository: "{{ kube_image_prefix }}{{ containers.monitoring.node_cert_exporter.split(':')[0] }}"
+              pullPolicy: IfNotPresent
+              tag: "{{ containers.monitoring.node_cert_exporter.split(':')[1] }}"
+            security:
+              tls:
+                enabled: false
+            podAnnotations:
+              prometheus.io/scrape: 'true'
+              prometheus.io/port: '9117'
+              container.apparmor.security.beta.kubernetes.io/node-cert-exporter: 'runtime/default'
+            podSecurityContext:
+              seccompProfile:
+                type: RuntimeDefault
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
+              privileged: false
+              readOnlyRootFilesystem: true
+            tolerations:
+              - key: node-role.kubernetes.io/control-plane
+                effect: NoSchedule
+              - operator: Exists
+                effect: NoSchedule
+              - operator: Exists
+                effect: NoExecute
+              - key: CriticalAddonsOnly
+                operator: Exists
+            paths:
+              - /host/etc/etcd/
+              - /host/etc/kubernetes/pki/
+              - /host/etc/pki
+              - /host/var/lib/kubelet/pki
+
+- name: Upgrade PM Server Utils
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+  - include_vars: ../../common/container-list.json
+  vars:
+    pm_server_utils_image: "{{ kube_image_prefix }}{{ containers.monitoring.eric_pm_server_utils }}"
+    pm_server_utils_log_level: "{{ eric_pm_server_utils_log_level | default('INFO') }}"
+    pm_server_utils_cr_custom_user_id: "{{ container_registry_custom_user_id | default('admin') }}"
+    pm_server_utils_cr_custom_pwd: "{{ container_registry_custom_pw | default('') }}"
+    pm_server_utils_schedule_in_masternode: "{{ pm_victoria_metrics_schedule_in_masternode | default(false) }}"
+    cr_ingress_tls_passthrough_enabled: "{{ container_registry_ingress_tls_passthrough_enabled | default('false') | bool }}"
+
+  roles:
+    - erikube-defaults
+    - role: eric-pm-server-utils
+      when: pm_monitoring_enabled | default(true) | bool

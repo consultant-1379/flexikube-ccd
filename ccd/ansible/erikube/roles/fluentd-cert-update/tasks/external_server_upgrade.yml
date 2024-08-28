@@ -1,0 +1,27 @@
+---
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/erikube-logger-XXXXXX
+  register: temp_logger
+  changed_when: False
+
+- name: Create logger external server output secret yaml file
+  template:
+    src: "{{item}}.j2"
+    dest: "{{ temp_logger.stdout }}/{{item}}"
+  with_items:
+    - output_secret.yml
+
+- name: Apply logger external server output secret yaml file
+  shell:  "{{ kubectl }} apply -f {{ temp_logger.stdout }}/{{item}}"
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+  with_items:
+    - output_secret.yml
+
+- name: Delete temp directory
+  file:
+    name: "{{ temp_logger.stdout }}"
+    state: absent
+  changed_when: False

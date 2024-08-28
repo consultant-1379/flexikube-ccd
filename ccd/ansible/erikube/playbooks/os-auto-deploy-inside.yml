@@ -1,0 +1,10 @@
+---
+
+- import_playbook: os-auto-inventory-file-inside.yml
+
+- name: Include generated variables used for following deployment
+  hosts: localhost
+  vars_files:
+    - "{{ playbook_dir | dirname }}/inventory/group_vars/all"
+
+- import_playbook: ../install.yml

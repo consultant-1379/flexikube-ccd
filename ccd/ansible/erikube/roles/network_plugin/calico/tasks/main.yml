@@ -1,0 +1,4 @@
+---
+
+- name: "{{ plugin_action | capitalize }} Calico"
+  include_tasks: "{{ role_path }}/tasks/calico-{{ plugin_action }}.yml"

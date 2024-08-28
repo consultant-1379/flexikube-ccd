@@ -1,0 +1,24 @@
+---
+docker_version: 1.13.1-94.gitb2f74b2.el7.x86_64
+docker_version_key: Package version
+docker_pkg_name: docker
+docker_packages:
+  - "{{ docker_pkg_name }}-{{ docker_version }}"
+  - python-docker-py
+  - cloud-utils-growpart
+
+# docker_purge_packages includes dependencies installed by docker, and doesn't
+# match a specific version.
+docker_purge_packages:
+  - "{{ docker_pkg_name }}"
+  - "{{ docker_pkg_name }}-common"
+  - "{{ docker_pkg_name }}-client"
+  - python-docker-py
+  - cloud-utils-growpart
+  - runc
+
+ca_certs_path: /etc/pki/ca-trust/source/anchors/
+ca_cert_update_cmd: update-ca-trust
+
+docker_config_os_specific:
+    signature-verification: false

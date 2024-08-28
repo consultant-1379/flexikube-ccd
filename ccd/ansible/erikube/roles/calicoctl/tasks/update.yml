@@ -1,0 +1,55 @@
+---
+- name: Create temp workspace directory
+  command: mktemp -td erikube-calicoctl-ansible-XXXXXX
+  register: mktemp_calicoctl
+  changed_when: false
+
+
+- name: Check for existing deployment
+  command: "{{ kubectl }} -n {{ calicoctl_namespace }} get deployment calicoctl"
+  register: deployment_exist
+  failed_when: false
+  changed_when: false
+  become: yes
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (deployment_exist.rc == 0 or "not found" in deployment_exist.stderr)
+
+- debug:
+    msg: "{{ deployment_exist }}"
+
+- name: Update pods with new image version
+  command: "{{ kubectl }} -n {{ calicoctl_namespace }} set image deployment/calicoctl calicoctl={{ calicoctl_image }}"
+  register: set_image
+  changed_when: "'image updated' in set_image.stdout"
+  when: deployment_exist.rc == 0
+  become: yes
+
+- name:  Deploy Calicoctl (Kubernetes API datastore) and Custom Resource Definitions (CRD)
+  block:
+  - name: Re-create calicoctl manifest
+    become: yes
+    template:
+      src: "calicoctl.yml.j2"
+      dest: "{{ mktemp_calicoctl.stdout }}/calicoctl.yaml"
+
+  - name: Installing Calicoctl as a Kubernetes pod
+    command: "{{ kubectl }} -n {{ calicoctl_namespace }} apply -f {{ mktemp_calicoctl.stdout }}/calicoctl.yaml --validate=false"
+    become: yes
+
+  - name: Re-create calicoctl deployment and Custom Resource Definitions (CRD) manifest
+    become: yes
+    template:
+      src: "calico-crd-calicoctl-deployment.yml.j2"
+      dest: "{{ mktemp_calicoctl.stdout }}/calico-crd-calicoctl-deployment.yml"
+
+  - name: Install Calicoctl and Deploy Custom Resource Definitions (CRD)
+    command: "{{ kubectl }} apply -f {{ mktemp_calicoctl.stdout }}/calico-crd-calicoctl-deployment.yml --validate=false"
+    become: yes
+  when: deployment_exist.rc != 0
+
+- name: Delete temp directory
+  file:
+    name: "{{ mktemp_calicoctl.stdout }}"
+    state: directory
+  changed_when: false

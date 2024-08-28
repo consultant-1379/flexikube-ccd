@@ -1,0 +1,22 @@
+---
+- name: Gather etcd facts
+  hosts: etcd
+  gather_facts: yes
+
+- name: Execute erikube-default to gather facts about all hosts
+  hosts: etcd
+  any_errors_fatal: true
+  tasks:
+    - include_role:
+        name: erikube-defaults
+
+
+- name: Create etcd kubernetes resources
+  hosts: master[0]
+  any_errors_fatal: true
+  vars:
+    etcd_peers: "{{ groups.etcd | default([], true) }}"
+  tasks:
+    - include_role:
+        name: etcd
+        tasks_from: kube-resources

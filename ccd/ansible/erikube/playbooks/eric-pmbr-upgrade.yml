@@ -1,0 +1,223 @@
+---
+- name: Delete helm chart for PMBR Document Database
+  hosts: master[0]
+  become: yes
+  ignore_errors: True
+  roles:
+    - erikube-defaults
+    - role: helm-chart-provisioner
+      vars:
+        - kube_namespace: "monitoring"
+        - chart_name: "{{ helm_charts.eric_data_document_database_pg.name }}"
+        - state: purged
+
+- name: Delete PMBR Document Database PVCs
+  hosts: master[0]
+  become: yes
+  ignore_errors: True
+  vars:
+    - pvc_names: "{{ ['pg-data-eric-data-document-database-pg-0', 'pg-data-eric-data-document-database-pg-1'] }}"
+    - kube_namespace: "monitoring"
+  tasks:
+    - name: Delete PVC for PMBR Database PG
+      include_role:
+        name: adp-documentdb-config
+        tasks_from: delete_postgres
+
+- name: Delete PMBR Document Database Secrets
+  hosts: master[0]
+  become: yes
+  tasks:
+    - name: Delete PMBR Document Database Secret documentdb-config
+      shell: |
+        {{ kubectl }} delete secret documentdb-config  -n monitoring --ignore-not-found
+      register: result
+      become: true
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: (result.rc == 0 or "not found" in result.stderr)
+      ignore_errors: True
+    - name: Delete PMBR Document Database Secret eric-data-document-database-pg-hkln-inventory
+      shell: |
+        {{ kubectl }} delete secret eric-data-document-database-pg-hkln-inventory  -n monitoring --ignore-not-found
+      register: result
+      become: true
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: (result.rc == 0 or "not found" in result.stderr)
+      ignore_errors: True
+    - name: Delete PMBR Document Database Secret eric-data-document-database-pg-hkln-inventory-stashed
+      shell: |
+        {{ kubectl }} delete secret eric-data-document-database-pg-hkln-inventory-stashed  -n monitoring --ignore-not-found
+      register: result
+      become: true
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: (result.rc == 0 or "not found" in result.stderr)
+      ignore_errors: True
+
+- name: Delete CM Mediator secrets
+  hosts: master[0]
+  become: yes
+  tasks:
+    - name: Delete CM Mediator secret eric-cm-mediator-hkln-inventory-stashed
+      shell: |
+        {{ kubectl }} delete secret eric-cm-mediator-hkln-inventory-stashed -n monitoring --ignore-not-found
+      register: result
+      become: true
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: (result.rc == 0 or "not found" in result.stderr)
+      ignore_errors: True
+
+- name: Create/Update local registry secret for PMBR
+  hosts: master[0]
+  become: yes
+  tasks:
+    - name: Create/Update PMBR secret for accessing local registry
+      shell: |
+        {{ kubectl }} create secret docker-registry local-registry-secret \
+        --docker-server={{ 'registry.eccd.local:5000' if local_registry_user is defined and local_registry_user != "" else 'null.eccd.local' }} \
+        --docker-username={{ local_registry_user if local_registry_user is defined and local_registry_user != "" else 'null' }} \
+        --docker-password={{ local_registry_password if local_registry_password is defined and local_registry_password != "" else 'nopassword' }} -n monitoring \
+        --dry-run=client -o yaml | {{ kubectl }} apply -f -
+      register: result
+      become: true
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: result.rc == 0
+      ignore_errors: True
+      when: (ccd_pm_3gpp_collection_enabled | default(false) | bool) or (pm_3gpp_collection_enabled | default(false) | bool)
+
+- name: Delete Document Database PG for PMBR
+  hosts: master[0]
+  become: yes
+  ignore_errors: True
+  roles:
+    - erikube-defaults
+    - role: helm-chart-provisioner
+      vars:
+        - chart_name: eric-data-document-database-pg
+        - kube_namespace: monitoring
+        - state: purged
+
+- name: Delete CM Mediator for PMBR
+  hosts: master[0]
+  become: yes
+  ignore_errors: True
+  roles:
+    - erikube-defaults
+    - role: helm-chart-provisioner
+      vars:
+        - chart_name: eric-cm-mediator
+        - kube_namespace: monitoring
+        - state: purged
+
+- name: Create pm bulk reporter sftp user config
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - name: Check Mandatory variables
+      assert:
+        that:
+          - (ccd_pm_3gpp_collection_user is defined) and (ccd_pm_3gpp_collection_password is defined)
+        fail_msg: "Mandatory Ansible variables ccd_pm_3gpp_collection_user and ccd_pm_3gpp_collection_password are not set"
+      when: (ccd_pm_3gpp_collection_enabled | default(false) | bool) or (pm_3gpp_collection_enabled | default(false) | bool)
+    - name: "Set pmbr sftp username and password"
+      set_fact:
+        pmbr_core_username: "{{ ccd_pm_3gpp_collection_user }}"
+        pmbr_core_password: "{{ ccd_pm_3gpp_collection_password }}"
+      when: (ccd_pm_3gpp_collection_enabled | default(false) | bool) or (pm_3gpp_collection_enabled | default(false) | bool)
+
+    - name: "generate eccd user password"
+      shell: >-
+        python3 -c 'import crypt; print(crypt.crypt("{{ pmbr_core_password }}", crypt.mksalt()))'
+      register: encrypted_pass
+      when: (ccd_pm_3gpp_collection_enabled | default(false) | bool) or (pm_3gpp_collection_enabled | default(false) | bool)
+  vars:
+    - pmbr_namespace: monitoring
+    - pmbr_secret: pm-br-sftp-users-secret
+    - pmbr_config:
+        users:
+         - user: "{{ pmbr_core_username }}"
+           groups: [adp-pm-core]
+           encryptedPass: "{{ encrypted_pass.stdout }}"
+  roles:
+  - erikube-defaults
+  tasks:
+    - name: Create pmbr sftp users config
+      include_role:
+        name: eric-pm-bulk-reporter
+        tasks_from: users
+      when: (ccd_pm_3gpp_collection_enabled | default(false) | bool) or (pm_3gpp_collection_enabled | default(false) | bool)
+
+- name: Upgrade PM Bulk Reporter (PMBR)
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - name: Check Mandatory variables
+      assert:
+        that:
+          - (ccd_pm_3gpp_collection_user is defined) and (ccd_pm_3gpp_collection_password is defined)
+        fail_msg: "Mandatory Ansible variables ccd_pm_3gpp_collection_user and ccd_pm_3gpp_collection_password are not set"
+      when: (ccd_pm_3gpp_collection_enabled | default(false) | bool) or (pm_3gpp_collection_enabled | default(false) | bool)
+    - include_vars: ../../common/container-list.json
+  vars:
+    - kube_image_prefix: "{{ docker_registry_host | default(default_registry) }}/"
+    - tarball_name: "{{ helm_charts.eric_pm_bulk_reporter.name + '-' + helm_charts.eric_pm_bulk_reporter.version + '.tgz' }}"
+    - pmbr_namespace: "monitoring"
+    - pmbr_sftp_secret: pm-br-sftp-users-secret
+    - victoria_metrics_host: "eric-victoria-metrics-cluster-vmselect:8481/select/0/prometheus"
+  roles:
+    - erikube-defaults
+
+    - role: helm-chart-provisioner
+      when: (ccd_pm_3gpp_collection_enabled | default(false) | bool) or (pm_3gpp_collection_enabled | default(false) | bool)
+      vars:
+        - chart_name: eric-pm-bulk-reporter
+        - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '600s' }}"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - state: update-installed
+        - kube_namespace: "{{ pmbr_namespace }}"
+        - productInfo:
+            images:
+              eric-pm-br-initcontainer:
+                name: "{{ containers.monitoring.eric_pm_br_initcontainer.split(':')[0] }}"
+                tag: "{{ containers.monitoring.eric_pm_br_initcontainer.split(':')[1] }}"
+              eric-pm-bulk-reporter:
+                name: "{{ containers.monitoring.eric_pm_bulk_reporter.split(':')[0] }}"
+                tag: "{{ containers.monitoring.eric_pm_bulk_reporter.split(':')[1] }}"
+              eric-pm-sftp:
+                name: "{{ containers.monitoring.eric_pm_sftp.split(':')[0] }}"
+                tag: "{{ containers.monitoring.eric_pm_sftp.split(':')[1] }}"
+              hooklauncher:
+                name: "{{ containers.monitoring.eric_lcm_smart_helm_hooks_hooklauncher.split(':')[0] }}"
+                tag: "{{ containers.monitoring.eric_lcm_smart_helm_hooks_hooklauncher.split(':')[1] }}"
+        - values:
+            global:
+              registry:
+                url: "{{ kube_image_prefix | regex_replace('\\/$', '') }}"
+              pullSecret: "local-registry-secret"
+              security:
+                tls:
+                  enabled: false
+            imageCredentials:
+              repoPath: ""
+            service:
+              type: NodePort
+            replicaCount: 1
+            userConfig:
+              secretName: "{{ pmbr_sftp_secret }}"
+              secretKey: users.yaml
+              ldap:
+                enabled: false
+            env:
+              cmhost: localhost:5003
+              maxNoOfPmFiles: 60
+              iscompressed: true
+              pmhost: "{{ victoria_metrics_host }}"
+              logLevel: debug
+            pmbrConfigManager:
+              image:
+                repository: "{{ kube_image_prefix }}{{ containers.monitoring.pmbr_config_manager.split(':')[0] }}"
+                tag : "{{ containers.monitoring.pmbr_config_manager.split(':')[1] }}"

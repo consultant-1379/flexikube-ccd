@@ -1,0 +1,18 @@
+---
+- import_playbook: playbooks/ansible-check.yml
+
+- name: Gather facts as non root
+  hosts: all
+  gather_facts: yes
+
+# Get container list
+- import_playbook: playbooks/get-container-list.yml
+
+# Run only etcd and kubernetes control plane upgrade
+- import_playbook: playbooks/etcd-upgrade.yml
+- import_playbook: playbooks/kube-upgrade.yml
+- import_playbook: playbooks/kube-controller-manager-upgrade.yml
+- import_playbook: playbooks/kubelet-server-cert.yml
+
+- import_playbook: playbooks/label-node-id.yml
+- import_playbook: playbooks/whereabouts-ipam.yml

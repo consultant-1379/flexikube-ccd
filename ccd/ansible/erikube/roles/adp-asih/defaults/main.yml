@@ -1,0 +1,2 @@
+kube_namespace: kube-system
+asih_nels_secret: eric-si-application-sys-info-handler-nels-cert-secret

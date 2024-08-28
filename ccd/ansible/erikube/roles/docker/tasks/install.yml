@@ -1,0 +1,71 @@
+---
+- include_vars: "{{ item }}"
+  with_first_found:
+    - files:
+      - "../vars/{{ ansible_distribution }}.yml"
+      - "../vars/{{ ansible_os_family }}.yml"
+      skip: True
+
+- name: Fetch docker version
+  shell: "docker version"
+  register: docker_version_out
+  become: true
+  changed_when: false
+  ignore_errors: yes
+
+- name: Print version from docker binary before possible upgrade
+  debug:
+    msg: "{{ docker_version_out.stdout.split('\n') }}"
+
+- name: Print docker_version variable
+  debug:
+    msg: "{{ docker_version }}"
+
+- name: Get docker version
+  shell: docker version | grep "{{ docker_version_key }}"  | awk '{print $NF}' | head -n 1
+  register: docker_out
+  changed_when: false
+  ignore_errors: yes
+
+- debug:
+    msg: "detected installed docker {{ docker_version_key }} is {{ docker_out.stdout }}"
+
+- block:
+  - name: Stop Docker service
+    service:
+      name: docker
+      state: stopped
+    ignore_errors: yes
+
+  # We want to keep the storage around, and only upgrade docker versions.
+  - set_fact:
+      purge_docker_destructive: false
+
+  - name: Purge docker
+    include_tasks: "purge.yml"
+
+  - name: Purge containerd config
+    include_tasks: "{{ role_path }}/../containerd/tasks/purge.yml"
+
+  - name: "Do OS specific installation steps of Docker for {{ ansible_distribution }}"
+    include_tasks: "{{ docker_install_item }}"
+    with_first_found:
+      - files:
+        - "install-{{ ansible_distribution }}.yml"
+        - "install-{{ ansible_os_family }}.yml"
+        skip: True
+    loop_control:
+      loop_var: docker_install_item
+
+  when: not is_atomic and docker_version not in docker_out.stdout
+
+- name: Fetch docker version
+  shell: "docker version"
+  register: docker_version_out
+  become: true
+  changed_when: false
+  ignore_errors: yes
+
+- name: Print version from docker binary after possible upgrade
+  debug:
+    msg: "{{ docker_version_out.stdout.split('\n') }}"

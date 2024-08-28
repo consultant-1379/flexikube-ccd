@@ -1,0 +1,24 @@
+---
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/ccd-XXXXXX
+  register: mktemp_pws
+  changed_when: False
+
+- name: Render ccd-license-consumer deployment manifest from template
+  template:
+    src: "ccd-lc-deployment.yml.j2"
+    dest: "{{ mktemp_pws.stdout }}/ccd-lc-deployment.yml"
+
+- name: Apply ccd-license-consumer deployment manifest
+  shell: "{{ kubectl }} apply -f {{ mktemp_pws.stdout }}/ccd-lc-deployment.yml"
+  register: ccd_lc_deploy_return
+  changed_when: '"unchanged" not in ccd_lc_deploy_return.stdout'
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: ccd_lc_deploy_return.rc == 0
+
+- name: Delete temp directory
+  file:
+    name: "{{ mktemp_pws.stdout }}"
+    state: absent
+  changed_when: False

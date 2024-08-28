@@ -1,0 +1,231 @@
+---
+- name: Create temp directory
+  command: mktemp -d /tmp/authclient-XXXXXX
+  register: tempdir
+  changed_when: false
+- set_fact:
+    tempdir: "{{ tempdir.stdout }}"
+
+- set_fact:
+      create_self_signed_cert_authclient: false
+  when: auth_client_cert_file is defined or auth_client_cert_content is defined
+
+- set_fact:
+      create_self_signed_cert_authclient: true
+  when: auth_client_cert_file is undefined and auth_client_cert_content is undefined
+
+- name: Get TLS secret
+  become: yes
+  command: "{{ kubectl }} -n kube-system get secret auth-client-tls"
+  register: get_tls_secret
+  changed_when: false
+  failed_when: false
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (get_tls_secret.rc == 0 or "not found" in get_tls_secret.stderr)
+
+- block:
+    - name: Copy TLS certificate
+      copy:
+        src: "{{ auth_client_cert_file }}"
+        dest: "{{ tempdir }}/auth-client.crt"
+    - name: Copy TLS key
+      copy:
+        src: "{{ auth_client_key_file }}"
+        dest: "{{ tempdir }}/auth-client.key"
+  when:
+    - auth_client_cert_file is defined and auth_client_cert_file | length > 0
+    - auth_client_key_file is defined and auth_client_key_file | length > 0
+
+- block:
+    - name: Copy TLS certificate
+      copy:
+        content: "{{ auth_client_cert_content }}"
+        dest: "{{ tempdir }}/auth-client.crt"
+      become: yes
+    - name: Copy TLS key
+      copy:
+        content: "{{ auth_client_key_content }}"
+        dest: "{{ tempdir }}/auth-client.key"
+      become: yes
+  when:
+    - auth_client_cert_content is defined
+    - auth_client_key_content is defined
+
+- name: Copy TLS CA cert
+  copy:
+    src: "{{ auth_client_ca_file }}"
+    dest: "{{ tempdir }}/ca.crt"
+  when: auth_client_ca_file is defined and auth_client_ca_file | length > 0
+
+- name: Copy TLS CA cert
+  copy:
+    content: "{{ auth_client_ca_content }}"
+    dest: "{{ tempdir }}/ca.crt"
+  when: auth_client_ca_content is defined
+
+- block:
+    - name: create SAN config file
+      copy:
+        dest: "/sanconfigfile_auth"
+        content: |
+          [ req ]
+          distinguished_name = req_distinguished_name
+          req_extensions     = req_ext
+
+          [ req_distinguished_name ]
+
+          [ req_ext  ]
+          subjectAltName     = @alt_names
+
+          [alt_names]
+          DNS.1              = {{ auth_client_ingress_host }}
+      become: yes
+
+    - name: create auth-client key
+      shell: openssl genrsa 2048 > {{ tempdir }}/auth-client.key
+
+    - name: create auth-client certificate
+      command: |
+        openssl req -x509 -new -sha256 -nodes -days 3650 \
+          -key "{{ tempdir }}/auth-client.key" \
+          -out "{{ tempdir }}/auth-client.crt" \
+          -subj "/CN={{ auth_client_ingress_host }}" \
+          -extensions req_ext -config /sanconfigfile_auth
+
+    - name: delete auth client san config file
+      file:
+        name: /sanconfigfile_auth
+        state: absent
+      become: yes
+  when:
+    - create_self_signed_cert_authclient | bool
+- block:
+    - command: "{{ kubectl }} -n kube-system get secret dex-tls -o jsonpath='{.data.tls\\.crt}'"
+      become: yes
+      register: result
+      retries: 3
+      delay: 3
+      until: result.rc == 0
+    - set_fact:
+        cadata: "{{ result.stdout | b64decode }}"
+    - file:
+        path: "{{ tempdir }}/ca.crt"
+        state: absent
+    - lineinfile:
+        line: "{{ cadata }}"
+        path: "{{ tempdir }}/ca.crt"
+        create: yes
+        state: present
+    - set_fact:
+        auth_client_ca_file: "dummy"
+  when: auth_client_ca_file is undefined and auth_client_ca_content is undefined
+
+- name: Delete TLS secret
+  become: yes
+  command: >
+      {{ kubectl }} -n kube-system delete secret auth-client-tls --ignore-not-found
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (result.rc == 0 or "not found" in result.stderr)
+
+- block:
+    - name: Create secret with TLS assets
+      command: >
+        {{ kubectl }} -n kube-system create secret tls auth-client-tls
+        --cert={{ tempdir }}/auth-client.crt --key={{ tempdir }}/auth-client.key
+      become: yes
+      register: result
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: result.rc == 0
+
+- block:
+    - name: Delete secret with CA
+      command: >
+        {{ kubectl }} -n kube-system delete secret generic auth-client-ca --ignore-not-found
+      become: yes
+      register: result
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: (result.rc == 0 or "not found" in result.stderr)
+
+    - name: Create secret with CA
+      command: >
+        {{ kubectl }} -n kube-system create secret generic auth-client-ca
+        --from-file=ca.crt={{ tempdir }}/ca.crt
+      become: yes
+      register: result
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: result.rc == 0
+  when: get_tls_secret.rc != 0
+
+- name: Get dex service ip
+  register: dex_service_ip
+  become: yes
+  command: >
+    {{ kubectl }} get service dex -n kube-system  --output jsonpath={.spec.clusterIP}
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (dex_service_ip.rc == 0 or "not found" in dex_service_ip.stderr)
+- set_fact:
+    dex_service_ip: "{{ dex_service_ip.stdout }}"
+  changed_when: true
+
+- name: Get cluster context
+  become: yes
+  command: "{{ kubectl }} config view -o jsonpath='{.contexts[0].context.cluster}'"
+  register: context
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (context.rc == 0 or "not found" in context.stderr)
+- set_fact:
+    cluster_context: "{{ context.stdout }}"
+
+- name: Get server URL
+  become: yes
+  command: "{{ kubectl }} config view -o jsonpath='{.clusters[0].cluster.server}'"
+  register: cluster_url
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (cluster_url.rc == 0 or "not found" in cluster_url.stderr)
+
+- set_fact:
+    cluster_server_url: "{{ cluster_url.stdout }}"
+  when: cluster_url.stdout
+
+- set_fact:
+    cluster_server_url: "https://{{ kube_apiserver_ip }}:{{ kube_apiserver_port }}"
+  when: cluster_server_url is undefined
+
+- name: Create auth-client manifest
+  template:
+    src: auth.j2
+    dest: "{{ tempdir }}/authclient.yml"
+  vars:
+    - ingress_class: "{{ authclient_ingress_controller | default(default_ingress_controller) | default('') }}"
+
+- name: Create auth-client resources
+  become: yes
+  command: "{{ kubectl }} -n kube-system apply -f {{ tempdir }}/authclient.yml"
+  register: apply
+  changed_when: '"configured" or "created" in apply.stdout'
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: apply.rc == 0
+
+- name: Wait until auth client pod is running
+  become: yes
+  shell: "{{ kubectl }} -n kube-system get pods | grep auth-client | grep -e Running "
+  register: task_result
+  until: task_result.rc == 0
+  retries: 100
+  delay: 5
+
+- name: Delete temp directory
+  file:
+    name: "{{ tempdir }}"
+    state: absent
+  changed_when: false

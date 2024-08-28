@@ -1,0 +1,8 @@
+---
+- name: Disable and stop services
+  systemd:
+    name: "{{ item }}"
+    state: stopped
+    enabled: False
+  with_items:
+    - "{{ os_services_to_disable | default([]) }}"

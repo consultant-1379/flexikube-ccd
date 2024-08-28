@@ -1,0 +1,381 @@
+---
+- name: Gather facts as non root
+  hosts: all
+  gather_facts: yes
+
+# Determine whether a kubernetes drain should be done before preparing the host.
+# We skip the drain if its not a HA cluster, or when a drain_nodes flag is set
+# explicitly to false, unless the drain_first flag is explicitly set to true.
+- hosts: localhost
+  tasks:
+    - set_fact:
+        drain_first: "{{ (drain_first | default(false) | bool) or (
+          upgrading | default(false) | bool and
+          drain_nodes | default(true) | bool and
+          groups['master'] | length > 1 and
+          (groups['worker'] | length > 1 or use_master_for_workloads | default(false) | bool)
+          ) }}"
+    - set_fact:
+        prepare_completed: []
+    - block:
+        - debug:
+            msg: "drain_nodes: {{ drain_nodes | default(true) }}"
+        - debug:
+            msg: "count of masters: {{ groups['master'] | length }}"
+        - debug:
+            msg: "count of workers: {{ groups['worker'] | length }}"
+        - debug:
+            msg: "use_master_for_workloads: {{ use_master_for_workloads | default(false) | bool }}"
+        - debug:
+            msg: "Will drain nodes before host prepare? {{ drain_first }}"
+      when: upgrading | default(false) | bool
+
+- import_playbook: get-container-list.yml
+
+# prepare hosts without draining when drain_first condition isn't met
+- name: Prepare all hosts when drain is not needed
+  hosts: etcd, master, worker, ingress_lb, add_master, add_worker, add_etcd, packer
+  become: yes
+  tasks:
+    - block:
+        - name: Suse connect cleanup
+          command: "SUSEConnect --cleanup"
+          retries: 3
+          delay: 3
+          register: result
+          until: result.rc == 0
+          when: ansible_distribution == "SLES" and sles_rmt_server is defined
+
+        - name: Connect to SUSE Customer Center with Registration Code
+          command: "SUSEConnect -r {{ sles_reg_code }}"
+          retries: 3
+          delay: 3
+          register: result
+          until: result.rc == 0
+          when: ansible_distribution == "SLES" and sles_reg_code is defined and sles_reg_code | length > 0
+
+        - name: Dowload CA cert to connect to Ericsson RMT server
+          command: "curl http://10.117.56.7/certs/rmt-ca.crt --output /etc/pki/trust/anchors/rmt-ca.crt"
+          retries: 3
+          delay: 3
+          register: result
+          until: result.rc == 0
+          when: ansible_distribution == "SLES" and sles_rmt_server is defined
+
+        - name: Connect to Ericsson RMT Server
+          command: "SUSEConnect --write-config --url https://10.117.56.7"
+          retries: 3
+          delay: 10
+          register: result
+          until: result.rc == 0
+          when: ansible_distribution == "SLES" and sles_rmt_server is defined
+
+        - name: Remove the old utilities repo
+          command: "zypper rr utilities"
+          when:
+            - upgrading
+            - ansible_distribution_version == "15.4"
+
+        - name: Install zypper migration plugin for SLES15 SP4 to SP5 upgrade
+          command: "zypper -n in zypper-migration-plugin"
+          when:
+            - upgrading
+            - ansible_distribution_version == "15.4"
+
+        - name: Remove python3-apipkg package
+          command: "zypper -n rm python3-apipkg"
+          when:
+            - upgrading
+            - ansible_distribution_version == "15.4"
+
+        - name: zypper refresh
+          command: "zypper --gpg-auto-import-keys refresh"
+          when:
+            - upgrading
+            - ansible_distribution_version == "15.4"
+
+        - name: Start to upgrade from SP4 to SP5 with zypper
+          shell: "zypper migration -l -n  $(zypper migration --query | awk '/SUSE Linux Enterprise Server 15 SP5 x86_64/ {print $1}')"
+          when:
+            - upgrading
+            - ansible_distribution_version == "15.4"
+
+        - name: Activate extra product modules
+          command: "SUSEConnect -p {{ item }}"
+          retries: 3
+          delay: 5
+          register: result
+          until: result.rc == 0
+          loop: "{{ upgrading | ternary(new_extra_product_modules, extra_product_modules) }}"
+          when: ansible_distribution == "SLES" and ((sles_reg_code is defined and sles_reg_code | length > 0) or sles_rmt_server is defined )
+
+        - name: zypper refresh
+          command: "zypper --gpg-auto-import-keys refresh"
+          when: ansible_distribution == "SLES" and sles_rmt_server is defined
+
+        - include_role:
+            name: host-prepare
+
+      always:
+        - name: Deregistered SLES repos
+          command: "SUSEConnect -d"
+          retries: 3
+          delay: 3
+          register: result
+          until: result.rc == 0
+          ignore_errors: yes
+          when: ansible_distribution == "SLES" and ( sles_reg_code is defined or sles_rmt_server is defined )
+
+      when: not hostvars['localhost']['drain_first']
+
+# perform docker upgrades, in parallel for installs but serialized for upgrades
+- name: Prepare docker when drain is not needed
+  hosts: etcd, master, worker, ingress_lb, add_master, add_worker, add_etcd, packer
+  become: yes
+  tasks:
+    - block:
+        - name: Suse connect cleanup
+          command: "SUSEConnect --cleanup"
+          retries: 3
+          delay: 3
+          register: result
+          until: result.rc == 0
+          when: ansible_distribution == "SLES" and sles_rmt_server is defined
+
+        - name: Connect to SUSE Customer Center with Registration Code
+          command: "SUSEConnect -r {{ sles_reg_code }}"
+          retries: 3
+          delay: 3
+          register: result
+          until: result.rc == 0
+          when: ansible_distribution == "SLES" and sles_reg_code is defined and sles_reg_code | length > 0
+
+        - name: Dowload CA cert to connect to Ericsson RMT server
+          command: "curl http://10.117.56.7/certs/rmt-ca.crt --output /etc/pki/trust/anchors/rmt-ca.crt"
+          retries: 3
+          delay: 3
+          register: result
+          until: result.rc == 0
+          when: ansible_distribution == "SLES" and sles_rmt_server is defined
+
+        - name: Connect to Ericsson RMT Server
+          command: "SUSEConnect --write-config --url https://10.117.56.7"
+          retries: 3
+          delay: 10
+          register: result
+          until: result.rc == 0
+          when: ansible_distribution == "SLES" and sles_rmt_server is defined
+
+        - name: Activate extra product modules
+          command: "SUSEConnect -p {{ item }}"
+          retries: 3
+          delay: 5
+          register: result
+          until: result.rc == 0
+          loop: "{{ upgrading | ternary(new_extra_product_modules, extra_product_modules) }}"
+          when: ansible_distribution == "SLES" and ((sles_reg_code is defined and sles_reg_code | length > 0) or sles_rmt_server is defined )
+
+        - name: zypper refresh
+          command: "zypper refresh"
+          when: ansible_distribution == "SLES" and sles_rmt_server is defined
+
+        - include_role:
+            name: host-prepare
+            tasks_from: docker
+
+      always:
+        - name: Deregistered SLES repos
+          command: "SUSEConnect -d"
+          retries: 3
+          delay: 3
+          register: result
+          until: result.rc == 0
+          ignore_errors: yes
+          when: ansible_distribution == "SLES" and ((sles_reg_code is defined and sles_reg_code | length > 0) or sles_rmt_server is defined )
+
+      when: not hostvars['localhost']['drain_first']
+  serial: "{{ 1 if upgrading | default(false) else '100%' }}"
+
+# otherwise perform these plays to drain then prepare:
+- name: Create nodeName lookup table
+  hosts: localhost
+  vars:
+    # output format for kubectl get nodes lookup
+    - kubectl_jpath: '{range .items[*]}{@.status.addresses[0].address}	{@.metadata.name}'
+  roles:
+    - erikube-defaults
+  tasks:
+    - block:
+        - tempfile:
+            state: file
+            suffix: .csv
+          register: tmpoutput
+        - set_fact: csvlookupfile="{{ tmpoutput.path }}"
+        - debug:
+            msg: "Lookup table created: {{ csvlookupfile }}"
+        - name: Create map of internal IP address to Kubernetes node name
+          block:
+            - name: Get node name for each IP
+              command: "{{ kubectl }} get nodes -o jsonpath='{{ kubectl_jpath }}\n'"
+              register: nodes
+              retries: "{{ kubectl_retry_count }}"
+              delay: "{{ kubectl_retry_delay }}"
+              until: nodes.rc == 0
+              changed_when: false
+            - local_action: copy content={{ nodes.stdout }} dest="{{ csvlookupfile }}"
+          delegate_to: "{{ groups['master'][0] }}"
+          delegate_facts: True
+          become: yes
+      when: hostvars['localhost']['drain_first']
+
+# Prepare workers, then masters, using the convention that worker names are
+# alphabetically after master names workers that are registered k8s nodes
+# get drained first
+- hosts: worker, add_worker, master, add_master, etcd, add_etcd, ingress_lb
+  order: reverse_sorted
+  become: yes
+  tasks:
+    - block:
+        - name: Suse connect cleanup
+          command: "SUSEConnect --cleanup"
+          retries: 3
+          delay: 3
+          register: result
+          until: result.rc == 0
+          when: ansible_distribution == "SLES" and sles_rmt_server is defined
+
+        - name: Connect to SUSE Customer Center with Registration Code
+          command: "SUSEConnect -r {{ sles_reg_code }}"
+          retries: 3
+          delay: 3
+          register: result
+          until: result.rc == 0
+          when: ansible_distribution == "SLES" and sles_reg_code is defined and sles_reg_code | length > 0
+
+        - name: Dowload CA cert to connect to Ericsson RMT server
+          command: "curl http://10.117.56.7/certs/rmt-ca.crt --output /etc/pki/trust/anchors/rmt-ca.crt"
+          retries: 3
+          delay: 3
+          register: result
+          until: result.rc == 0
+          when: ansible_distribution == "SLES" and sles_rmt_server is defined
+
+        - name: Connect to Ericsson RMT Server
+          command: "SUSEConnect --write-config --url https://10.117.56.7"
+          retries: 3
+          delay: 10
+          register: result
+          until: result.rc == 0
+          when: ansible_distribution == "SLES" and sles_rmt_server is defined
+
+        - name: Remove the old utilities repo
+          command: "zypper rr utilities"
+          when:
+            - upgrading
+            - ansible_distribution_version == "15.4"
+
+        - name: Install zypper migration plugin for SLES15 SP4 to SP5 upgrade
+          command: "zypper -n in zypper-migration-plugin"
+          when:
+            - upgrading
+            - ansible_distribution_version == "15.4"
+
+        - name: Remove python3-apipkg package
+          command: "zypper -n rm python3-apipkg"
+          when:
+            - upgrading
+            - ansible_distribution_version == "15.4"
+
+        - name: zypper refresh
+          command: "zypper --gpg-auto-import-keys refresh"
+          when:
+            - upgrading
+            - ansible_distribution_version == "15.4"
+
+        - name: Start to upgrade from SP4 to SP5 with zypper
+          shell: "zypper migration -l -n  $(zypper migration --query | awk '/SUSE Linux Enterprise Server 15 SP5 x86_64/ {print $1}')"
+          when:
+            - upgrading
+            - ansible_distribution_version == "15.4"
+
+        - name: Activate extra product modules
+          command: "SUSEConnect -p {{ item }}"
+          retries: 3
+          delay: 5
+          register: result
+          until: result.rc == 0
+          loop: "{{ upgrading | ternary(new_extra_product_modules, extra_product_modules) }}"
+          when: ansible_distribution == "SLES" and ((sles_reg_code is defined and sles_reg_code | length > 0) or sles_rmt_server is defined )
+
+        - name: zypper refresh
+          command: "zypper --gpg-auto-import-keys refresh"
+          when: ansible_distribution == "SLES" and sles_rmt_server is defined
+
+        - include_role:
+            name: host-prepare
+            tasks_from: drain-first
+          vars:
+            - f: "{{ hostvars['localhost']['csvlookupfile'] }}"
+            - nodeName: "{{ lookup('csvfile', '{{ ansible_host }} file={{ f }}') }}"
+
+      always:
+        - name: Deregistered SLES repos
+          command: "SUSEConnect -d"
+          retries: 3
+          delay: 3
+          register: result
+          until: result.rc == 0
+          ignore_errors: yes
+          when: ansible_distribution == "SLES" and ((sles_reg_code is defined and sles_reg_code | length > 0) or sles_rmt_server is defined )
+
+      when: hostvars['localhost']['drain_first']
+  serial: 1
+
+- name: Fix systemd DNS for Ubuntu 18.04
+  hosts: add_master, add_worker, master, worker
+  roles:
+    - kube-common
+  become: yes
+  tasks:
+    - block:
+        - name: Add the kube-dns to resolved.conf
+          lineinfile:
+            path: /etc/systemd/resolved.conf
+            regexp: "^(.*)#DNS="
+            line: "DNS={{ kubelet_DNS }}"
+            backrefs: yes
+
+        - name: restart the systemd-resolved service
+          systemd:
+            name: systemd-resolved
+            state: restarted
+
+        - name: Remove /etc/resolv.conf
+          file:
+            path: /etc/resolv.conf
+            state: absent
+
+        - name: Create a symbolic link for resolv.conf
+          file:
+            src: /run/systemd/resolve/resolv.conf
+            dest: /etc/resolv.conf
+            state: link
+
+      when: ansible_os_family == 'Debian'
+
+- name: clean up {{ csvlookupfile }}
+  hosts: localhost
+  tasks:
+    - block:
+        - file:
+            path: "{{ csvlookupfile }}"
+            state: absent
+        - debug:
+            msg: "Lookup table deleted: {{ csvlookupfile }}"
+      when: hostvars['localhost']['drain_first']
+
+- name: Run erikube/installer
+  hosts: packer
+  become: yes
+  roles:
+    - packer

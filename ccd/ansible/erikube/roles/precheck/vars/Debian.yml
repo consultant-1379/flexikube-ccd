@@ -1,0 +1,13 @@
+---
+required_packages:
+  - conntrack
+  - ebtables
+  - ethtool
+  - nfs-common
+  - openssl
+  - socat
+  - vlan
+  - python3-pip
+  - irqbalance
+  - apache2-utils
+  - ceph-common

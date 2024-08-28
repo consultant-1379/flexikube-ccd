@@ -1,0 +1,45 @@
+---
+
+- name: Check if {{ controller_namespace }} namespace exists
+  command: "{{ kubectl }} get namespace {{ controller_name }} -o name"
+  register: ns_exists
+  failed_when: ns_exists.rc > 1 or (ns_exists.rc == 1 and ns_exists.stderr is defined and controller_name not in ns_exists.stderr)
+  changed_when: False
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (ns_exists.rc == 0 or "not found" in ns_exists.stderr)
+
+- name: Create namespace ({{ controller_namespace }}) for ({{ controller_name }}) ingress controller
+  block:
+    - name: Create temp workspace directory for secrets
+      command: mktemp -d /tmp/k8s-ingress-ctrl-XXXXXX
+      register: tmpdir
+      changed_when: False
+
+    - name: Prepare ingress controller templates
+      template: >
+        src="{{ item }}.j2"
+        dest="{{ tmpdir.stdout }}/{{ item }}"
+      with_items:
+        - ingress-ctrl-namespace.yaml
+
+    - name: Create ingress controller namespace
+      become: yes
+      command: "{{ kubectl }} apply -f {{ tmpdir.stdout }}/ingress-ctrl-namespace.yaml"
+      register: ns_create
+      failed_when: ns_create.rc != 0 and ns_create.rc is defined and 'already exists' not in ns_create.stderr
+      changed_when: ns_create.rc == 0
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: ns_create.rc == 0
+
+    - name: Delete temp directory
+      file:
+        name: "{{ tmpdir.stdout }}"
+        state: absent
+      changed_when: False
+
+  when:
+    - ns_exists.rc == 1
+    - ns_exists.stderr is defined
+    - controller_name in ns_exists.stderr

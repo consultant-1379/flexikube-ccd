@@ -1,0 +1,50 @@
+---
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/erikube-k8s-XXXXXX
+  register: mktemp
+  changed_when: False
+
+- set_fact:
+    tmp_workdir: "{{ mktemp.stdout }}"
+
+- name: Get IP address of base_domain
+  shell: grep ' {{ docker_registry_host.split(':')[0] }}' /etc/hosts | awk '{print $1}'
+  register: docker_registry_host_ip
+
+- debug:
+    msg: "{{ docker_registry_host_ip}}"
+
+- name: Write registry.cnf file
+  template:
+    src: "registry.cnf.j2"
+    dest: "{{ tmp_workdir }}/registry.cnf"
+
+- name: Copy ca cert
+  shell: "cp /etc/pki/trust/anchors/ca.crt {{ tmp_workdir }}/ca.crt"
+
+- name: Copy ca key
+  shell: "cp /etc/pki/trust/anchors/ca.key {{ tmp_workdir }}/ca.key"
+
+- name: Generate server certificate
+  shell: >-
+    openssl req -newkey rsa:2048 -days "3650" -nodes -keyout "/etc/docker-distribution/registry/registry.key" \
+    -out {{ tmp_workdir }}/registry.csr -config {{ tmp_workdir }}/registry.cnf
+
+- name: Generate required certificate keys
+  shell: >-
+    openssl rsa -in "/etc/docker-distribution/registry/registry.key" -out "/etc/docker-distribution/registry/registry.key"
+
+- name: Generate and rotate internal registry certificates
+  shell: >-
+    openssl x509 -req -in {{ tmp_workdir }}/registry.csr -days "3650" \
+    -CA {{ tmp_workdir }}/ca.crt -CAkey {{ tmp_workdir }}/ca.key -set_serial 01 -extensions v3_req \
+    -extfile {{ tmp_workdir }}/registry.cnf -out "/etc/docker-distribution/registry/registry.crt"
+
+- name: Restart docker-distribution
+  shell: systemctl restart docker-distribution
+
+- name: Delete temp directory
+  file:
+    name: "{{ mktemp.stdout }}"
+    state: absent
+  become: yes

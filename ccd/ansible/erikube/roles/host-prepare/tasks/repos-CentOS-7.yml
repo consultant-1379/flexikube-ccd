@@ -1,0 +1,21 @@
+---
+- name: Point CentOS-Base repo to remote {{ centos_repo_loc }}
+  become: yes
+  template: >
+    src='etc.yum.repos.d/CentOS-Base.repo.j2'
+    dest='/etc/yum.repos.d/CentOS-Base.repo'
+    mode=0644
+  when: centos_repo_loc | length > 0
+
+- name: Overwrite default /etc/yum.repos.d/CentOS-Base.repo with file {{ centos_base_repo_file_loc }}
+  become: yes
+  copy: >
+    src={{ centos_base_repo_file_loc }}
+    dest='/etc/yum.repos.d/CentOS-Base.repo'
+    mode=0644
+  when: not use_default_centos_base_repo and centos_repo_loc | length == 0
+- name: Add EPEL Repo (required for jq package)
+  become: yes
+  package:
+    name: epel-release
+    state: present

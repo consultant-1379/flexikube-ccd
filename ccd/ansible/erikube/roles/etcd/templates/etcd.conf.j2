@@ -1,0 +1,62 @@
+{% macro initial_cluster() -%}
+{% for host in etcd_peers | default([]) -%}
+{% if loop.last -%}
+{{ hostvars[host].ansible_hostname }}=https://{{ hostvars[host].etcd_ip | default(hostvars[host].k8s_ip_address) | ipwrap }}:{{ etcd_peer_port }}
+{%- else -%}
+{{ hostvars[host].ansible_hostname }}=https://{{ hostvars[host].etcd_ip | default(hostvars[host].k8s_ip_address) | ipwrap }}:{{ etcd_peer_port }},
+{%- endif -%}
+{% endfor -%}
+{% endmacro -%}
+
+ETCD_NAME={{ etcd_hostname }}
+ETCD_LISTEN_PEER_URLS={{ etcd_listen_peer_urls }}
+ETCD_DATA_DIR={{ etcd_data_dir }}
+
+# ETCD defaults can be found on https://etcd.io/docs/v2/configuration/
+
+{% if etcd_snapshot_count is defined %}
+ETCD_SNAPSHOT_COUNT={{ etcd_snapshot_count }}
+{% endif %}
+
+{% if etcd_heartbeat_interval is defined %}
+ETCD_HEARTBEAT_INTERVAL={{ etcd_heartbeat_interval }}
+{% endif %}
+
+{% if etcd_election_timeout is defined %}
+ETCD_ELECTION_TIMEOUT={{ etcd_election_timeout }}
+{% endif %}
+
+{% if etcd_grpc_keepalive_min_time is defined %}
+ETCD_GRPC_KEEPALIVE_MIN_TIME={{ etcd_grpc_keepalive_min_time }}
+{% endif %}
+
+{% if etcd_enable_pprof is defined %}
+ETCD_ENABLE_PPROF={{ etcd_enable_pprof }}
+{% endif %}
+
+ETCD_LISTEN_CLIENT_URLS={{ etcd_listen_client_urls }}
+
+ETCD_INITIAL_ADVERTISE_PEER_URLS={{ etcd_initial_advertise_peer_urls }}
+{% if initial_etcd_cluster is defined and initial_etcd_cluster %}
+ETCD_INITIAL_CLUSTER={{ initial_etcd_cluster }}
+{% else %}
+ETCD_INITIAL_CLUSTER={{ initial_cluster() }}
+{% endif %}
+ETCD_INITIAL_CLUSTER_STATE={{ etcd_initial_cluster_state }}
+ETCD_INITIAL_CLUSTER_TOKEN={{ etcd_initial_cluster_token }}
+ETCD_ADVERTISE_CLIENT_URLS={{ etcd_advertise_client_urls }}
+
+ETCD_TRUSTED_CA_FILE={{ etcd_ca_file }}
+ETCD_CLIENT_CERT_AUTH=true
+ETCD_CERT_FILE={{ etcd_cert_file }}
+ETCD_KEY_FILE={{ etcd_key_file }}
+ETCD_PEER_TRUSTED_CA_FILE={{ etcd_peer_ca_file }}
+ETCD_PEER_CERT_FILE={{ etcd_peer_cert_file }}
+ETCD_PEER_KEY_FILE={{ etcd_peer_key_file }}
+ETCD_PEER_CLIENT_CERT_AUTH=true
+
+{% if etcd_cipher_suites is defined %}
+ETCD_CIPHER_SUITES={{ etcd_cipher_suites }}
+{% endif %}
+
+ETCD_DEBUG={{ etcd_debug | default(false) | bool | string }}

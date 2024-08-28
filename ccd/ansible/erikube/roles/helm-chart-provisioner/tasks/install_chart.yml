@@ -1,0 +1,63 @@
+---
+- name: Authorize local registry access before helm
+  shell: "{{ docker_cmd }} login -u {{ local_registry_user }} -p {{ local_registry_password }} registry.eccd.local:5000"
+  ignore_errors: true
+  when: local_registry_user is defined and local_registry_user != ""
+
+- name: Get helm status
+  shell: "{{ get_helm_status }}"
+  register: chart_status
+  failed_when: false == true
+
+- name: Install chart with helm
+  when: chart_status.rc != 0
+  block:
+  - name: Delete chart if already there when installed
+    when: state == 'installed'
+    file:
+      state: absent
+      path: "{{ k8s_helm_file_loc }}/{{ chart_name }}"
+
+  - name: Retrieve {{ chart_name }} chart
+    get_url: >
+      url="{{ tarball }}"
+      dest="{{ k8s_helm_file_loc }}/{{ chart_name }}"
+      timeout="{{ chart_retrieval_timeout }}"
+    when: '"https://" in tarball'
+
+  - name: Copy {{ chart_name }} chart
+    copy: >
+      src="{{ tarball }}"
+      dest="{{ k8s_helm_file_loc }}/{{ chart_name }}"
+    when: '"https://" not in tarball'
+
+  - include: update_product_info.yml
+    when: productInfo is defined
+
+  - name: Configure values of {{ chart_name }} chart
+    when: values is defined
+    copy:
+      content: "{{ values }}"
+      dest: "{{ k8s_helm_file_loc }}/values_{{ chart_name }}.yaml"
+
+  - name: Install {{ chart_name }} chart with custom values
+    shell: |
+      {{ helm }} install {{ chart_name }} /charts/{{ chart_name }} -f /charts/values_{{ chart_name }}.yaml \
+      --namespace {{ kube_namespace | default('default') }} \
+      {{ extra_params | default('') }} --timeout {{ helm_install_timeout }} --debug --atomic
+    register: helm_output
+    until: helm_output.rc == 0
+    retries: "{{ helm_check_retries | default(5) }}"
+    delay: "{{ helm_check_retry_delay | default(5) }}"
+    when: values is defined
+
+  - name: Install {{ chart_name }} chart with timeout {{ helm_install_timeout }}
+    shell: |
+      {{ helm }} install {{ chart_name }} /charts/{{ chart_name }} --namespace \
+      {{ kube_namespace | default('default') }} \
+      {{ extra_params | default('') }} --timeout {{ helm_install_timeout }} --debug --atomic
+    register: helm_output
+    until: helm_output.rc == 0
+    retries: "{{ helm_check_retries | default(5) }}"
+    delay: "{{ helm_check_retry_delay | default(5) }}"
+    when: values is not defined

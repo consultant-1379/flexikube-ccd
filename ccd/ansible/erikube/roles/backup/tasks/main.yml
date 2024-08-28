@@ -1,0 +1,14 @@
+---
+- set_fact:
+    backup_files: []
+
+- include: etcd.yml
+  when: inventory_hostname in etcd_hosts
+
+- include: kubernetes.yml
+  when: inventory_hostname in kube_hosts
+
+- include: lb.yml
+  when: groups['ingress_lb'] is defined and inventory_hostname in groups['ingress_lb']
+
+- include: local_backup.yml

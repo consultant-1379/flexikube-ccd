@@ -1,0 +1,45 @@
+---
+- name: Check if container is running in node
+  shell: "{{ crictl_cmd }} ps --name {{ target_container_id_name }} -o json |jq .containers |jq length"
+  register: status_of_container
+  ignore_errors: true
+
+- name: Restart container and check is running
+  block:
+  - name: Get cri container id
+    shell: "{{ crictl_cmd }} ps --name {{ target_container_id_name }} -q"
+    register: target_container_id
+    ignore_errors: true
+
+  - name: Restart cri container
+    shell: "{{ crictl_cmd }} stop {{ target_container_id.stdout}} && {{ crictl_cmd }} rm {{ target_container_id.stdout }}"
+    ignore_errors: true
+
+  - name: get the id of the restarted container
+    shell: "{{ crictl_cmd }} ps --name {{ target_container_id_name }} -q"
+    register: restarted_container_id
+    retries: 30
+    delay: 2
+    until: restarted_container_id.stdout | length > 0
+
+  - name: Wait till container is in running status after restart
+    shell: "{{ crictl_cmd }} ps --state running --no-trunc | grep {{ restarted_container_id.stdout }} | awk '{print $1}' | wc -l"
+    register: container_count
+    until: container_count.stdout.find("1") != -1
+    retries: 20
+    delay: 1
+
+  - name: Change recovery time for kube-apiserver
+    set_fact:
+      container_sleep_after_restart: "10"
+    when: target_container_id_name == "kube-apiserver"
+
+  - name: Sleep for stabilizing container after container restart
+    pause:
+      seconds: "{{ container_sleep_after_restart }}"
+
+  - name: Set recovery time back to default value if kube-apiserver was restarted
+    set_fact:
+      container_sleep_after_restart: "1"
+    when: target_container_id_name == "kube-apiserver"
+  when: status_of_container.stdout != "0"

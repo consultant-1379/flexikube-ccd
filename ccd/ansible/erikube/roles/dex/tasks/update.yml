@@ -1,0 +1,112 @@
+---
+- name: Create temp workspace directory
+  command: mktemp -td erikube-dex-ansible-XXXXXX
+  register: mktemp
+  changed_when: false
+
+- name: Check cert and key files are available
+  assert:
+    that: dex_cert_file is defined and dex_key_file is defined
+    msg: dex_cert_file and dex_key_file -variables must be defined
+
+- name: Update secret with Dex TLS assets
+  shell:
+    executable: /bin/bash
+    cmd: "{{ kubectl }} -n {{ dex_namespace }} create secret tls dex-tls --cert={{ dex_cert_file }} --key={{ dex_key_file }} \
+         --dry-run=client -o yaml | {{ kubectl }} apply -f -"
+  become: yes
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+
+- name: Delete custom CA root secret
+  command: "{{ kubectl }} -n {{ dex_namespace }} delete secret dex-ldap-ca --ignore-not-found"
+  become: yes
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (result.rc == 0 or "not found" in result.stderr)
+  when: dex_ldap_ca is defined or dex_ldap_ca_data is defined
+
+- name: Re-create secret from custom ldap root ca file
+  shell:
+    executable: /bin/bash
+    cmd: "{{ kubectl }} -n {{ dex_namespace }} create secret generic dex-ldap-ca --from-file={{ dex_ldap_ca }}"
+  become: yes
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+  when: dex_ldap_ca is defined
+
+- name: Re-create secret from custom ldap root ca data
+  shell:
+    executable: /bin/bash
+    cmd: "{{ kubectl }} -n {{ dex_namespace }} create secret generic dex-ldap-ca --from-literal=ldap.crt={{ dex_ldap_ca_data }}"
+  become: yes
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+  when: dex_ldap_ca_data is defined
+
+- name: Check for existing deployment
+  command: "{{ kubectl }} -n {{ dex_namespace }} get deployment dex"
+  register: deployment_exist
+  failed_when: false
+  changed_when: false
+  become: yes
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (deployment_exist.rc == 0 or "not found" in deployment_exist.stderr)
+
+- debug:
+    msg: "{{ deployment_exist }}"
+
+- name: Update pods with new image version
+  command: "{{ kubectl }} -n {{ dex_namespace }} set image deployment/dex dex={{ dex_image }}"
+  register: set_image
+  changed_when: "'image updated' in set_image.stdout"
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: set_image.rc == 0
+  when: deployment_exist.rc == 0
+  become: yes
+
+- name: Re-create dex manifest
+  template:
+    src: roles/dex/templates/dex.yaml.j2
+    dest: "{{ mktemp.stdout }}/dex.yaml"
+  vars:
+    - ingress_class: "{{ dex_ingress_controller | default(default_ingress_controller) | default('') }}"
+
+- name: Re-create dex resources
+  become: yes
+  command: "{{ kubectl }} -n {{ dex_namespace }} apply -f {{ mktemp.stdout }}/dex.yaml"
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+
+- name: Re-create dex ingress manifest
+  template:
+    src: roles/dex/templates/dex-ingress.yaml.j2
+    dest: "{{ mktemp.stdout }}/dex-ingress.yaml"
+  vars:
+    - ingress_class: "{{ dex_ingress_controller | default(default_ingress_controller) | default('') }}"
+  when: dex_ingress_host is defined
+
+- name: Re-create dex ingress
+  become: yes
+  command: "{{ kubectl }} -n {{ dex_namespace }} apply -f {{ mktemp.stdout }}/dex-ingress.yaml"
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+
+- name: Delete temp directory
+  file:
+    name: "{{ mktemp.stdout }}"
+    state: directory
+  changed_when: false

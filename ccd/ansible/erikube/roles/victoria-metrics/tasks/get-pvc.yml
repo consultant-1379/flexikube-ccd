@@ -1,0 +1,32 @@
+- name: Get PVC size for Given PVC
+  shell: "{{ kubectl }} get pvc {{ pvc_names[0] }} -n {{ kube_namespace }} -o jsonpath='{.spec.resources.requests.storage}'"
+  register: pvcsize
+  become: yes
+  failed_when: false == true
+
+- name: Get PVC storage class for Given PVC
+  shell: "{{ kubectl }} get pvc {{ pvc_names[0] }} -n {{ kube_namespace }} -o jsonpath='{.spec.storageClassName}'"
+  register: pvcstorageclass
+  become: yes
+  failed_when: false == true
+
+- set_fact:
+    old_pv_size: "{{ (pvcsize.stdout | length > 0 ) | ternary(pvcsize.stdout, '0') | regex_replace('(?i)i', '') | human_to_bytes | int }}"
+
+- set_fact:
+   new_pv_size : "{{ pv_size | regex_replace('(?i)i', '') | human_to_bytes | int }}"
+
+- set_fact:
+    old_pv_storageclass: "{{ (pvcstorageclass.stdout | length > 0 ) | ternary(pvcstorageclass.stdout, '') }}"
+
+- set_fact:
+    delete_victoria_metrics_cluster_helm_chart: true
+  when: (old_pv_size != new_pv_size) or
+        (old_pv_storageclass != pv_storageclass) or
+        ((ansible_distribution == "SLES") and (not image_based_deployment | default(false) | bool))
+
+- set_fact:
+    delete_vmstorage_pvc: true
+  when: (old_pv_size != 0 and old_pv_size != new_pv_size) or
+        (old_pv_storageclass != '' and old_pv_storageclass != pv_storageclass) or
+        ((ansible_distribution == "SLES") and (not image_based_deployment | default(false) | bool))

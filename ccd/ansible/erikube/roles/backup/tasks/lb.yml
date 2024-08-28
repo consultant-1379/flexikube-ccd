@@ -1,0 +1,14 @@
+---
+- name: Check lb paths exist
+  stat:
+    path: "{{ item }}"
+  with_items: "{{ lb_backup_paths }}"
+  register: backup_dirs_st
+
+- fail:
+    msg: "{{ item.item }} does not exist"
+  with_items: "{{ backup_dirs_st.results }}"
+  when: not item.stat.exists
+
+- set_fact:
+    backup_files: "{{ backup_files }} + {{ lb_backup_paths }}"

@@ -1,0 +1,65 @@
+---
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/erikube-k8s-XXXXXX
+  register: mktemp_calicoctl
+  changed_when: False
+
+- name: Get the name of all worker nodes to apply network policy
+  become: yes
+  command: "{{ kubectl }} get node --selector='!node-role.kubernetes.io/control-plane' -o=jsonpath={.items..metadata.name}"
+  register: worker_nodes
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: worker_nodes.rc == 0
+
+- name: Get calicoctl pod name and set variables
+  block:
+  - name: Get calicoctl instance name from {{ calicoctl_namespace }}
+    become: yes
+    shell: "{{ kubectl }} get pods -n {{ calicoctl_namespace }} -l k8s-app=calicoctl -o jsonpath={.items[0].metadata.name}"
+    register: calicoctl_pod
+    ignore_errors: yes
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: calicoctl_pod.rc == 0
+
+  - set_fact:
+      worker_nodes: "{{ worker_nodes.stdout.split() }}"
+      kube_service_node_port_ranges: "{{ kube_service_node_port_range.split('-') | join(':') }}"
+      k8s_file_calicoctl_loc: "{{ mktemp_calicoctl.stdout }}"
+      calicoctl_pod_name: "{{ calicoctl_pod.stdout }}"
+
+  when: block_node_port_access_for_services | bool
+
+- name: Deploy Global Network Policy block_node_port_access_for_services is set to true
+  block:
+  - name: Prepare Global Network Policy Manifest
+    become: yes
+    template:
+      src: "global-network-policy.yml.j2"
+      dest: "{{ k8s_file_calicoctl_loc }}/global-network-policy.yml"
+
+  - name: Copy Network Policy manifest to calicoctl pod
+    become: yes
+    shell: "{{ kubectl }} -n {{ calicoctl_namespace }} exec -i {{ calicoctl_pod_name }} -- /bin/bash -c 'cat > /tmp/global-network-policy.yml' < {{ k8s_file_calicoctl_loc }}/global-network-policy.yml"
+    register: result
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: result.rc == 0
+
+  - name: Deploy Global Network Policy using calicoctl pod
+    become: yes
+    command: "{{ kubectl }} -n {{ calicoctl_namespace }}  exec {{ calicoctl_pod_name }}  -- sh -c 'calicoctl create -f /tmp/global-network-policy.yml'"
+    register: result
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: result.rc == 0
+
+  when: block_node_port_access_for_services | bool and calicoctl_pod_name is defined and calicoctl_pod.rc == 0
+
+- name: Delete temp directory
+  file:
+    name: "{{ mktemp_calicoctl.stdout }}"
+    state: absent
+  become: yes
+  changed_when: False

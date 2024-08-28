@@ -1,0 +1,33 @@
+---
+
+- name: Copy ansible scripts into ansible executor
+  become: true
+  synchronize:
+    src: "{{ playbook_dir | dirname | dirname }}"
+    dest: "{{ lookup('env','HOME') }}/erikube-ansible/"
+    rsync_opts:
+      - "--exclude=facts"
+
+- name: Create ansible configuration file
+  become: true
+  file:
+    path: "{{ ansible_cfg | dirname }}"
+    state: directory
+
+- name: Copy ansible configuration file into remote host
+  become: true
+  copy:
+    src: "{{ playbook_dir | dirname }}/ansible.cfg"
+    dest: "{{ ansible_cfg }}"
+    owner: root
+    group: root
+    mode: 0644
+
+- name: Copy private key which used for access erikube cluster instance
+  become: true
+  copy:
+    src: "{{ private_key_name }}"
+    dest: "{{ private_key_name }}"
+    owner: root
+    group: root
+    mode: 0600

@@ -1,0 +1,5 @@
+---
+
+- block:
+    - include_tasks: "{{ kube_api_vip_action }}.yml"
+  become: true

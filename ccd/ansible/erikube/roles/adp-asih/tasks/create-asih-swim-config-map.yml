@@ -1,0 +1,25 @@
+---
+
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/asih-swim-config-map-XXXXXX
+  register: temp_asih_swim_cm_dir
+  changed_when: False
+
+- set_fact:
+    asih_swim_cm_file_loc: "{{ temp_asih_swim_cm_dir.stdout }}"
+
+- name: Create new manifest for asih-swim configmap
+  template:
+    src: "asih-swim-config-map.yml.j2"
+    dest: "{{ asih_swim_cm_file_loc }}/asih-swim-config-map.yml"
+  become: yes
+
+- name: Deploy updated asih-swim cm
+  shell: "{{ kubectl }} apply -f {{ asih_swim_cm_file_loc }}/asih-swim-config-map.yml"
+  become: yes
+
+- name: Delete temp directory
+  file:
+    name: "{{ asih_swim_cm_file_loc }}"
+    state: absent
+  changed_when: False

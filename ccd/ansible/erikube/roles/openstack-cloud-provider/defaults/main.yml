@@ -1,0 +1,7 @@
+---
+openstack_ca_cert: ""
+openstack_cm_cert_validity_years: 10
+
+#this variable need to be in sync with cinder role default
+openstack_ca_cert_path: "/etc/oscacert"
+openstack_ccm_log_level: 2

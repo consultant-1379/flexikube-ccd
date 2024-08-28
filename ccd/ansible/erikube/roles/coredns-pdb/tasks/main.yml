@@ -1,0 +1,5 @@
+---
+
+- name: Add pod disruption budget for coredns
+  script: coredns-pdb.sh
+  become: yes

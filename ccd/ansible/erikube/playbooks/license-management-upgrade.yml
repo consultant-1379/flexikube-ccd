@@ -1,0 +1,4 @@
+---
+- import_playbook: adp-asih-upgrade.yml
+- import_playbook: adp-lm-upgrade.yml
+- import_playbook: ccd-license-consumer-deploy.yml

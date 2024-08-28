@@ -1,0 +1,10 @@
+- name: restart sshd
+  service:
+    name: sshd
+    state: restarted
+
+- name: start network service
+  service:
+    name: network
+    state: restarted
+    enabled: True

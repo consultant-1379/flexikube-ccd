@@ -1,0 +1,14 @@
+---
+
+- name: Setup TLS for container registry
+  include_tasks: tls.yml
+
+- name: install htpasswd if needed
+  include_tasks: htpasswd.yml
+  when: not image_based_deployment | default(false) | bool
+
+- name: Create custom credentials for container registry
+  include_tasks: credentials.yml
+
+- name: Remove /etc/hosts entries
+  include_tasks: hosts.yml

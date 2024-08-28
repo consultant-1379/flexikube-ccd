@@ -1,0 +1,5 @@
+---
+systemd_dir: "/etc/systemd/system"
+kube_lb_config_dir: "/etc/{{ default_kube_lb }}"
+kube_lb_service_name: "{{ kube_lb_container }}"
+kube_lb_image: "{{ haproxy_image }}"

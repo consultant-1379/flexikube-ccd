@@ -1,0 +1,27 @@
+---
+- name: "Check networking: Inter nodes connectivity"
+  wait_for:
+    host: hostvars[item].k8s_ip_address
+    timeout: 10
+    msg: "Failed to connect to {{ hostvars[item].k8s_ip_address }}, Inter nodes connectivity might be not available"
+  with_items: "{{ groups['all'] }}"
+  when: airgap_check | default(false) | bool
+
+- name: "Check airgap networking: NO ECN connectivity from nodes"
+  wait_for:
+    host: armdocker.rnd.ericsson.se
+    port: 443
+    timeout: 3
+    state: absent
+    msg: "ECN connectivity is available"
+  when: airgap_check | default(false) | bool
+
+- name: "Check airgap networking: NO Internet connectivity"
+  wait_for:
+    host: www.google.com
+    port: 80
+    timeout: 2
+    state: absent
+    msg: "Internet is available "
+  when: airgap_check | default(false) | bool
+

@@ -1,0 +1,99 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus-webhook-snmp
+  namespace: {{ prometheus_namespace }}
+  labels:
+    app: prometheus-webhook-snmp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus-webhook-snmp
+  template:
+    metadata:
+      labels:
+        app: prometheus-webhook-snmp
+      annotations:
+        container.apparmor.security.beta.kubernetes.io/prometheus-webhook-snmp: "runtime/default"
+        container.apparmor.security.beta.kubernetes.io/prometheus-webhook-snmp-sidecar: "runtime/default"
+    spec:
+      priorityClassName: system-cluster-critical
+{% if  infra_node_pool_name is defined %}
+      nodeSelector:
+        node-pool: "{{infra_node_pool_name}}"
+{% endif %}
+      imagePullSecrets:
+        - name: local-registry-secret
+      containers:
+        - name: prometheus-webhook-snmp
+          image: {{ image_prometheus_webhook_snmp }}
+          ports:
+          - name: http
+            containerPort: {{ webhook_listen_port }}
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/prometheus-webhook-snmp.conf
+              subPath: prometheus-webhook-snmp.conf
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            privileged: false
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: RuntimeDefault
+            runAsNonRoot: true
+            runAsUser: 113231
+            runAsGroup: 113231
+          resources:
+            requests:
+              cpu: 50m
+              memory: 100Mi
+            limits:
+              cpu: 100m
+              memory: 200Mi
+        - name: prometheus-webhook-snmp-sidecar
+          image: {{ image_prometheus_webhook_snmp_sidecar }}
+          ports:
+          - name: smtp-translator
+            containerPort: {{ snmp_translator_port }}
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/prometheus-webhook-snmp.conf
+              subPath: prometheus-webhook-snmp.conf
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            privileged: false
+            readOnlyRootFilesystem: false
+            seccompProfile:
+              type: RuntimeDefault
+            runAsNonRoot: true
+            runAsUser: 204611
+            runAsGroup: 204611
+          resources:
+            requests:
+              cpu: 30m
+              memory: 50Mi
+            limits:
+              cpu: 60m
+              memory: 100Mi
+      volumes:
+        - name: config-volume
+          configMap:
+            name: prometheus-webhook-snmp
+      automountServiceAccountToken: false
+      tolerations:
+      - key: node.kubernetes.io/not-ready
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 10
+      - key: node.kubernetes.io/unreachable
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 10

@@ -1,0 +1,32 @@
+---
+- name: Create ca certs for rsyslog
+  block:
+    - name: Create client private key
+      shell: openssl genrsa -out {{ dir2 }}/private/client.key.pem 4096
+
+    - name: Create client csr
+      shell: >-
+        openssl req -config {{ dir2 }}/openssl.cnf -key {{ dir2 }}/private/client.key.pem \
+        -new -sha256 -out {{ dir2 }}/csr/client.csr.pem \
+        -subj "/CN=rsyslog"
+
+    - name: Get serial number
+      shell: >-
+        openssl x509 -noout -serial -in {{ dir2 }}/certs/client.crt.pem | cut -d'=' -f2
+      register: serial_result
+
+    - name: Revoke certificate if it already exists
+      shell: >-
+        openssl ca -revoke {{ dir2 }}/certs/client.crt.pem -config {{ dir2 }}/openssl.cnf
+      when:
+        - serial_result.stdout != 1000
+        - not serial_result.stderr
+        - not "Already revoked" in serial_result.stderr
+
+    - name: Create client certificate
+      shell: >-
+        openssl ca -batch -config {{ dir2 }}/openssl.cnf -outdir {{ dir2 }}/certs  \
+        -cert {{ dir2 }}/certs/ca.crt.pem -keyfile {{ dir2 }}/private/ca.key.pem \
+        -extensions client_cert -days 3650 -notext -md sha256 \
+        -in {{ dir2 }}/csr/client.csr.pem -out {{ dir2 }}/certs/client.crt.pem \
+        -subj "/CN=rsyslog"

@@ -1,0 +1,108 @@
+---
+- name: Remove csi-cinder-controller-service if found
+  shell: "{{ kubectl }} delete svc -n kube-system csi-cinder-controller-service"
+  ignore_errors: yes
+  register: output
+
+- name: Remove csi-cinder-controllerplugin pods if found
+  shell: "{{ kubectl }} delete statefulsets.apps -n kube-system csi-cinder-controllerplugin"
+  ignore_errors: yes
+  register: output
+
+
+- name: Remove csi-cinder-controllerplugin deployment if found
+  shell: "{{ kubectl }}  delete deployments.apps -n kube-system csi-cinder-controllerplugin"
+  ignore_errors: yes
+  register: output
+
+- name: Verify that only one default storage class is found
+  block:
+    - name: set variable os_default_storage_classes
+      set_fact:
+        os_default_storage_classes: "{{ openstack_sc_is_default | default(false) | bool | int  }}"
+
+    - name: add default classes from openstack_cinder_storage_classes
+      set_fact:
+        os_default_storage_classes: "{{ os_default_storage_classes|int + (sc_default| bool | int) }}"
+      vars:
+        sc_default: "{{ openstack_cinder_storage_classes[os_sc_index].default |default(false) }}"
+      loop: "{{ openstack_cinder_storage_classes | default([]) }}"
+      loop_control:
+        index_var: os_sc_index
+
+    - name: add default classes from openstack_manila_storage_classes
+      set_fact:
+        os_default_storage_classes: "{{ os_default_storage_classes|int + (sc_default| bool | int) }}"
+      vars:
+        sc_default: "{{ openstack_manila_storage_classes[os_sc_index].default |default(false) }}"
+      loop: "{{ openstack_manila_storage_classes | default([]) }}"
+      loop_control:
+        index_var: os_sc_index
+
+    - name: Check if we find one and only one default storage class
+      assert:
+        that:
+          - "{{os_default_storage_classes}} == 1"
+        fail_msg: |
+          There has to be one and only one default storage class
+          Check openstack_sc_is_default and openstack_cinder_storage_classes
+          and openstack_manila_storage_classes variables.
+
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/erikube-k8s-XXXXXX
+  register: mktemp_csi
+  changed_when: False
+
+- set_fact:
+    k8s_csi_file_loc: "{{ mktemp_csi.stdout }}"
+
+- name: Create Cinder CSI yaml files
+  template:
+    src: "{{item}}.j2"
+    dest: "{{ k8s_csi_file_loc }}/{{item}}"
+  with_items:
+    - csi-cinder-controllerplugin.yml
+    - csi-cinder-nodeplugin.yml
+    - cinder-sc.yml
+
+- name: Apply Openstack Cinder files
+  shell: "{{ kubectl }} apply -f {{ k8s_csi_file_loc }}/{{item}}"
+  register: output
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: output.rc == 0
+  with_items:
+    - csi-cinder-controllerplugin.yml
+    - csi-cinder-nodeplugin.yml
+
+- name: Delete old StorageClass if exits
+  shell: "{{ kubectl }} delete sc {{ openstack_sc_name }}"
+  ignore_errors: yes
+  register: output
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (output.rc == 0 or "not found" in output.stderr)
+
+- name: Delete old extra storage classes if exits
+  shell: "{{ kubectl }} delete sc {{ openstack_cinder_storage_classes[os_sc_index].name }}"
+  ignore_errors: yes
+  loop: "{{ openstack_cinder_storage_classes | default([]) }}"
+  loop_control:
+    index_var: os_sc_index
+  register: output
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (output.rc == 0 or "not found" in output.stderr)
+
+- name: Apply Cinder CSI Storage Class template
+  shell: "{{ kubectl }} create -f {{ k8s_csi_file_loc }}/cinder-sc.yml"
+  register: output
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: output.rc == 0
+
+- name: Delete temp directory
+  file:
+    name: "{{ mktemp_csi.stdout }}"
+    state: absent
+  changed_when: False

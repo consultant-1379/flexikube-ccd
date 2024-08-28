@@ -1,0 +1,7 @@
+---
+openstack_ca_cert: ""
+openstack_ca_cert_path: "/etc/oscacert"
+subport_manager_node_port: 31234
+subport_manager_secret_name: "subport-manager-cloud"
+subport_controller_secret_name: "subport-manager-cloud"
+subport_controller_replicas: 1

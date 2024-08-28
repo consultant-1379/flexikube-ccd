@@ -1,0 +1,41 @@
+- name: Check old PVC
+  block:
+    - name: Set default for old pvc status
+      set_fact:
+        old_pvc_exists: false
+
+    - name: Check if old pvc exists
+      shell: "{{ kubectl }} -n kube-system get pvc {{ cr_pvc_name }}"
+      register: get_pvc_result
+      ignore_errors: yes
+
+    - name: Set old pvc status
+      set_fact:
+        old_pvc_exists: true
+      when: get_pvc_result.rc == 0
+
+- name: Enable storage migration if needed
+  block:
+    - name: Set S3 default
+      set_fact:
+        s3_enabled: false
+
+    - name: Set S3 value
+      set_fact:
+        s3_enabled: "{{ cr_helm_chart_values.registry.storage.s3.enabled }}"
+      when: cr_helm_chart_values.registry.storage is defined and
+            cr_helm_chart_values.registry.storage.s3 is defined
+
+    # S3 not enabled, S3 after upgrade -> migration needed
+    - name: Enable storage migration
+      set_fact:
+        cr_storage_migration_enabled: true
+      when: not s3_enabled and cr_storage_s3_enabled
+
+    # S3 enabled, S3 after upgrade -> migration not needed
+    - name: Enable storage migration
+      set_fact:
+        cr_storage_migration_enabled: false
+      when: s3_enabled and cr_storage_s3_enabled
+
+  when: cr_helm_chart_values is defined and cr_helm_chart_values != ""

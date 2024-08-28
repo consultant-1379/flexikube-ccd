@@ -1,0 +1,78 @@
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: subport-manager
+  namespace: kube-system
+  labels:
+    k8s-app: subport-manager
+spec:
+  selector:
+    matchLabels:
+      k8s-app: subport-manager
+  # updateStrategy:
+  #   type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        k8s-app: subport-manager
+    spec:
+      priorityClassName: system-cluster-critical
+      nodeSelector:
+        use_trunks: ""
+      tolerations:
+      - effect: NoExecute
+        operator: Exists
+      serviceAccountName: cloud-controller-manager
+      initContainers:
+        - name: init-subport-manager
+          image: {{ subport_manager_image }}
+          command: ["sh", "-c", "--"]
+          args: ['while true; do [[ -f /var/lib/eccd/trunk-ports.json ]] && exit 0 || sleep 30; done; exit 1']
+          volumeMounts:
+            - mountPath: /var/lib/eccd
+              name: trunk-data
+      imagePullSecrets:
+        - name: local-registry-secret
+      containers:
+        - name: subport-manager
+          image: {{ subport_manager_image }}
+          # command: [ "/bin/bash", "-c", "--" ]
+          # args: [ "while true; do sleep 300000; done;" ]
+          volumeMounts:
+            - mountPath: /etc/hosts
+              name: etc-hosts
+              readOnly: true
+            - mountPath: /var/lib/eccd
+              name: trunk-data
+            - mountPath: /etc/kubernetes
+              name: k8s-cert
+            - mountPath: /etc/openstack
+              name: cloud-config-volume
+              readOnly: true
+{% if openstack_ca_cert != "" %}
+            - mountPath: "{{ openstack_ca_cert_path }}"
+              name: os-cacert
+              readOnly: true
+{% endif %}
+      hostNetwork: true
+      volumes:
+      - name: etc-hosts
+        hostPath:
+          path: /etc/hosts
+          type: File
+      - name: k8s-cert
+        hostPath:
+          path: /etc/kubernetes
+      - name: trunk-data
+        hostPath:
+          path: /var/lib/eccd
+      - name: cloud-config-volume
+        secret:
+          secretName: "{{ subport_manager_secret_name }}"
+{% if openstack_ca_cert != "" %}
+      - name: os-cacert
+        secret:
+          secretName: openstack-ca-cert
+{% endif %}
+---

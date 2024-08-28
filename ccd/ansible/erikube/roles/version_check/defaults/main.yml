@@ -1,0 +1,14 @@
+---
+
+# a dict with the name of the pod as key and the image as value
+# e.g.:
+# pod_images_dict:
+#  multus-controller: {{ multus_cni_image }}
+#  multus-node: {{ multus_cni_image }}
+#  calico-kube-controllers: {{ calico_kube_controllers_image }}
+#  calico-node: {{ calico_node_image }}
+
+# container_images_dict:
+#   etcd_container: {{ etcd_image }}
+
+namespace: kube-system

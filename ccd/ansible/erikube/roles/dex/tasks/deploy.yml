@@ -1,0 +1,169 @@
+---
+- name: Create temp workspace directory
+  command: mktemp -td erikube-dex-ansible-XXXXXX
+  register: mktemp
+  changed_when: false
+
+- set_fact:
+    tempdir: "{{ mktemp.stdout }}"
+
+- name: Check cert and key files are available
+  assert:
+    that: dex_cert_file is defined and dex_key_file is defined
+    msg: dex_cert_file and dex_key_file -variables must be defined
+
+- name: Get TLS secret
+  command: "{{ kubectl }} -n {{ dex_namespace }} get secret dex-tls"
+  become: yes
+  register: get_secret
+  changed_when: false
+  failed_when: false
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (get_secret.rc == 0 or "not found" in get_secret.stderr)
+
+- name: Create secret with Dex TLS assets
+  command: "{{ kubectl }} -n {{ dex_namespace }} create secret tls dex-tls --cert={{ dex_cert_file }} --key={{ dex_key_file }}"
+  become: yes
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+  when: get_secret.rc != 0
+
+- name: Get CA root secret
+  command: "{{ kubectl }} -n {{ dex_namespace }} get secret dex-ldap-ca"
+  become: yes
+  register: get_ca_secret
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: get_ca_secret.rc == 0
+  changed_when: false
+  failed_when: false
+
+- name: Create secret from custom root ca file
+  command: "{{ kubectl }} -n {{ dex_namespace }} create secret generic dex-ldap-ca --from-file={{ dex_ldap_ca }}"
+  become: yes
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+  when: get_ca_secret.rc != 0 and dex_ldap_ca is defined
+
+- name: Create secret from custom root ca data
+  command: "{{ kubectl }} -n {{ dex_namespace }} create secret generic dex-ldap-ca --from-literal=ldap.crt={{ dex_ldap_ca_data }}"
+  become: yes
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+  when: get_ca_secret.rc != 0 and dex_ldap_ca_data is defined
+
+- name: Create service account manifest
+  template:
+    src: service-account.yaml.j2
+    dest: "{{ tempdir }}/service-account.yaml"
+
+- name: Create service account
+  become: yes
+  command: "{{ kubectl }} apply -f {{ tempdir }}/service-account.yaml"
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+
+- name: Copy RBAC manifest
+  copy:
+    src: rbac.yml
+    dest: "{{ tempdir }}/rbac.yaml"
+
+- name: Create RBAC resources
+  become: yes
+  command: "{{ kubectl }} apply -f {{ tempdir }}/rbac.yaml"
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+
+- name: Create dex manifests
+  template:
+    src: dex.yaml.j2
+    dest: "{{ tempdir }}/dex.yaml"
+  vars:
+    - ingress_class: "{{ dex_ingress_controller | default(default_ingress_controller) | default('') }}"
+
+- name: Create dex resources
+  become: yes
+  command: "{{ kubectl }} -n {{ dex_namespace }} apply -f {{ tempdir }}/dex.yaml"
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+
+- name: Create dex ingress manifest
+  template:
+    src: dex-ingress.yaml.j2
+    dest: "{{ tempdir }}/dex-ingress.yaml"
+  vars:
+    - ingress_class: "{{ dex_ingress_controller | default(default_ingress_controller) | default('') }}"
+  when: dex_ingress_host is defined
+
+- name: Create dex ingress resource
+  become: yes
+  command: "{{ kubectl }} -n {{ dex_namespace }} apply -f {{ tempdir }}/dex-ingress.yaml"
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+  when: dex_ingress_host is defined
+
+- block:
+  - name: Get coredns cm corefile
+    register: corefileoutput
+    shell: '{{ kubectl }} get cm -n kube-system coredns -o jsonpath\={.data.Corefile}'
+    become: yes
+    changed_when: false
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: (corefileoutput.rc == 0 or "not found" in corefileoutput.stderr)
+
+  - name: Add rewrite to dns entry
+    register: rewriteoutput
+    shell: echo "{{ corefileoutput.stdout }}" | awk "/{/{f=1} f{ print; if(count==0) {print \"    rewrite name {{ dex_ingress_host }} dex.kube-system.svc.cluster.local\"};count++}"
+    become: yes
+    changed_when: false
+
+  - name: Replace newlines
+    register: patchsource
+    shell: echo "{{ rewriteoutput.stdout }}" | sed ':a;N;$!ba;s/\n/\\n/g'
+    become: yes
+    changed_when: false
+
+  - name: Add record to coredns configmap
+    register: patchoutput
+    shell: "{{ kubectl }} patch cm -n kube-system coredns -p '{\"data\":{\"Corefile\":\"{{ patchsource.stdout }}\"}}'"
+    become: yes
+    changed_when: " 'configmap/coredns patched' in patchoutput.stdout "
+
+- name: Get coredns instances
+  register: loopoutput
+  shell: "{{ kubectl }} get pods -n kube-system -l k8s-app=kube-dns -o jsonpath\\={.items[*].metadata.name}"
+  become: yes
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (loopoutput.rc == 0 or "not found" in loopoutput.stderr)
+
+- name: Restart coredns instances
+  command: "{{ kubectl }} delete pod -n kube-system {{ item }}"
+  become: yes
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+  with_list: "{{ loopoutput.stdout.split(' ') }}"
+
+- name: Delete temp directory
+  file:
+    name: "{{ tempdir }}"
+    state: directory
+  changed_when: false

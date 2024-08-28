@@ -1,0 +1,22 @@
+- name: Delete given PVCs
+  block:
+  - name: Delete PVCs
+    shell: "{{ kubectl }} delete pvc {{ item }} -n {{ kube_namespace }} --grace-period=0 --force"
+    loop: "{{ pvc_names | list }}"
+    failed_when: false == true
+
+  - name: check the status of PVCs after deletion
+    shell: "{{ kubectl }} get pvc {{ item }} -n {{ kube_namespace }}"
+    loop: "{{ pvc_names | list }}"
+    register: result
+    until: '"Error from server (NotFound): persistentvolumeclaims" in result.stderr'
+    retries: 5
+    delay: 10
+    ignore_errors: true
+
+  - name: Check that PVCs are removed
+    assert:
+      that:
+        - '"Error from server (NotFound): persistentvolumeclaims" in item.stderr'
+      msg: "Error: PVC still exists!"
+    loop: "{{ result.results }}"

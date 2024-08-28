@@ -1,0 +1,13 @@
+---
+- name: Gather facts as non root
+  hosts: master[0]
+  gather_facts: yes
+
+- name: Purge all auth-client resources
+  hosts: master[0]
+  roles:
+  - erikube-defaults
+  tasks:
+  - include_role:
+      name: auth-client
+      tasks_from: purge

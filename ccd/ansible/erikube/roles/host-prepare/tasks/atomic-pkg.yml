@@ -1,0 +1,31 @@
+---
+# Atomic add socat, ...
+
+- name: is socat installed?
+  stat:
+    path: /usr/bin/socat
+  register: socat_installed
+
+- name: add socat
+  shell: rpm-ostree pkg-add socat
+  when: not socat_installed.stat.exists
+
+- name: is nfs-utils installed?
+  stat:
+    path: /usr/sbin/nfsstat
+  register: nfs_installed
+
+- name: add nfs-utils
+  shell: rpm-ostree pkg-add nfs-utils
+  when: not nfs_installed.stat.exists
+
+- name: reboot
+  command: /sbin/shutdown -r +1
+  async: 0
+  poll: 0
+  ignore_errors: true
+  when: not socat_installed
+
+- name: Wait for server(s) to finish rebooting
+  local_action: wait_for host="{{ inventory_hostname }}" search_regex=OpenSSH port=22 timeout=300 delay=60
+  when: not socat_installed

@@ -1,0 +1,57 @@
+# This flow is used for HA clusters (>1 master) and secrets encryption
+# has been enabled previously.
+
+
+- name: Update cryptoprov keys
+  include_tasks: update-cryptprov-cfg.yml
+  vars:
+    conf_file_exists: true
+    update_phase: 1
+  when: inventory_hostname == first_master
+
+- name: Replicate cryptprov cfg
+  include_tasks: replicate-cryptprov-cfg.yml
+  when: inventory_hostname != first_master
+
+- name: Restart apiserver to recognize new key
+  include_tasks: kubeapi-restart.yml
+
+- name: Wait for 1 minute
+  wait_for:
+    timeout: 60
+
+- name: Make new cryptprov key primary
+  include_tasks: update-cryptprov-cfg.yml
+  vars:
+    conf_file_exists: true
+    update_phase: 2
+  when: inventory_hostname == first_master
+
+- name: Replicate cryptprov cfg
+  include_tasks: replicate-cryptprov-cfg.yml
+  when: inventory_hostname != first_master
+
+- name: Restart API server for enabled key
+  include_tasks: kubeapi-restart.yml
+
+- name: Wait for 1 minute
+  wait_for:
+    timeout: 60
+
+- name: Reencrypt secrets with new key
+  include_tasks: kube-process-secrets.yml
+  when: inventory_hostname == first_master
+
+- name: Cleanup cryptoprov keys
+  include_tasks: update-cryptprov-cfg.yml
+  vars:
+    conf_file_exists: true
+    update_phase: 3
+  when: inventory_hostname == first_master
+
+- name: Replicate cryptprov cfg
+  include_tasks: replicate-cryptprov-cfg.yml
+  when: inventory_hostname != first_master
+
+- name: Restart apiserver to pick up final config
+  include_tasks: kubeapi-restart.yml

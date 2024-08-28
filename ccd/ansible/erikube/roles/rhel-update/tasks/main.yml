@@ -1,0 +1,13 @@
+---
+- name: Add yum repo files
+  become: true
+  copy:
+    src: "files/yum.repos.d/"
+    dest: "/etc/yum.repos.d/"
+    mode: 0644
+
+- name: Upgrade all packages
+  become: true
+  yum:
+    name: "*"
+    state: latest

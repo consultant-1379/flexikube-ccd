@@ -1,0 +1,36 @@
+---
+- name: Remove manila-csi-node pods if found
+  shell: "{{ kubectl }} delete daemonset.apps/openstack-manila-csi-nodeplugin -n {{ manila_namespace }}"
+  ignore_errors: yes
+  register: output
+
+- name: Remove manila-csi-controllerplugin pods if found
+  shell: "{{ kubectl }} delete statefulset.apps/openstack-manila-csi-controllerplugin -n {{ manila_namespace }}"
+  ignore_errors: yes
+  register: output
+
+- name: Remove Manila service if found
+  shell: "{{ kubectl }} delete service/openstack-manila-csi-controllerplugin -n {{ manila_namespace }}"
+  ignore_errors: yes
+  register: output
+
+- name: Delete storage classes if exits
+  shell: "{{ kubectl }} delete sc {{ openstack_manila_storage_classes[os_sc_index].name }}"
+  ignore_errors: yes
+  loop: "{{ openstack_manila_storage_classes | default([]) }}"
+  loop_control:
+    index_var: os_sc_index
+  register: output
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (output.rc == 0 or "not found" in output.stderr)
+
+- name: Remove csi-nfs-node pods if found
+  shell: "{{ kubectl }} delete daemonset.apps/csi-nfs-node -n {{ manila_namespace }}"
+  ignore_errors: yes
+  register: output
+
+- name: Remove Manila secret if found
+  shell: "{{ kubectl }} delete secret {{ manila_secret_name }} -n {{ manila_namespace }}"
+  ignore_errors: yes
+  register: output

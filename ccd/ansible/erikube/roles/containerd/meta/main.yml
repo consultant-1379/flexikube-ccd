@@ -1,0 +1,4 @@
+---
+dependencies:
+- role: erikube-defaults
+- role: docker

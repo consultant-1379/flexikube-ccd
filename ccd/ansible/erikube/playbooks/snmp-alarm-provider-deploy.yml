@@ -1,0 +1,86 @@
+---
+- name: Configure SNMP Alarm Provider
+  hosts: master[0]
+  become: yes
+  roles:
+  - erikube-defaults
+  tasks:
+  - name: Create SNMP Alarm Provider secret config
+    block:
+    - name: create temporary config file
+      tempfile:
+        state: file
+        suffix: alarm-provider
+      register: tempfile_snmp_ap
+
+    - name: Store config to temporary file
+      copy:
+        content: "{{ snmp_ap_config | to_nice_json }}"
+        dest: "{{ tempfile_snmp_ap.path }}"
+
+    - name: Create SNMP Alarm secret in k8s cluster
+      shell: >-
+        /usr/local/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf
+        create secret generic snmp-alarm-provider-config --namespace monitoring
+        --from-file="{{ tempfile_snmp_ap.path }}"
+      register: create_secret
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: create_secret.rc == 0
+
+    - name: Create SNMP Alarm secret for accessing local registry
+      shell: |
+        {{ kubectl }} create secret docker-registry local-registry-secret \
+        --docker-server={{ 'registry.eccd.local:5000' if local_registry_user is defined and local_registry_user != "" else 'null.eccd.local' }} \
+        --docker-username={{ local_registry_user if local_registry_user is defined and local_registry_user != "" else 'null' }} \
+        --docker-password={{ local_registry_password if local_registry_password is defined and local_registry_password != "" else 'nopassword' }} -n monitoring \
+        --dry-run=client -o yaml | {{ kubectl }} apply -f -
+      register: result
+      become: true
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: result.rc == 0
+      ignore_errors: True
+      when: snmp_ap_enabled | default(false) | bool
+
+    - name: Delete temporary file
+      file:
+        path: "{{ tempfile_snmp_ap.path }}"
+        state: absent
+      when: tempfile_snmp_ap.path is defined
+    when:
+      - snmp_ap_enabled is defined
+      - snmp_ap_enabled
+      - snmp_ap_config is defined
+      - snmp_ap_config
+
+- name: Deploy ADP SNMP Alarm Provider
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+  vars:
+    - kube_image_prefix: "{{ docker_registry_host | default(default_registry) }}/"
+    - tarball_name: "{{ helm_charts.eric_fh_snmp_alarm_provider.tarball }}"
+  roles:
+    - erikube-defaults
+    - role: helm-chart-provisioner
+      when: snmp_ap_enabled | default(false) | bool
+      vars:
+        - chart_name: eric-fh-snmp-alarm-provider
+        - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '600s' }}"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - state: installed
+        - kube_namespace: monitoring
+        - values:
+            global:
+              registry:
+                # Remove the / from the registry url
+                url: "{{ kube_image_prefix | regex_replace('\\/$', '') }}"
+              pullSecret: "local-registry-secret"
+            images:
+              alarmprovider:
+                name: "{{ containers.monitoring.eric_fh_snmp_alarm_provider.split(':')[0] }}"
+                tag: "{{ containers.monitoring.eric_fh_snmp_alarm_provider.split(':')[1] }}"
+            service:
+              secret: snmp-alarm-provider-config

@@ -1,0 +1,589 @@
+---
+# Upgrade Release
+
+# NB. Before these tasks execute, the erikube-installer container must have
+# run to replace kube* binaries on host, but the kubelet must NOT have been
+# restarted to pick up the new version. This is because the steps below use
+# new version of kubeadm which expects the old version of kubelet. The
+# kublet restart is deferred until after kubeadm has upgraded the control
+# plane.
+
+- name: Verify that connectivity is established
+  shell: "{{ kubectl }} cluster-info | grep 'Kubernetes control plane'"
+  register: cmd_status
+  until: cmd_status.rc == 0
+  retries: 5
+  delay: 10
+  become: true
+
+# Create the new release config settings, using the values saved by kubeadm
+# init/join as a base. Note that kubeadm saves only the
+# ClusterConfiguration, so the InitConfiguration fields which have
+# different values for each node are not included and are preserved from
+# the init run.
+- name: Get kubeadm configset
+  command: "{{ kubectl }} get cm -n kube-system kubeadm-config -o=jsonpath='{.data.ClusterConfiguration}'"
+  register: result
+  until: result.rc == 0
+  retries: 5
+  delay: 10
+  become: true
+
+- name: Print to console kubeadm configset
+  debug:
+    msg: "{{ result.stdout_lines }}"
+
+- name: Create temp K8S config view file on ansible executor node
+  copy:
+    dest: "/tmp/{{ inventory_hostname }}_config_view.yml"
+    content: "{{ result.stdout }}"
+    mode: '0755'
+  delegate_to: localhost
+
+- name: Include kubeadm config values to variable
+  include_vars:
+    file: "/tmp/{{ inventory_hostname }}_config_view.yml"
+    name: currentvals
+
+- name: Remove the temp config view file
+  file:
+    path: "/tmp/{{ inventory_hostname }}_config_view.yml"
+    state: absent
+
+# Combine settings, write new config file and push it to K8s as a ConfigMap.
+- name: Create kubeadm config
+  block:
+    - name: Apply upgrade kubeadm config override settings
+      set_fact:
+        currentvals: "{{ currentvals | combine(upgrade_cfgs, recursive=True) }}"
+
+    - name: Set upgrade config file name
+      set_fact:
+        upgrade_cfgfile: "{{ kube_config_dir }}/kubeadm-config-{{ opt_kubernetes_version }}.yaml"
+        configfile: "{{ kube_config_dir }}/kubeadm-config.yaml"
+
+    - name: Write kubeadm config {{ upgrade_cfgfile }}
+      copy:
+        content: "{{ currentvals | to_nice_yaml }}"
+        dest: "{{ upgrade_cfgfile }}"
+      become: true
+
+    - name: Comment out kube-apiserver sni certificate
+      replace:
+        path: "{{ upgrade_cfgfile }}"
+        regexp: 'tls-sni-cert-key:'
+        replace: '#tls-sni-cert-key:'
+      when: "kube_api_cert is not defined or kube_api_key is not defined"
+
+      # Appending criSocket to kubeadm config ipv4 version
+    - name: Update kubeadm config {{ upgrade_cfgfile }} for ipv4
+      when: k8s_ip_version == "ipv4"
+      block:
+        - name: Prepare kubeadm configs
+          set_fact:
+            kubeadm_ipv4_init_cfg: "{{ lookup('template', 'kubeadm-init-cfg-ipv4.yml.j2') }}"
+            kubeadm_ipv4_kubelet_cfg: "{{ lookup('template', 'kubeadm-kubelet-cfg.yml.j2') }}"
+
+        - name: Comment out localAPIEndpoint from  ClusterConfiguration {{ upgrade_cfgfile }}
+          replace:
+            path: "{{ upgrade_cfgfile }}"
+            regexp: 'localAPIEndpoint:'
+            replace: '#localAPIEndpoint:'
+
+        - name: Comment out advertiseAddress from  ClusterConfiguration {{ upgrade_cfgfile }}
+          replace:
+            path: "{{ upgrade_cfgfile }}"
+            regexp: 'advertiseAddress:'
+            replace: '#advertiseAddress:'
+
+        - name: Append kubeadm init config to {{ upgrade_cfgfile }}
+          blockinfile:
+            block: "{{ kubeadm_ipv4_init_cfg }}"
+            dest: "{{ upgrade_cfgfile }}"
+            marker: "# {mark}-INIT-CONFIG #"
+            state: present
+          become: true
+
+        - name: Append kubeadm init config to {{ configfile }}
+          blockinfile:
+            block: "{{ kubeadm_ipv4_init_cfg }}"
+            dest: "{{ configfile }}"
+            marker: "# {mark}-INIT-CONFIG #"
+            state: present
+          become: true
+
+        - name: Append kubeadm kubelet config to {{ upgrade_cfgfile }}
+          blockinfile:
+            block: "{{ kubeadm_ipv4_kubelet_cfg }}"
+            dest: "{{ upgrade_cfgfile }}"
+            marker: "# {mark}-KUBELET-CONFIG #"
+            state: present
+          become: true
+
+        - name: Append kubeadm kubelet config to {{ configfile }}
+          blockinfile:
+            block: "{{ kubeadm_ipv4_kubelet_cfg }}"
+            dest: "{{ configfile }}"
+            marker: "# {mark}-KUBELET-CONFIG #"
+            state: present
+          become: true
+
+    - name: Update kubeadm config {{ upgrade_cfgfile }}
+      block:
+      - name: Update kubeadm config specific to (dualstack)
+        when: k8s_ip_version == "dualstack"
+        block:
+        - name: Insert readOnly option to ClusterConfiguration {{ upgrade_cfgfile }}
+          blockinfile:
+            path: "{{ upgrade_cfgfile }}"
+            insertafter: "name: apiserver-log"
+            block: |2
+                      readOnly: false
+
+        - name: Comment out localAPIEndpoint from  ClusterConfiguration {{ upgrade_cfgfile }}
+          replace:
+            path: "{{ upgrade_cfgfile }}"
+            regexp: 'localAPIEndpoint:'
+            replace: '#localAPIEndpoint'
+
+        - name: Comment out advertiseAddress from  ClusterConfiguration {{ upgrade_cfgfile }}
+          replace:
+            path: "{{ upgrade_cfgfile }}"
+            regexp: 'advertiseAddress:'
+            replace: '#advertiseAddress:'
+
+      - name: Get the Kube Apiserver Bind Address
+        debug:
+          msg: "The advertiseAddress is {{ kube_apiserver_bind_address }}"
+
+      - name: Prepare kubeadm configs
+        set_fact:
+          kubeadm_init_cfg: "{{ lookup('template', 'kubeadm-init-cfg.yml.j2') }}"
+          kubeadm_kube_proxy_cfg: "{{ lookup('template', 'kubeadm-kube-proxy-cfg.yaml.j2') }}"
+
+      - name: Append kubeadm init config to {{ upgrade_cfgfile }}
+        blockinfile:
+          block: "{{ kubeadm_init_cfg }}"
+          dest: "{{ upgrade_cfgfile }}"
+          marker: "# {mark}-INIT-CONFIG #"
+          state: present
+        become: true
+
+      - name: Append kubeadm kube-proxy config to {{ upgrade_cfgfile }}
+        blockinfile:
+          block: "{{ kubeadm_kube_proxy_cfg }}"
+          dest: "{{ upgrade_cfgfile }}"
+          marker: "# {mark}-KUBE-PROXY-CONFIG #"
+          state: present
+        become: true
+
+    - name: Prepare kubeadm configs
+      set_fact:
+        kubeadm_kubelet_cfg: "{{ lookup('template', 'kubeadm-kubelet-cfg.yml.j2') }}"
+
+    - name: Append kubeadm kubelet config to {{ upgrade_cfgfile }}
+      blockinfile:
+        block: "{{ kubeadm_kubelet_cfg }}"
+        dest: "{{ upgrade_cfgfile }}"
+        marker: "# {mark}-KUBELET-CONFIG #"
+        state: present
+      become: true
+
+    - name: Pull the erikube client container
+      become: yes
+      shell: "{{ ctr_cmd }} -n k8s.io image pull -u {{ local_registry_user }}:{{ local_registry_password }} {{ erikube_client_image }}"
+      when: local_registry_user is defined and local_registry_user != ""
+
+    - block:
+      - name: Pull the pause container if unauthorized
+        become: yes
+        shell: "{{ ctr_cmd }} -n k8s.io image pull {{ erikube_pause_image }}"
+        when: local_registry_user is not defined or local_registry_user == ""
+
+      - name: Pull the pause container if authorized
+        become: yes
+        shell: "{{ ctr_cmd }} -n k8s.io image pull -u {{ local_registry_user }}:{{ local_registry_password }} {{ erikube_pause_image }}"
+        when: local_registry_user is defined and local_registry_user != ""
+
+      - name: Tag the pause container with the tag k8s expects
+        become: yes
+        shell: "{{ ctr_cmd }} -n k8s.io image tag {{ erikube_pause_image }} {{ kubernetes_pause_image }}"
+        register: ctr_tag
+        failed_when: ctr_tag.rc != 0 and "already exists" not in ctr_tag.stderr
+
+      - name: Pull the coredns container if authorized
+        become: yes
+        shell: "{{ ctr_cmd }} -n k8s.io image pull -u {{ local_registry_user }}:{{ local_registry_password }} {{ coredns_image }}"
+        when: local_registry_user is defined and local_registry_user != ""
+
+      - name: Pull the coredns container if unauthorized
+        become: yes
+        shell: "{{ ctr_cmd }} -n k8s.io image pull {{ coredns_image }}"
+        when: local_registry_user is not defined or local_registry_user == ""
+
+      - name: Tag the coredns container with the tag k8s expects
+        become: yes
+        shell: "{{ ctr_cmd }} -n k8s.io image tag {{ coredns_image }} {{ kubernetes_coredns_image }}"
+        register: ctr_tag
+        failed_when: ctr_tag.rc != 0 and "already exists" not in ctr_tag.stderr
+
+      - name: Fix coredns image version in {{ upgrade_cfgfile }}
+        become: yes
+        shell: "sed -i 's/{{ opt_coredns_version }}/{{ major_coredns_version }}/g' {{ upgrade_cfgfile }}"
+
+      - name: Get imageRepository and trim '/' at end
+        shell: echo {{ opt_kubernetes_repo }} | sed -e 's/\/$//g'
+        register: coredns_image_repo
+
+      - name: Add coredns image repository in {{ upgrade_cfgfile }}
+        become: yes
+        lineinfile:
+          dest: "{{ upgrade_cfgfile }}"
+          line: "    imageRepository: {{ coredns_image_repo.stdout }}"
+          insertafter: "dns:"
+          state: present
+          firstmatch: yes
+
+      when: not image_based_deployment | default(false) | bool
+
+    - name: Update feature-gates in {{ upgrade_cfgfile }}
+      replace:
+        path: "{{ upgrade_cfgfile }}"
+        regexp: 'feature-gates:.*$'
+        replace: 'feature-gates: AllAlpha=false'
+
+    - name: Display kubeadm-config.yaml contents
+      command: cat {{ upgrade_cfgfile }}
+      register: config_output
+
+    - name: Print to console
+      debug:
+        msg: "{{ config_output.stdout_lines }}"
+
+    - name: Remove IPv6DualStack from {{ upgrade_cfgfile }}
+      become: yes
+      lineinfile:
+        path: "{{ upgrade_cfgfile }}"
+        regexp: "IPv6DualStack: false"
+        state: absent
+
+    - name: Load {{ upgrade_cfgfile }}
+      command: "{{ kubeadm_cmd }} init phase upload-config all --config {{ upgrade_cfgfile }} --v=5"
+      register: cmd_status
+      until: cmd_status.rc == 0
+      retries: 5
+      delay: 10
+      become: true
+
+# Check if kubeadm considers everything up to date
+- name: Plan kubeadm update
+  become: true
+  command: >-
+    {{ kubeadm_cmd }}
+    upgrade plan v{{ opt_kubernetes_version }}
+    --ignore-preflight-errors=all
+    --allow-experimental-upgrades
+    --allow-release-candidate-upgrades
+  register: kubeadm_plan
+  #skip error since ETCD version check might be failed due to ETCD upgrade
+  ignore_errors: yes
+
+- name: Set kubeadm_needed fact
+  set_fact:
+    kubeadm_needed: '{{ kubeadm_plan.stdout.find("you''re up-to-date") == -1 }}'
+
+- name: "Check kubeadm_needed value: {{ kubeadm_needed }}"
+  debug:
+    var: kubeadm_needed
+
+- name: Show kubeadm upgrade plan output when upgrade not needed
+  block:
+    - debug:
+        msg: "Kubeadm plan claims upgrade not needed for kubernetes v{{ opt_kubernetes_version }}. kubeadm plan output shown below"
+    - debug:
+        msg: "{{ kubeadm_plan.stdout.split('\n') }}"
+  when: not kubeadm_needed
+
+- name: Override kubeadm_needed for non AWS platforms
+  set_fact:
+    kubeadm_needed: true
+  when: not cloud_provider | default('') == 'aws'
+
+- name: Apply kubernetes update
+  block:
+    - name: Fetch nodes status via kubectl command
+      command: "{{ kubectl }} get nodes -o wide"
+      register: nodes_status
+      until: nodes_status.rc == 0
+      retries: 5
+      delay: 10
+      become: true
+
+    - name: Print nodes status
+      debug:
+        msg: "{{ nodes_status.stdout.split('\n') }}"
+        #verbosity: 2
+
+    - name: Upgrade master control plane using kubeadm
+      command: >-
+        {{ kubeadm_cmd }}
+        upgrade apply v{{ opt_kubernetes_version }}
+        --ignore-preflight-errors=all
+        --allow-experimental-upgrades
+        --allow-release-candidate-upgrades
+        --force --yes
+      register: kubeadm_upgrade
+      become: true
+      ignore_errors: yes
+      until: kubeadm_upgrade.rc == 0
+      retries: 3
+      delay: 10
+      environment:
+        PATH: /usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin:{{ ansible_env.PATH }}
+
+    - debug: { msg: "{{ kubeadm_upgrade.stdout.split('\n') }}" }
+    - debug: { msg: "{{ kubeadm_upgrade.stderr.split('\n') }}" }
+    - assert: { that: kubeadm_upgrade.rc == 0 }
+  when: kubeadm_needed
+
+- name: Delete /var/lib/kubelet/kubeadm-flags.env for 1.24 uplift
+  file:
+    state: absent
+    path: "/var/lib/kubelet/kubeadm-flags.env"
+  become: true
+
+- name: Wait for Kubernetes control plane PODs to be Running
+  shell: >
+    {{ kubectl }} -n kube-system get pod {{ item }}-{{ ansible_nodename }}
+    -o jsonpath={.status.phase} | grep Running
+  register: get_pod
+  become: true
+  with_items:
+    - kube-apiserver
+    - kube-scheduler
+    - kube-controller-manager
+  retries: 90
+  delay: 2
+  until: get_pod.rc == 0
+
+- name: Delete old kubelet server certificates
+  file:
+    state: absent
+    path: "/var/lib/kubelet/pki/{{ item }}"
+  loop:
+    - kubelet.crt
+    - kubelet.key
+  become: true
+
+- name: Remove RemoveSelfLink flag from featureGates
+  lineinfile:
+    path: /var/lib/kubelet/config.yaml
+    regexp: "RemoveSelfLink: false"
+    state: absent
+
+- name: Remove MixedProtocolLBService flag from featureGates
+  lineinfile:
+    path: /var/lib/kubelet/config.yaml
+    regexp: "MixedProtocolLBService: true"
+    state: absent
+
+- name: Enable new kubelet
+  systemd:
+    state: restarted
+    daemon_reload: yes
+    name: kubelet
+  become: true
+
+- name: verify that new kubelet is running
+  shell: "systemctl status kubelet | grep -i active"
+  register: kubelet_running
+  until: kubelet_running.rc == 0
+  retries: 10
+  delay: 20
+
+- name: Verify all master nodes are in Ready state
+  shell: "{{ kubectl }} get nodes | grep -i control-plane | grep -v Ready"
+  become: true
+  register: master_ready
+  failed_when: false
+  until: master_ready.stdout | length == 0
+  retries: 10
+  delay: 5
+
+# Configure authenticated local registry secret for kube-system namespace
+- name: Configure local registry
+  block:
+    - name: Create kube-system secret for accessing local registry
+      shell: |
+        {{ kubectl }} create secret docker-registry local-registry-secret \
+        --docker-server={{ 'registry.eccd.local:5000' if local_registry_user is defined and local_registry_user != "" else 'null.eccd.local' }} \
+        --docker-username={{ local_registry_user if local_registry_user is defined and local_registry_user != "" else 'null' }} \
+        --docker-password={{ local_registry_password if local_registry_password is defined and local_registry_password != "" else 'nopassword' }} -n kube-system \
+        --dry-run=client -o yaml | {{ kubectl }} apply -f -
+      register: result
+      become: yes
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: result.rc == 0
+
+    - name: Patch kube-system service accounts to include imagePullSecrets to templates
+      become: yes
+      register: get_patch
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: (get_patch.rc == 1)
+      failed_when: false
+      changed_when: false
+      shell: |
+        {{ kubectl }} get serviceaccount -n kube-system -o name | sed -e 's/.*\///g' | \
+        xargs -I {} {{ kubectl }} patch serviceaccount {} -n kube-system -p '{"imagePullSecrets": [{"name": "local-registry-secret"}]}'
+  when:
+    - inventory_hostname == first_master
+    - local_registry_user is defined and local_registry_user != ""
+
+# Write new config file from possibly updated kubeadm apiversion and
+# store it in kubeadm-config.yaml as this is what is read when kubeadm
+# init is used. The earlier stored version may have the old
+# apiversion for the first master that is upgraded.
+- name: Create kubeadm config
+  block:
+    - name: Get kubeadm configset
+      command: "{{ kubectl }} get cm -n kube-system kubeadm-config -o=jsonpath='{.data.ClusterConfiguration}'"
+      register: result
+      until: result.rc == 0
+      retries: 5
+      delay: 10
+      become: true
+
+    - name: Create temp K8S config view file on ansible executor node
+      copy:
+        dest: "/tmp/{{ inventory_hostname }}_config_view.yml"
+        content: "{{ result.stdout }}"
+        mode: '0755'
+      delegate_to: localhost
+
+    - name: Include kubeadm config values to variable
+      include_vars:
+        file: "/tmp/{{ inventory_hostname }}_config_view.yml"
+        name: currentvals
+
+    - name: Remove the temp config view file
+      file:
+        path: "/tmp/{{ inventory_hostname }}_config_view.yml"
+        state: absent
+
+    - name: Set upgrade config file name
+      set_fact:
+        upgrade_cfgfile: "{{ kube_config_dir }}/kubeadm-config.yaml"
+
+    - name: Write kubeadm config {{ upgrade_cfgfile }}
+      copy:
+        content: "{{ currentvals | to_nice_yaml }}"
+        dest: "{{ upgrade_cfgfile }}"
+      become: true
+
+    - name: Update feature-gates to Kubelet
+      replace:
+        path: "{{ upgrade_cfgfile }}"
+        regexp: 'feature-gates:.*$'
+        replace: 'feature-gates: AllAlpha=false'
+
+    - name: Update kubeadm config {{ upgrade_cfgfile }}
+      block:
+        - name: Prepare kubeadm configs
+          set_fact:
+            kubeadm_init_cfg: "{{ lookup('template', 'kubeadm-init-cfg.yml.j2') }}"
+            kubeadm_kube_proxy_cfg: "{{ lookup('template', 'kubeadm-kube-proxy-cfg.yaml.j2') }}"
+            kubeadm_kubelet_cfg: "{{ lookup('template', 'kubeadm-kubelet-cfg.yml.j2') }}"
+
+        - name: Append kubeadm init config to {{ upgrade_cfgfile }}
+          blockinfile:
+            block: "{{ kubeadm_init_cfg }}"
+            dest: "{{ upgrade_cfgfile }}"
+            marker: "# {mark}-INIT-CONFIG #"
+            state: present
+          become: true
+
+        - name: Append kubeadm kube-proxy config to {{ upgrade_cfgfile }}
+          blockinfile:
+            block: "{{ kubeadm_kube_proxy_cfg }}"
+            dest: "{{ upgrade_cfgfile }}"
+            marker: "# {mark}-KUBE-PROXY-CONFIG #"
+            state: present
+          become: true
+
+        - name: Append kubeadm kubelet config to {{ upgrade_cfgfile }}
+          blockinfile:
+            block: "{{ kubeadm_kubelet_cfg }}"
+            dest: "{{ upgrade_cfgfile }}"
+            marker: "# {mark}-KUBELET-CONFIG #"
+            state: present
+          become: true
+          when: k8s_ip_version == "ipv6"
+
+
+- set_fact:
+    upgrade_kubeadm_config: "{{ kube_config_dir }}/kubeadm-config-{{ opt_kubernetes_version }}.yaml"
+    base_kubeadm_config: "{{ kube_config_dir }}/kubeadm-config.yaml"
+
+- name: Add PSS default rules file
+  become: yes
+  lineinfile:
+    path: "{{ upgrade_kubeadm_config }}"
+    line: '        admission-control-config-file: /etc/kubernetes/policies/pss-default-rules.yaml'
+    insertafter: 'enable-admission-plugins:'
+    state: present
+    firstmatch: yes
+
+- name: Add PSS volume
+  become: yes
+  blockinfile:
+    path: "{{ upgrade_kubeadm_config }}"
+    insertbefore: 'hostPath: /var/log/kube-apiserver'
+    block: |2
+          - hostPath: "/etc/kubernetes/policies"
+            mountPath: "/etc/kubernetes/policies"
+            name: pss-config
+            readOnly: true
+    state: present
+
+- name: Copy kubeadm config for IBD
+  copy:
+    src: "{{ upgrade_kubeadm_config }}"
+    dest: "{{ base_kubeadm_config }}"
+    remote_src: yes
+  become: true
+  when: image_based_deployment | default(false) | bool
+
+- name: Get group ID for ansible user
+  become: no
+  command: id -g
+  register: id_g
+  changed_when: false
+
+- set_fact:
+    gid: "{{ id_g.stdout }}"
+
+- name: Create {{ ansible_env.HOME }}/.kube directory
+  file:
+    path: "{{ ansible_env.HOME }}/.kube"
+    state: directory
+    mode: 0700
+    owner: "{{ ansible_env.USER }}"
+    group: "{{ gid }}"
+  become: yes
+
+- name: Copy /etc/kubernetes/admin.conf to {{ ansible_env.HOME }}/.kube/config
+  copy:
+    src: /etc/kubernetes/admin.conf
+    dest: "{{ ansible_env.HOME }}/.kube/config"
+    remote_src: yes
+    owner: "{{ ansible_env.USER }}"
+    group: "{{ gid }}"
+    mode: 0600
+  become: yes
+
+- name: Deploy localhost DNS
+  include_role:
+    name: kube-common
+    tasks_from: deploy-nodelocaldns

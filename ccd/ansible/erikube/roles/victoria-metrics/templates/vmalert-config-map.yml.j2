@@ -1,0 +1,460 @@
+apiVersion: v1
+{% raw %}
+kind: ConfigMap
+metadata:
+  name: eric-victoria-metrics-vmalert
+  namespace: monitoring
+data:
+  alert-rules.yaml: |
+    groups:
+    - name: K8sResource
+      rules:
+      - alert: Deployment Status Error
+        annotations:
+          description: 'Deployment {{ $labels.deployment }} in namespace {{ $labels.namespace
+            }} is running {{ $value }}% replicas.'
+          summary: 'Deployment {{ $labels.deployment }} in namespace {{ $labels.namespace }}
+            is running less than desired replicas ({{ with printf `kube_deployment_status_replicas_available{
+            job="kubernetes-service-endpoints",deployment="%s"}` $labels.deployment | query }}
+            {{- . | first | value -}} {{ end }}/{{ with printf `kube_deployment_spec_replicas{
+            job="kubernetes-service-endpoints",deployment="%s"}` $labels.deployment | query }}
+            {{- . | first | value -}} {{ end }})'
+        expr: (max by(instance, deployment, namespace, job)
+          (ceil(kube_deployment_status_replicas_available{job="kubernetes-service-endpoints",namespace=~"etcd|ingress-nginx|k8s-registry|kube-node-lease|kube-public|kube-system|monitoring|ccd-logging|ccd-ingress"}
+          / kube_deployment_spec_replicas{job="kubernetes-service-endpoints",namespace=~"etcd|ingress-nginx|k8s-registry|kube-node-lease|kube-public|kube-system|monitoring|ccd-logging|ccd-ingress"}  * 100))) < 100
+        for: 10m
+        labels:
+          eriAlarmActiveEventType: 1
+          eriAlarmActiveMajorType: 193
+          eriAlarmActiveMinorType: 9895959
+          eriAlarmActiveProbableCause: 165
+          severity: minor
+          resource: '{{ $labels.deployment }}'
+          type: 'K8sResource'
+      - alert: StatefulSet Status Error
+        annotations:
+          description: 'StatefulSet {{ $labels.statefulset }} in namespace {{ $labels.namespace
+            }} is running {{ $value }}% replicas.'
+          summary: 'StatefulSet {{ $labels.statefulset }} in namespace {{ $labels.namespace
+            }} is running less than desired replicas ({{ with printf `kube_statefulset_status_replicas_ready{
+            job="kubernetes-service-endpoints",statefulset="%s"}` $labels.statefulset | query }}
+            {{- . | first | value -}} {{ end }}/{{ with printf `kube_statefulset_replicas{
+            job="kubernetes-service-endpoints",statefulset="%s"}` $labels.statefulset | query }}
+            {{- . | first | value -}} {{ end }})'
+        expr: (max by(instance, statefulset, namespace, job)
+          (ceil(kube_statefulset_status_replicas_ready{job="kubernetes-service-endpoints",namespace=~"etcd|ingress-nginx|k8s-registry|kube-node-lease|kube-public|kube-system|monitoring|ccd-logging|ccd-ingress"}
+          / kube_statefulset_replicas{job="kubernetes-service-endpoints",namespace=~"etcd|ingress-nginx|k8s-registry|kube-node-lease|kube-public|kube-system|monitoring|ccd-logging|ccd-ingress"}  * 100))) < 100
+        for: 10m
+        labels:
+          eriAlarmActiveEventType: 1
+          eriAlarmActiveMajorType: 193
+          eriAlarmActiveMinorType: 9895960
+          eriAlarmActiveProbableCause: 165
+          severity: minor
+          resource: '{{ $labels.statefulset }}'
+          type: 'K8sResource'
+      - alert: DaemonSet Status Error
+        annotations:
+          description: 'DaemonSet {{ $labels.daemonset }} in namespace {{ $labels.namespace
+            }} has {{ $value }} pods unavailable.'
+          summary: 'DaemonSet {{ $labels.daemonset }} in namespace {{ $labels.namespace
+            }} has ({{ $value }}/{{ with printf `kube_daemonset_status_desired_number_scheduled{
+            job="kubernetes-service-endpoints",daemonset="%s"}` $labels.daemonset | query }}
+            {{- . | first | value -}} {{ end }}) pods unavailable.'
+        expr: (max by(instance, daemonset, namespace, job)
+          (kube_daemonset_status_number_unavailable{job="kubernetes-service-endpoints",namespace=~"etcd|ingress-nginx|k8s-registry|kube-node-lease|kube-public|kube-system|monitoring|ccd-logging|ccd-ingress"})) != 0
+        for: 10m
+        labels:
+          eriAlarmActiveEventType: 1
+          eriAlarmActiveMajorType: 193
+          eriAlarmActiveMinorType: 9895961
+          eriAlarmActiveProbableCause: 165
+          severity: minor
+          resource: '{{ $labels.daemonset }}'
+          type: 'K8sResource'
+    - name: Cluster
+      rules:
+      - alert: ETCD alarm list not empty
+        annotations:
+          description: ETCD alarm list is not empty, {{ $value }} alarms are active
+          summary: ETCD alarm list is not empty, {{ $value }} alarms are active
+        expr: (max by(instance, job)(etcd_active_alarms{job="kubernetes-pods"})) > 0
+        for: 1m
+        labels:
+          eriAlarmActiveEventType: 1
+          eriAlarmActiveMajorType: 193
+          eriAlarmActiveMinorType: 9895962
+          eriAlarmActiveProbableCause: 1
+          severity: major
+          resource: 'etcd'
+          type: 'Cluster'
+      - alert: Kube Api Down
+        annotations:
+          description: Kube Api is Down
+          summary: Kube Api connectivity is lost
+        expr: max by(instance, job) (kube_api_health_state{job="kubernetes-pods"}==0)
+        for: 1m
+        labels:
+          eriAlarmActiveEventType: 1
+          eriAlarmActiveMajorType: 193
+          eriAlarmActiveMinorType: 9895963
+          eriAlarmActiveProbableCause: 165
+          severity: critical
+          resource: 'kube-api'
+          type: 'Cluster'
+      - alert: CCD container registry unavailable
+        annotations:
+          description: CCD container registry unavailable
+          summary: CCD container registry unavailable
+        expr: max by(instance, job) (ccd_container_registry_availability{job="kubernetes-pods"}==0)
+        for: 1m
+        labels:
+          eriAlarmActiveEventType: 1
+          eriAlarmActiveMajorType: 193
+          eriAlarmActiveMinorType: 9895966
+          eriAlarmActiveProbableCause: 165
+          severity: critical
+          resource: 'registry'
+          type: 'Cluster'
+      - alert: Application container registry unavailable
+        annotations:
+          description: Application container registry unavailable
+          summary: Application container registry unavailable
+        expr: max by(instance, job) (ccd_application_container_registry_availability{job="kubernetes-pods"}==0)
+        for: 1m
+        labels:
+          eriAlarmActiveEventType: 1
+          eriAlarmActiveMajorType: 193
+          eriAlarmActiveMinorType: 9895967
+          eriAlarmActiveProbableCause: 165
+          severity: critical
+          resource: 'registry'
+          type: 'Cluster'
+    - name: Instances
+      rules:
+      - alert: High CPU load
+        annotations:
+          description: CPU load is {{ $value }}
+          summary: High CPU load - {{ $labels.node }} / {{ $labels.label_node_uuid
+            }} ({{ $value }}%)
+        expr: (max by(instance, node, job, label_node_uuid) (kube_node_labels{job="kubernetes-service-endpoints"}
+          * on(node) group_left(instance) label_replace(((ceil((1 - (avg by (instance)
+          (rate(node_cpu_seconds_total{job="kubernetes-service-endpoints",mode="idle"}[5m]))))*1000)/10)
+          * on(instance) group_left(nodename) node_uname_info{job="kubernetes-service-endpoints"}),
+          "node", "$1", "nodename", "(.+)"))) > 80
+        for: 1m
+        labels:
+          eriAlarmActiveEventType: 5
+          eriAlarmActiveMajorType: 193
+          eriAlarmActiveMinorType: 9895937
+          eriAlarmActiveProbableCause: 207
+          severity: major
+      - alert: High Root Disk Utilization
+        annotations:
+          description: Root disk used is {{ $value }}
+          summary: High Root Disk Utilization - {{ $labels.node }} / {{ $labels.label_node_uuid
+            }} ({{ $value }}%)
+        expr: (max by(instance, node, job, label_node_uuid) (kube_node_labels{job="kubernetes-service-endpoints"}
+          * on(node) group_left(instance) label_replace(((ceil((1 - (node_filesystem_avail_bytes{job="kubernetes-service-endpoints",mountpoint="/"}/node_filesystem_size_bytes{job="kubernetes-service-endpoints",mountpoint="/"}))*1000)/10)
+          * on(instance) group_left(nodename) node_uname_info{job="kubernetes-service-endpoints"}),
+          "node", "$1", "nodename", "(.+)"))) > 80
+        for: 1m
+        labels:
+          eriAlarmActiveEventType: 5
+          eriAlarmActiveMajorType: 193
+          eriAlarmActiveMinorType: 9895938
+          eriAlarmActiveProbableCause: 100541
+          severity: major
+      - alert: Node Unavailable
+        annotations:
+          description: Node down or docker daemon down
+          summary: Node Unavailable - {{ $labels.node }} / {{ $labels.label_node_uuid }}
+        expr: max by (instance, node, job, label_node_uuid) (kube_node_status_condition{job="kubernetes-service-endpoints", condition="Ready", status="true"} == 0)
+          * on (node) group_left(label_node_uuid) kube_node_labels{job="kubernetes-service-endpoints"}
+          or  label_replace(label_replace(up{job="director-monitoring"}==0, "label_node_uuid", "$1", "node_uuid", "(.+)" ),  "node",  "$1", "node_name", "(.+)")
+        for: 1m
+        labels:
+          eriAlarmActiveEventType: 1
+          eriAlarmActiveMajorType: 193
+          eriAlarmActiveMinorType: 9895939
+          eriAlarmActiveProbableCause: 165
+          severity: critical
+      - alert: High Memory usage
+        annotations:
+          description: Available memory is at {{ $value }}%
+          summary: 'High Memory usage - {{ $labels.node }} / {{ $labels.label_node_uuid }} (Available memory : {{ $value }}%)'
+        expr: (max by(instance, node, job, label_node_uuid) (kube_node_labels{job="kubernetes-service-endpoints"}
+          * on(node) group_left(instance) label_replace((ceil(100 * (node_memory_MemAvailable_bytes{job="kubernetes-service-endpoints"}
+          / node_memory_MemTotal_bytes{job="kubernetes-service-endpoints"})) * on(instance)
+          group_left(nodename) node_uname_info{job="kubernetes-service-endpoints"}), "node",
+          "$1", "nodename", "(.+)"))) < 20
+        for: 1m
+        labels:
+          eriAlarmActiveEventType: 5
+          eriAlarmActiveMajorType: 193
+          eriAlarmActiveMinorType: 9895940
+          eriAlarmActiveProbableCause: 207
+          severity: major
+      - alert: NIC Outage
+        annotations:
+          description: NIC Outage on {{ $labels.node }} / {{ $labels.label_node_uuid }} / {{ $labels.device }}
+          summary: NIC Outage on {{ $labels.node }} / {{ $labels.label_node_uuid }} / {{ $labels.device }}
+        expr: max by(instance, device, job, label_node_uuid, node) (kube_node_labels{job="kubernetes-service-endpoints"}
+          * on(node) group_right(label_node_uuid,job)
+          label_replace(((node_network_carrier{job="kubernetes-service-endpoints", device!="docker0"} == 0
+          and on(device,instance) (node_network_protocol_type{job="kubernetes-service-endpoints"} == 1))
+          * on(instance) group_left(nodename) node_uname_info{job="kubernetes-service-endpoints"}),
+          "node", "$1", "nodename", "(.+)"))
+        for: 1m
+        labels:
+          eriAlarmActiveEventType: 2
+          eriAlarmActiveMajorType: 193
+          eriAlarmActiveMinorType: 9895941
+          eriAlarmActiveProbableCause: 8
+          severity: major
+          resource: '{{ $labels.device }}'
+      - alert: ECFE Config Stale
+        annotations:
+          description: ECFE config is stale in pod {{ $labels.kubernetes_pod_name }} on node {{ $labels.node }} / {{ $labels.label_node_uuid }}
+          summary: ECFE config is stale in pod {{ $labels.kubernetes_pod_name }} on node {{ $labels.node }} / {{ $labels.label_node_uuid }}
+        expr: (max by (instance, node, job, kubernetes_pod_name, label_node_uuid)
+         (ecfe_speaker_k8s_config_stale or metallb_k8s_client_config_stale_bool) * on(node) group_left(label_node_uuid) kube_node_labels) == 1
+        for: 5s
+        labels:
+          eriAlarmActiveEventType: 4
+          eriAlarmActiveMajorType: 193
+          eriAlarmActiveMinorType: 9895942
+          eriAlarmActiveProbableCause: 159
+          severity: major
+          resource: '{{ $labels.kubernetes_pod_name }}'
+      - alert: Certificate Expiry Major
+        annotations:
+          description: Certificate {{ $labels.label_node_uuid }}:{{ $labels.path }} about to expire
+          summary: Certificate {{ $labels.label_node_uuid }}:{{ $labels.path }} with subject {{ $labels.subject }} issued by {{ $labels.issuer }}
+            on node {{ $labels.node }} about to expire in {{ $value }} days
+        expr: max by(instance, node, path, job, issuer, subject, label_node_uuid)
+          (label_replace(ceil((ssl_certificate_expiry_seconds{path !~"/host/etc/etcd/ca/.+" , path !~"/host/etc/kubernetes/etcd/master-ca.crt", path !~"/host/etc/etcd/generated_certs/kubernetes-master.+"})/86400) <= 30
+          and ceil((ssl_certificate_expiry_seconds{path !~"/host/etc/etcd/ca/.+", path !~"/host/etc/kubernetes/etcd/master-ca.crt", path !~"/host/etc/etcd/generated_certs/kubernetes-master.+"})/86400) > 15, "node","$1", "nodename", "(.+)")
+          * on(node) group_left(label_node_uuid) kube_node_labels{job="kubernetes-service-endpoints"})
+        for: 1m
+        labels:
+          eriAlarmActiveEventType: 1
+          eriAlarmActiveMajorType: 193
+          eriAlarmActiveMinorType: 9895943
+          eriAlarmActiveProbableCause: 1
+          severity: major
+          resource: '{{ $labels.path }}'
+      - alert: Certificate Expiry Critical
+        annotations:
+          description: Certificate {{ $labels.label_node_uuid }}:{{ $labels.path }} about to expire
+          summary: Certificate {{ $labels.label_node_uuid }}:{{ $labels.path }} with subject {{ $labels.subject }} issued by {{ $labels.issuer }}
+            on node {{ $labels.node }} about to expire in {{ $value }} days
+        expr: max by(instance, node, path, job, issuer, subject, label_node_uuid)
+          (label_replace(ceil((ssl_certificate_expiry_seconds{path !~"/host/etc/etcd/ca/.+", path !~"/host/etc/kubernetes/etcd/master-ca.crt", path !~"/host/etc/etcd/generated_certs/kubernetes-master.+"})/86400) <= 15 , "node","$1", "nodename", "(.+)")
+          * on(node) group_left(label_node_uuid) kube_node_labels{job="kubernetes-service-endpoints"})
+        for: 1m
+        labels:
+          eriAlarmActiveEventType: 1
+          eriAlarmActiveMajorType: 193
+          eriAlarmActiveMinorType: 9895944
+          eriAlarmActiveProbableCause: 1
+          severity: critical
+          resource: '{{ $labels.path }}'
+      - alert: NeLS Connectivity Alarm
+        annotations:
+          description: NeLS {{ $labels.connectivityType }} Connection state is {{ $labels.connection_state }}
+          summary: NeLS {{ $labels.connectivityType }} Connection state is {{ $labels.connection_state }}
+        expr: license_nels_connectivity{connection_state=~"DISCONNECTED|UNKNOWN"} == 1 or asih_nels_connectivity_errors >= 1
+        for: 5m
+        labels:
+          eriAlarmActiveEventType: 2
+          eriAlarmActiveMajorType: 193
+          eriAlarmActiveMinorType: 9895953
+          eriAlarmActiveProbableCause: 22
+          severity: critical
+      - alert: LicenseManager Connectivity Alarm
+        annotations:
+          description: LicenseManager Connection state is {{ $labels.connection_state }}
+          summary: LicenseManager Connection state is {{ $labels.connection_state }}
+        expr: max by(instance, node, job, connection_state)
+          (license_consumer_connection_state{connection="LM", connection_state="DISCONNECTED"}==1
+          or license_consumer_connection_state{connection="LM", connection_state="UNKNOWN"}==1)
+          * on(node) group_left(label_node_uuid) kube_node_labels{job="kubernetes-service-endpoints"}
+        for: 5m
+        labels:
+          eriAlarmActiveEventType: 1
+          eriAlarmActiveMajorType: 193
+          eriAlarmActiveMinorType: 9895954
+          eriAlarmActiveProbableCause: 1
+          severity: critical
+      - alert: Invalid License Alarm
+        annotations:
+          description: License Flag-{{ $labels.license_flag }} Key-{{ $labels.license }} is
+            invalid. Reason - License is {{ $labels.license_status }}
+          summary: License Flag-{{ $labels.license_flag }} Key-{{ $labels.license }} is
+            invalid. Reason - License is {{ $labels.license_status }}
+        expr: max by(instance, node, job, license_flag, license, license_status)
+          (license_consumer_license_status{license_status="EXPIRED"}==1
+          or license_consumer_license_status{license_status="NOT_FOUND"}==1)
+          * on(node) group_left(label_node_uuid) kube_node_labels{job="kubernetes-service-endpoints"}
+        for: 5m
+        labels:
+          eriAlarmActiveEventType: 1
+          eriAlarmActiveMajorType: 193
+          eriAlarmActiveMinorType: 9895955
+          eriAlarmActiveProbableCause: 1
+          severity: critical
+      - alert: Gateway Unavailable Alarm
+        annotations:
+          description: Gateway unavailable in pod {{ $labels.kubernetes_pod_name }}
+            on instance {{ $labels.node }} / {{ $labels.label_node_uuid }}
+          summary: Gateway unavailable in pod {{ $labels.kubernetes_pod_name }}
+            on instance {{ $labels.node }} / {{ $labels.label_node_uuid }}
+        expr: max by(instance, node, job, kubernetes_pod_name, label_node_uuid)
+          (ecfe_speaker_peer_unavailable == 1 or ecfe_speaker_peer_flapping_indicator > 2)
+          * on(node) group_left(label_node_uuid) kube_node_labels{job="kubernetes-service-endpoints"}
+        for: 1m
+        labels:
+          eriAlarmActiveEventType: 2
+          eriAlarmActiveMajorType: 193
+          eriAlarmActiveMinorType: 9895956
+          eriAlarmActiveProbableCause: 26
+          severity: critical
+      - alert: ETCD instance Unavailable
+        annotations:
+          description: ETCD instance Unavailable
+          summary: ETCD instance unavailable - {{ $labels.node }} / {{ $labels.label_node_uuid }}
+        expr: (max by(label_node_uuid, job, instance, node, ip) (kube_node_labels{job="kubernetes-service-endpoints"}
+          * on(node) group_left(instance, ip) label_replace(label_replace((up{job="kubernetes-service-endpoints-etcd"} == 0), "ip", "$1", "instance", "(.+?):.*")
+          * on(ip) group_left(nodename)
+          label_replace(node_uname_info{job="kubernetes-service-endpoints"}, "ip", "$1", "instance", "(.+?):.*"), "node", "$1", "nodename", "(.*)")))
+        for: 1m
+        labels:
+          eriAlarmActiveEventType: 1
+          eriAlarmActiveMajorType: 193
+          eriAlarmActiveMinorType: 9895957
+          eriAlarmActiveProbableCause: 165
+          severity: critical
+      - alert: Node clock not synchronised
+        annotations:
+          description: Node clock not synchronised
+          summary: Node clock not synchronised at {{ $labels.node }} / {{ $labels.label_node_uuid }}
+        expr: (max by(instance, node, job, label_node_uuid) (kube_node_labels{job="kubernetes-service-endpoints"}
+          * on(node) group_left(instance) label_replace((((node_timex_sync_status==0))
+          * on(instance) group_left(nodename)node_uname_info{job="kubernetes-service-endpoints"}),"node", "$1", "nodename", "(.+)")))
+        for: 1m
+        labels:
+          eriAlarmActiveEventType: 5
+          eriAlarmActiveMajorType: 193
+          eriAlarmActiveMinorType: 9895958
+          eriAlarmActiveProbableCause: 70
+          severity: major
+      - alert: NTP Sources Unavailable
+        annotations:
+          description: NTP Sources for {{ $labels.node }} has {{ $value }} unavailable
+          summary: NTP Sources for {{ $labels.node }} has ({{ $value }}/{{ with printf `count(chronyd_peer_status{job="kubernetes-service-endpoints"}) by (instance)` | query }}
+           {{- . | first | value -}} {{ end }}) unavailable
+        expr: (max by(label_node_uuid, job, instance, node, ip) (kube_node_labels{job="kubernetes-service-endpoints"}
+          * on(node) group_left(instance, ip) label_replace(label_replace((count(chronyd_peer_status==1) by (instance) != 0), "ip", "$1", "instance", "(.+?):.*")
+          * on(ip) group_left(nodename) label_replace(node_uname_info{job="kubernetes-service-endpoints"}, "ip", "$1", "instance", "(.+?):.*"), "node", "$1", "nodename", "(.*)")))
+        for: 1m
+        labels:
+          eriAlarmActiveEventType: 1
+          eriAlarmActiveMajorType: 193
+          eriAlarmActiveMinorType: 9895965
+          eriAlarmActiveProbableCause: 70
+          severity: major
+      - alert: ETCD member unstarted
+        annotations:
+          description: ETCD member {{ $labels.node }} / {{ $labels.label_node_uuid }} is unstarted
+          summary: ETCD member {{ $labels.node }} / {{ $labels.label_node_uuid }} is unstarted
+        expr: max by(instance, job, node, label_node_uuid)(label_replace(label_replace(etcd_member_started{job="kubernetes-pods"}, "ip", "$1", "member", "(.+)")
+          * on(ip) group_left(nodename) label_replace(node_uname_info{job="kubernetes-service-endpoints"}, "ip", "$1", "instance", "(.+?):.*"), "node", "$1", "nodename", "(.+)")
+          * on (node) group_left(label_node_uuid) kube_node_labels{job="kubernetes-service-endpoints"})==0
+        for: 1m
+        labels:
+          eriAlarmActiveEventType: 1
+          eriAlarmActiveMajorType: 193
+          eriAlarmActiveMinorType: 9895964
+          eriAlarmActiveProbableCause: 1
+          severity: major
+          resource: 'etcd'
+          severity: major
+      - alert: NTP sync Last offset threshold crossed
+        annotations:
+          description: NTP sync Last offset threshold crossed at {{ $labels.node }} / {{ $labels.label_node_uuid }}
+          summary: NTP sync Last offset threshold crossed at {{ $labels.node }} / {{ $labels.label_node_uuid }} with an offset of {{ $value }} seconds
+{% endraw %}
+        expr: (max by(instance, node, job, label_node_uuid) (kube_node_labels{job="kubernetes-service-endpoints"}
+          * on(node) group_left(instance) label_replace((((abs(node_clock_offset_seconds) > {{ pm_victoria_metrics_ntp_offset_threshold }} ))
+          * on(instance) group_left(nodename)node_uname_info{job="kubernetes-service-endpoints"}),"node", "$1", "nodename", "(.+)")))
+{% raw %}
+        for: 1m
+        labels:
+          eriAlarmActiveEventType: 5
+          eriAlarmActiveMajorType: 193
+          eriAlarmActiveMinorType: 9895968
+          eriAlarmActiveProbableCause: 70
+          severity: major
+      - record: node_cpu_record
+        expr: (max by(instance, node, job, label_node_uuid) (kube_node_labels{job="kubernetes-service-endpoints"}
+          * on(node) group_left(instance) label_replace(((ceil((1 - (avg by (instance)
+          (rate(node_cpu_seconds_total{job="kubernetes-service-endpoints",mode="idle"}[5m]))))*1000)/10)
+          * on(instance) group_left(nodename) node_uname_info{job="kubernetes-service-endpoints"}),
+          "node", "$1", "nodename", "(.+)")))
+      - record: node_memory_record
+        expr: (max by(instance, node, job, label_node_uuid) (kube_node_labels{job="kubernetes-service-endpoints"}
+          * on(node) group_left(instance) label_replace((ceil(100 * (1 - (node_memory_MemAvailable_bytes{job="kubernetes-service-endpoints"}
+          / node_memory_MemTotal_bytes{job="kubernetes-service-endpoints"}))) * on(instance)
+          group_left(nodename) node_uname_info{job="kubernetes-service-endpoints"}), "node",
+          "$1", "nodename", "(.+)")))
+      - record: node_disk_utilization_record
+        expr: (max by(instance, node, job, label_node_uuid) (kube_node_labels{job="kubernetes-service-endpoints"}
+          * on(node) group_left(instance) label_replace(((ceil((1 - (node_filesystem_avail_bytes{job="kubernetes-service-endpoints",mountpoint="/"}
+          / node_filesystem_size_bytes{job="kubernetes-service-endpoints",mountpoint="/"}))*1000)/10)
+          * on(instance) group_left(nodename) node_uname_info{job="kubernetes-service-endpoints"}),
+          "node", "$1", "nodename", "(.+)")))
+      - record: license_nels_connectivity
+        expr: max by(instance, node, job, connection_state)
+          (license_consumer_connection_state{connection="NeLS"})
+          * on(node) group_left(label_node_uuid) kube_node_labels{job="kubernetes-service-endpoints"}
+        labels:
+          connectivityType: License
+      - record: asih_nels_connectivity_errors
+        expr: max by(instance, node, job)
+          (increase(asih_application_info_reports_http_request_errors_total{job="kubernetes-pods"}[30m]))
+          * on(node) group_left(label_node_uuid) kube_node_labels{job="kubernetes-service-endpoints"}
+        labels:
+          connectivityType: Application System Info Handler
+          connection_state: 'DISCONNECTED'
+    - name: ISP
+      rules:
+      - alert: Node Down
+        annotations:
+          description: VM down or docker daemon down
+          summary: Node Down - {{ $labels.instance }} / {{ $labels.node_uuid }}
+        expr: max by (instance, node, job, node_uuid) (up{job="kubernetes-nodes"}==0)
+        for: 1m
+        labels:
+          ISPEventType: Node Down
+          AlertType: ISP
+      - alert: Api Server Unavailable
+        annotations:
+          description: K8S API Server down
+          summary: Server Unavailable - {{ $labels.instance }} / {{ $labels.node_uuid }}
+        expr: max by (instance, node, job, node_uuid) (up{job="kubernetes-apiservers"}==0)
+        for: 1m
+        labels:
+          ISPEventType: Api Server Unavailable
+          AlertType: ISP
+      - alert: Cluster Upgrade Process
+        annotations:
+          description: Cluster upgrade is in progress
+          summary: Cluster upgrade is in progress from {{ $labels.current_version }} to {{ $labels.target_version }}
+        expr: (upgrade_in_progress{job="clusterupgrade"}) == 1
+        for: 5s
+        labels:
+          ISPEventType: Upgrade Start
+          AlertType: ISP
+          severity: warning
+{% endraw %}

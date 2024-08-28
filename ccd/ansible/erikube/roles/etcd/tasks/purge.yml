@@ -1,0 +1,21 @@
+---
+- name: Include etcd default vars
+  include_vars: roles/etcd/defaults/main.yml
+
+- name: Disable service {{ etcd_service }}
+  systemd:
+    name: "{{ etcd_service }}"
+    state: stopped
+    enabled: no
+  ignore_errors: True
+
+- name: Purge all directories/files
+  file:
+    path: "{{ item }}"
+    state: absent
+  with_items:
+  - "{{ etcd_conf_dir }}"
+  - "{{ etcd_data_dir }}"
+  - /etc/profile.d/etcdctl.sh
+  - /usr/local/bin/etcdctl
+  - "{{ etcd_systemd_dir }}/{{ etcd_service }}.service"

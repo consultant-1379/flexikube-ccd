@@ -1,0 +1,5 @@
+{% if 'overlay2' in docker_storage_driver %}
+{{ docker_config | combine(docker_storage_driver_options) | to_nice_json }}
+{% else %}
+{{ docker_config | to_nice_json }}
+{% endif %}

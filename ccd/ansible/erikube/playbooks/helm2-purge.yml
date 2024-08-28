@@ -1,0 +1,64 @@
+---
+- name: Purge helm2 from cluster
+  hosts: master[0]
+  become: yes
+
+  roles:
+    - erikube-defaults
+
+  tasks:
+  - name: Check for existing tiller deployment
+    command: "{{ kubectl }} -n kube-system get deployment tiller-deploy"
+    register: deployment_exist
+    failed_when: false
+    changed_when: false
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: (deployment_exist.rc == 0 or "not found" in deployment_exist.stderr)
+
+  - name: Delete tiller deployment
+    shell: >-
+      {{ kubectl }} -n kube-system delete deployment tiller-deploy
+    register: result
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: result.rc == 0
+    when:
+      - deployment_exist.rc == 0
+
+  - name: Check for existing tiller service
+    command: "{{ kubectl }} -n kube-system get service tiller-deploy"
+    register: deployment_exist
+    failed_when: false
+    changed_when: false
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: (deployment_exist.rc == 0 or "not found" in deployment_exist.stderr)
+
+  - name: Delete tiller service
+    shell: >-
+      {{ kubectl }} -n kube-system delete service tiller-deploy
+    register: result
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: result.rc == 0
+    when:
+      - deployment_exist.rc == 0
+
+- name: Purge helm2 and 2to3 binary
+  hosts: master, worker
+  become: yes
+
+  roles:
+    - erikube-defaults
+
+  tasks:
+  - name: Delete helm2 binary
+    file:
+      state: absent
+      path: /usr/local/bin/helm2
+
+  - name: Delete 2to3 binary
+    file:
+      state: absent
+      path: /usr/local/bin/2to3

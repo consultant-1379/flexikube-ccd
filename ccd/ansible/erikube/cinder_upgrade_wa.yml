@@ -1,0 +1,28 @@
+- import_playbook: playbooks/ansible-check.yml
+
+- name: Gather facts as non root
+  hosts: all
+  gather_facts: yes
+
+# Get container list
+- import_playbook: playbooks/get-container-list.yml
+
+# upgrade cinder containers to version that can run k8s 1.22
+- name: Create Cinder Storage Class
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+  - include_vars: ../common/container-list.json
+  vars:
+    cinder_csi_plugin_image: "{{ kube_image_prefix }}{{ containers.erikube.cinder_csi_plugin }}"
+    csi_attacher_image: "{{ kube_image_prefix }}{{ containers.erikube.csi_attacher_cinder }}"
+    driver_registrar_image: "{{ kube_image_prefix }}{{ containers.erikube.csi_node_driver_registrar_cinder }}"
+    csi_provisioner_image: "{{ kube_image_prefix }}{{ containers.erikube.csi_provisioner_cinder }}"
+    csi_snapshotter_image: "{{kube_image_prefix}}{{ containers.erikube.csi_snapshotter_cinder }}"
+    csi_resizer_image: "{{kube_image_prefix}}{{ containers.erikube.csi_resizer_cinder }}"
+    csi_livenessprobe_image: "{{kube_image_prefix}}{{ containers.erikube.csi_livenessprobe_cinder }}"
+  tasks:
+  - include_role:
+      name: cinder
+      tasks_from: upgrade_wa
+    when: openstack_enable_cloud_provider | default('false') | bool

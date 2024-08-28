@@ -1,0 +1,15 @@
+---
+
+- name: Prefetch Master calico images
+  command: "{{ crictl_cmd }} pull {{ item }}"
+  become: true
+  when: inventory_hostname in groups['master']
+  with_items:
+    - "{{ calico_kube_controllers_image }}"
+
+- name: Prefetch Node calico images
+  command: "{{ crictl_cmd }} pull {{ item }}"
+  become: true
+  with_items:
+    - "{{ calico_node_image }}"
+    - "{{ calico_cni_image }}"

@@ -1,0 +1,22 @@
+- name: Delete given Config-Maps
+  block:
+  - name: Delete Config-Maps
+    shell: "{{ kubectl }} delete cm {{ item }} -n {{ kube_namespace }} --grace-period=0 --force"
+    loop: "{{ config_map_names | list }}"
+    failed_when: false == true
+
+  - name: check the status of Config-Maps after deletion
+    shell: "{{ kubectl }} get cm {{ item }} -n {{ kube_namespace }}"
+    loop: "{{ config_map_names | list }}"
+    register: result
+    until: '"Error from server (NotFound): configmaps" in result.stderr'
+    retries: 5
+    delay: 10
+    ignore_errors: true
+
+  - name: Check that Config-Maps are removed
+    assert:
+      that:
+        - '"Error from server (NotFound): configmaps" in item.stderr'
+      msg: "Error: Config Map not deleted"
+    loop: "{{ result.results }}"

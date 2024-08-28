@@ -1,0 +1,117 @@
+---
+- name: Deploy erikube ingress controller
+  hosts: master[0]
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+  vars:
+    - ingressctrl_action: deploy
+    - kube_image_prefix: "{{ docker_registry_host | default(default_registry) }}/"
+    - default_ingress_service:
+    - default_ingress_namespace:
+    - cr_hostname: "{{ container_registry_hostname | default('k8s-registry.eccd.local') }}"
+  become: yes
+
+  roles:
+    - erikube-defaults
+
+  tasks:
+
+  - name: Ensure default_ingress_controller is defined
+    assert:
+      that:
+        - default_ingress_controller is defined
+        - default_ingress_controller != None
+        - default_ingress_controller != ""
+      msg: "default_ingress_controller must be a controller name nginx | haproxy"
+
+  # Due to a bug in Ansible 2.4.x, include_role cannot evaluate template used
+  # in the name property.  The preferred syntax is the following:
+  #   include_role:
+  #     name: "ingress-controller-{{ default_ingress_controller }}"
+  #
+  # The work around is to replace the above with:
+  #   include_tasks: "roles/ingress-controller-{{ default_ingress_controller }}/tasks/include-role.yml"
+  #
+  # See the following link:
+  # https://www.reddit.com/r/ansible/comments/916o63/question_playbook_include_role_with_items/
+
+  - name: Deploy configured ingress controller(s)
+    include_tasks: "roles/ingress-controller-{{ default_ingress_controller }}/tasks/include-role.yml"
+    vars:
+      - state: update-installed
+      - controller_image: "{{ kube_image_prefix + containers.erikube[default_ingress_controller + '_ingressctrl'] if containers.erikube[default_ingress_controller + '_ingressctrl'] is defined else None }}"
+      - defaultbackend_image: "{{ kube_image_prefix }}{{ containers.erikube.ingressdefaultbackend }}"
+    with_items: "{{ default_ingress_controller }}"
+
+
+  - name: Ensure default ingress controller namespace and service name are set during deploy
+    assert: { that: ["{{ item }} is defined", "{{ item }} != None", "{{ item }} | length > 0"] }
+    with_items:
+      - default_ingress_service
+      - default_ingress_namespace
+
+  - name: Deploy the ingress for {{ default_ingress_controller }} ingress controller service
+    import_tasks: roles/ingress-controller-common/tasks/controller_ingress.yml
+    vars:
+      - kube_namespace: "{{ default_ingress_namespace }}"
+      - ingress_class: "{{ default_ingress_controller }}"
+      - ingress_service: "{{ default_ingress_service }}"
+
+  - name: Update CoreDNS with registry rewrite rules
+    block:
+      - name: create temp folder
+        shell: mktemp -d /tmp/coredns-configmap-XXXXXX
+        register: mktemp
+        changed_when: False
+
+      - name: Fetch the coredns configmap
+        shell: "{{ kubectl }} get cm coredns -n kube-system -o yaml > {{ mktemp.stdout }}/coredns_configmap.yaml"
+        become: yes
+
+      - name: Add the rewrite cr_hostname to coredns
+        lineinfile:
+          dest: "{{ mktemp.stdout }}/coredns_configmap.yaml"
+          line: "        rewrite name {{ cr_hostname }}  {{ default_ingress_service }}.{{ default_ingress_namespace }}.svc.cluster.local"
+          insertbefore: loop
+          state: present
+          firstmatch: yes
+        when: cr_hostname is defined and cr_hostname | length > 0
+
+      - name: Add the rewrite k8s-registry.eccd.local to coredns
+        lineinfile:
+          dest: "{{ mktemp.stdout }}/coredns_configmap.yaml"
+          line: "        rewrite name k8s-registry.eccd.local  {{ default_ingress_service }}.{{ default_ingress_namespace }}.svc.cluster.local"
+          insertbefore: loop
+          state: present
+          firstmatch: yes
+
+      - name: Add the rewrite kube_api_ingress_host to coredns configmap
+        lineinfile:
+          dest: "{{ mktemp.stdout }}/coredns_configmap.yaml"
+          line: "        rewrite name {{ kube_api_ingress_host }} {{ default_ingress_service }}.{{ default_ingress_namespace }}.svc.cluster.local"
+          insertbefore: loop
+          state: present
+          firstmatch: yes
+        when: kube_api_ingress_host is defined
+
+      - name: Add the rewrite dex_ingress_host to coredns
+        lineinfile:
+          dest: "{{ mktemp.stdout }}/coredns_configmap.yaml"
+          line: "        rewrite name {{ dex_ingress_host }}  {{ default_ingress_service }}.{{ default_ingress_namespace }}.svc.cluster.local"
+          insertbefore: loop
+          state: present
+          firstmatch: yes
+        when: dex_ingress_host is defined
+
+      - name: Apply the coredns configmap rewrite rules
+        shell: "{{ kubectl }} apply -f {{ mktemp.stdout }}/coredns_configmap.yaml"
+        become: yes
+
+      - name: Delete temp directory
+        file:
+          name: "{{ mktemp.stdout }}"
+          state: absent
+        become: yes
+
+    when: inventory_hostname == first_master
+

@@ -1,0 +1,125 @@
+---
+- name: Deploy Container Registry
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+    - name: "Set container_registry_nodeSelector to {}"
+      set_fact:
+        container_registry_nodeselector: {}
+    - name: "Set container_registry_nodeSelector if infra_node_pool_name is defined"
+      set_fact:
+        container_registry_nodeselector:
+          node-pool: "{{ infra_node_pool_name }}"
+      when: infra_node_pool_name is defined
+  vars:
+    - tarball_name: "{{ helm_charts.eric_lcm_container_registry.tarball }}"
+    - cr_hostname: "{{ container_registry_hostname | default('k8s-registry.eccd.local') }}"
+    - cr_storage_class: "{{ container_registry_storage_class | default('network-block') }}"
+    - cr_storage_size: "{{ container_registry_storage_size | default('10Gi') }}"
+    - cr_cred_custom_user_id: "{{ container_registry_custom_user_id | default('') }}"
+    - cr_cred_custom_pw: "{{ container_registry_custom_pw | default('') }}"
+    - cr_cert_tls_secret_name: "{{ container_registry_registry_secret_name | default('cr-registry-tls') }}"
+    - cr_cred_secret_name: "cr-registry-credentials"
+    - cr_storage_migration_enabled: "{{ container_registry_storage_migration_enabled | default('false') | bool }}"
+    - cr_storage_s3_enabled: "{{ container_registry_storage_s3_enabled | default('false') | bool }}"
+    - cr_storage_replicas: "{{ container_registry_replicas | default('1') | int }}"
+    - cr_pvc_name: "{{ 'eric-lcm-container-registry' if cr_storage_s3_enabled == true else 'registry-data-eric-lcm-container-registry-registry-0' }}"
+    - cr_image_based_deployment: "{{ image_based_deployment | default(false) | bool }}"
+#   this flag is used with specialized CR registry, when used with nginx sidecar container in registry
+#   glogal.security.tls.enabled should be false as it requires other ADP components
+    - cr_ingress_tls_passthrough_enabled: "{{ container_registry_ingress_tls_passthrough_enabled | default('false') | bool }}"
+  roles:
+    - role: erikube-defaults
+
+    - role: cr-registry
+      vars:
+        - tls_secret_namespace: kube-system
+        - credentials_secret_namespace: kube-system
+        - tls_secret: "{{ cr_cert_tls_secret_name }}"
+      when:
+      - container_registry_enabled | default(true) | bool
+
+    - role: helm-chart-provisioner
+      when: container_registry_enabled | default(true) | bool
+      vars:
+        - chart_name: eric-lcm-container-registry
+        - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '1200s' }}"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - state: installed
+        - kube_namespace: kube-system
+        - values:
+            global:
+              registry:
+                # Remove the hardcoded / from the default prefix
+                  url: "{{ kube_image_prefix | regex_replace('\\/$', '') }}"
+              pullSecret: "local-registry-secret"
+              security:
+                tls:
+                  enabled: false
+            nodeSelector:
+              registry: "{{ container_registry_nodeselector }}"
+            ingress:
+              enabled: true
+              ingressClass: "nginx"
+              useHttpProxy: "{{ container_registry_use_http_proxy | default(false) }}"
+              hostname: "{{ cr_hostname }}"
+              tls:
+                enabled: true
+                secretName: "{{ cr_cert_tls_secret_name }}"
+            nginx_tls_terminator:
+              tls:
+                enabled: "{{ cr_ingress_tls_passthrough_enabled }}"
+                secretName: "{{ cr_cert_tls_secret_name }}"
+            tls:
+              enabled: false
+              secretName: "{{ cr_cert_tls_secret_name }}"
+            replicaCount: "{{ cr_storage_replicas }}"
+            registry:
+              users:
+                secret: "{{ cr_cred_secret_name }}"
+              storage:
+                migration:
+                  enabled: >-
+                    {{ cr_storage_migration_enabled if cr_image_based_deployment else false }}
+                s3:
+                  enabled: >-
+                    {{ cr_storage_s3_enabled if cr_image_based_deployment else false }}
+                  authSecret: object-storage-mn-config
+            persistence:
+              persistentVolumeClaim:
+                size: "{{ cr_storage_size }}"
+                storageClassName: "{{ cr_storage_class }}"
+            podDisruptionBudget:
+              minAvailable: 0
+        # productInfo is merged with eric-product-info.yaml by helm-chart-provisioner:update_product_info.yml
+        - productInfo:
+            images:
+              registry:
+                name: "{{ containers.erikube.eric_cr_registry.split(':')[0] }}"
+                tag: "{{ containers.erikube.eric_cr_registry.split(':')[1] }}"
+                repoPath: ""
+              bragent:
+                name: "{{ containers.erikube.eric_cr_bragent.split(':')[0] }}"
+                tag: "{{ containers.erikube.eric_cr_bragent.split(':')[1] }}"
+                repoPath: ""
+              init:
+                name: "{{ containers.erikube.eric_cr_init.split(':')[0] }}"
+                tag: "{{ containers.erikube.eric_cr_init.split(':')[1] }}"
+                repoPath: ""
+              sidecar:
+                name: "{{ containers.erikube.eric_cr_sidecar.split(':')[0] }}"
+                tag: "{{ containers.erikube.eric_cr_sidecar.split(':')[1] }}"
+                repoPath: ""
+              migration:
+                name: "{{ containers.erikube.eric_cr_migration.split(':')[0] }}"
+                tag: "{{ containers.erikube.eric_cr_migration.split(':')[1] }}"
+                repoPath: ""
+              hooklauncher:
+                name: "{{ containers.erikube.eric_cr_hooklauncher.split(':')[0] }}"
+                tag: "{{ containers.erikube.eric_cr_hooklauncher.split(':')[1] }}"
+                repoPath: ""
+              nginx_tls_terminator:
+                name: "{{ containers.erikube.nginx_tls_terminator.split(':')[0] }}"
+                tag: "{{ containers.erikube.nginx_tls_terminator.split(':')[1] }}"
+                repoPath: ""

@@ -1,0 +1,135 @@
+---
+# Manages the state of the kubernetes cluster.
+# Used to setup a new cluster or add nodes.
+
+- name: Gather etcd hosts facts
+  hosts: etcd
+  gather_facts: yes
+
+- name: Set common etcd related vars
+  hosts: master
+  tasks:
+    - set_fact:
+        etcd_peers: "{{ groups.etcd | default([], true) }}"
+        etcd_ca_host: "{{ groups.etcd.0 }}"
+
+- name: Deploy Kubernetes API VIP
+  hosts: master
+  become: yes
+  roles:
+  - erikube-defaults
+  tasks:
+  - include_role:
+      name: kube-api-vip
+    vars:
+      keepalived_master: "{{ groups.master[0] }}"
+      keepalived_vip: "{{ kube_apiserver_ip }}"
+      kube_lb_upstream_servers: ["{{ groups.master[0] }}"]
+      kube_api_check: false
+      keepalived_unicast_src_ip: "{{ k8s_ip_address }}"
+      keepalived_unicast_peers: "{{ groups.master | difference([inventory_hostname]) }}"
+    when: kube_api_vip_enabled | default(false) | bool
+
+- name: Generate IdAM certificate
+  hosts: master
+  vars:
+  - idam_certificate_action: deploy
+  tasks:
+  - include_role:
+      name: idam_certificate
+    when: dex_enabled is defined and dex_enabled
+
+- name: Add local api host name to KubeAPI certificate SANs
+  hosts: master
+  tasks:
+  - set_fact:
+      kube_apiserver_cert_altnames:
+        "{{ ((kube_apiserver_cert_altnames | default([])) + [ (kube_apiserver_fqdn | default('nodelocal-api.eccd.local')) ]) }}"
+
+- name: Deploy Kubernetes masters
+  hosts: master
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+  vars:
+    - kube_image_prefix: "{{ docker_registry_host | default(default_registry) }}/"
+    - dns_servers_ips: "{{ dns_server_ips | join(' ') }}"
+  roles:
+    - { role: kube-master, tags: master }
+
+# Workaround to extend the 10y certificates on master-0
+- name: Rotate kubelet certificates
+  hosts: master-0
+  become: yes
+  gather_facts: yes
+  vars:
+  - first_master: "{{ groups['master'] | first }}"
+  roles:
+  - erikube-defaults
+  tasks:
+    - name: Rotate kubelet certificates
+      include_tasks: "../roles/kubelet-cert-update/tasks/main.yml"
+
+- name: Update API loadbalancer to have all masters
+  hosts: master
+  become: yes
+  tasks:
+  - include_role:
+      name: kube-lb
+    vars:
+      kube_lb_upstream_servers: "{{ groups.master }}"
+    when: kube_api_vip_enabled | default(false) | bool
+
+- name: Setup PodSecurityStandards
+  hosts: master[0]
+  tasks:
+  - include_role:
+      name: kube-pss
+
+- name: Deploy Kubernetes network plugin (CNI)
+  hosts: master[0]
+  roles:
+    - network_plugin
+
+- name: Set affinity and node selector rules for coredns deployment towards master node
+  hosts: master[0]
+  vars:
+    kubectl: "/usr/local/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf"
+    namespace: "kube-system"
+  become: true
+  tasks:
+  - name: Set affinity and node selector rules for coredns deployment
+    include_role:
+      name: coredns-anti-affinity
+
+- name: Set pod disruption budget for coredns
+  hosts: master[0]
+  become: true
+  roles:
+    - coredns-pdb
+
+- name: Deploy Kubernetes nodes
+  hosts: worker
+  roles:
+    - { role: kube-node, tags: node }
+
+- name: Sleep for 30 seconds to allow workers nodes to get ready and generate CSR requests
+  hosts: localhost
+  tasks:
+  - name: Sleep for 30 seconds
+    pause:
+      seconds: 30
+
+- name: Sign Kubelet Server CSRs
+  hosts: master, worker
+  roles:
+  - erikube-defaults
+  vars:
+    kubectl: "/usr/local/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf"
+    first_master: "{{ groups['master'] | first }}"
+    node_csr: "{{ ansible_hostname }}"
+  serial: 1
+  become: yes
+  tasks:
+  - name: Sign Kubelet Server CSRs
+    include_role:
+      name: kubelet-server-cert

@@ -1,0 +1,10 @@
+---
+
+# The path to locally stored backup user wants to restore from
+#backup_file_path: erikube-backups/201802072101.tgz
+
+# Disable current and backup inventories comparison
+skip_inventory_check: false
+
+# Disable current and backup versions comparison
+skip_version_check: false

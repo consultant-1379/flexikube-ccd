@@ -1,0 +1,90 @@
+---
+- name: Set etcd_ip fact
+  # makes the bound IP for etc appear in hostvars
+  set_fact:
+    etcd_ip: "{{ etcd_ip }}"
+
+- name: Create etcd data directory
+  file:
+    path: "{{ etcd_data_dir }}"
+    state: directory
+    mode: 0700
+    owner: "{{ file_default_owner }}"
+    group: "{{ file_default_group }}"
+
+- name: Log into local registry and force re-authorization
+  docker_login:
+    registry: "{{ kube_image_prefix }}"
+    username: "{{ local_registry_user }}"
+    password: "{{ local_registry_password }}"
+    reauthorize: yes
+  when: local_registry_user is defined and local_registry_user != ""
+
+- name: Pull etcd image
+  docker_image:
+    name: "{{ etcd_image }}"
+    pull: true
+  when: local_registry_user is defined and local_registry_user != ""
+
+- name: Install systemd service file
+  template:
+    src: etcd.docker.service.j2
+    dest: "{{ etcd_service_file }}"
+
+- name: Write etcd global config file
+  template:
+    src: etcd.conf.j2
+    dest: "{{ etcd_conf_file }}"
+    mode: 0600
+    backup: true
+  notify:
+  - restart etcd
+
+- name: Create server and client certificates
+  include_tasks:
+    file: create_new_certificates.yml
+
+- name: Enable etcd
+  systemd:
+    name: "{{ etcd_service }}"
+    state: started
+    enabled: yes
+    daemon_reload: true
+  register: start_result
+
+- name: Set fact etcd_service_status_changed
+  set_fact:
+    etcd_service_status_changed: "{{ start_result.changed }}"
+
+- name: Configure etcd profile.d aliases
+  template:
+    src: etcdctl.sh.j2
+    dest: /etc/profile.d/etcdctl.sh
+    mode: 0755
+    owner: root
+    group: root
+    backup: true
+
+- name: Wait for etcd client port
+  wait_for:
+    port: "{{ etcd_client_port }}"
+    host: "{{ etcd_ip }}"
+    delay: 1
+
+- name: Install etcdctl to host
+  command: "{{ docker_cmd }} cp {{ etcd_service }}:/usr/local/bin/etcdctl /usr/local/bin"
+  changed_when: false
+
+- name: Install etcdutl to host
+  command: "{{ docker_cmd }} cp {{ etcd_service }}:/usr/local/bin/etcdutl /usr/local/bin"
+  changed_when: false
+
+- name: Get PID of etcd
+  command: pgrep -f /usr/local/bin/etcd
+  register: etcd_pid
+
+- name: Boost etcd's I/O scheduling priority
+  command: "ionice -c2 -n0 -p {{ etcd_pid.stdout }}"
+
+- name: Increase etcd's priority
+  command: "renice -n -5 -p  {{ etcd_pid.stdout }}"

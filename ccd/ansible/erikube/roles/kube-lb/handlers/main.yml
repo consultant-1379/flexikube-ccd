@@ -1,0 +1,8 @@
+---
+- name: Restart haproxy
+  systemd:
+    name: "{{ kube_lb_service_name }}"
+    state: reloaded
+    daemon_reload: true
+  become: true
+  when: not (kube_lb_start_result_changed | default(false) | bool)

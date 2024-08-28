@@ -1,0 +1,30 @@
+---
+
+- block:
+  - name: get the oidc-secret
+    shell: "cat /tmp/oidc-secret/oidc-secret.yaml"
+    register: dashboard_oidc_client_secret_output
+    no_log: true
+    become: yes
+
+  - set_fact:
+      dashboard_oidc_client_secret: "{{ dashboard_oidc_client_secret_output.stdout }}"
+  when: dashboard_oidc_client_secret is undefined
+
+- block:
+    - include_tasks: "{{ auth_client_action }}.yml"
+  become: yes
+
+- name: check if oidc-secret path exist
+  stat:
+    path: /tmp/oidc-secret/
+  register: oidc_secret_path
+  become: yes
+
+- name: Delete temp directory
+  file:
+    name: "/tmp/oidc-secret/"
+    state: absent
+  changed_when: False
+  become: yes
+  when: oidc_secret_path.stat.isdir is defined and oidc_secret_path.stat.isdir

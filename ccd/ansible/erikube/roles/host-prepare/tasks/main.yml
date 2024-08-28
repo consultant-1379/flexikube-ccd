@@ -1,0 +1,6 @@
+---
+- name: Prepare host capabilities
+  block:
+    - include_tasks: host-preparation.yml
+  become: yes
+  any_errors_fatal: true

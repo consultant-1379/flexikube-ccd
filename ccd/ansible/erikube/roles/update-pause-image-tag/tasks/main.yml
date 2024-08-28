@@ -1,0 +1,16 @@
+---
+- name: Pull the pause container if unauthorized
+  become: yes
+  shell: "{{ ctr_cmd }} -n k8s.io image pull {{ erikube_pause_image }}"
+  when: local_registry_user is not defined or local_registry_user == ""
+
+- name: Pull the pause container if authorized
+  become: yes
+  shell: "{{ ctr_cmd }} -n k8s.io image pull -u {{ local_registry_user }}:{{ local_registry_password }} {{ erikube_pause_image }}"
+  when: local_registry_user is defined and local_registry_user != ""
+
+- name: Tag the pause container with the tag k8s expects
+  become: yes
+  shell: "{{ ctr_cmd }} -n k8s.io image tag {{ erikube_pause_image }} {{ kubernetes_pause_image }}"
+  register: ctr_tag
+  failed_when: ctr_tag.rc != 0 and "already exists" not in ctr_tag.stderr

@@ -1,0 +1,77 @@
+---
+- name: Create temp directory for syncing certs
+  delegate_to: localhost
+  command: mktemp -d /tmp/etcd-certs-XXXXX
+  register: g_etcd_mktemp
+  changed_when: false
+
+- name: Prepare CA certs in first master node
+  block:
+  - name: Create temp workspace directory
+    command: mktemp -d /tmp/erikube-etcd-XXXXXX
+    register: mktemp
+    changed_when: False
+    delegate_to: "{{ etcd_ca_host }}"
+
+  - name: Create empty CA index file
+    copy:
+      dest: "{{ mktemp.stdout }}/index.txt"
+      content: ""
+      force: no
+
+  - name: Write openssl config
+    template:
+      src: "openssl.conf.j2"
+      dest: "{{ mktemp.stdout }}/openssl.cnf"
+
+  - name: Create new CA certificate
+    command: >
+      openssl req -newkey rsa:4096 -keyout {{ mktemp.stdout }}/new_ca.key
+        -x509 -days {{ etcd_ca_default_days }} -batch -nodes -out {{ mktemp.stdout }}/new_ca.crt -subj /CN=etcd-ca
+
+  - name: Read current etcd CA
+    slurp:
+      src: "{{ etcd_conf_dir }}/ca.crt"
+    register: current_etcd_ca_output
+
+  - name: Read new etcd CA
+    slurp:
+      src: "{{ mktemp.stdout }}/new_ca.crt"
+    register: new_etcd_ca_output
+
+  - name: Combine new and old etcd ca cert
+    copy:
+      content: "{{ (new_etcd_ca_output.content|b64decode) + (current_etcd_ca_output.content|b64decode) }}"
+      dest: "{{ mktemp.stdout }}/ca.crt"
+
+  - name: Change file ownership, group and permissions
+    file:
+      path: "{{ mktemp.stdout }}/ca.crt"
+      mode: '0644'
+
+  - name: Create a tarball of the etcd ca certs
+    command: >
+      tar -czvf /tmp/etcd-certs.tgz
+        -C {{ mktemp.stdout }} .
+    args:
+      warn: no
+    run_once: true
+
+  - name: Retrieve etcd ca cert tarball
+    fetch:
+      src: "/tmp/etcd-certs.tgz"
+      dest: "{{ hostvars['localhost'].g_etcd_mktemp.stdout }}/"
+      flat: yes
+      fail_on_missing: yes
+      validate_checksum: yes
+    run_once: true
+
+  - name: Delete temp directory
+    file:
+      name: "{{ mktemp.stdout }}"
+      state: absent
+    become: yes
+    changed_when: False
+
+  when:
+    - inventory_hostname == first_master

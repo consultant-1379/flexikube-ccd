@@ -1,0 +1,5 @@
+{% if cert_failed_component is defined and ansible_failed_task is defined and ansible_failed_result is defined %}
+Failure to rotate: '{{ cert_failed_component }}'
+During task: '{{ ansible_failed_task.name }}'
+Cause of failure: '{{ ansible_failed_result.stderr }}'
+{% endif -%}

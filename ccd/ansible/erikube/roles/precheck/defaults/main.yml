@@ -1,0 +1,38 @@
+---
+master_min_vcpu: 2
+worker_min_vcpu: 1
+etcd_min_vcpu: 2
+
+# Integer in GB
+all_min_diskspace: 10
+etcd_extra_diskspace: 10
+workder_extra_diskspace: 10
+
+# Integer in GB
+master_min_ram: 3
+worker_min_ram: 3
+etcd_min_ram: 3
+
+docker_storage_driver_allow_list:
+- "overlay2"
+- "devicemapper"
+
+# docker command
+docker_cmd: 'docker'
+
+# containerd command
+containerd_cmd: 'containerd'
+
+# Supported docker version(s)
+# See https://github.com/kubernetes/kubernetes/blob/master/CHANGELOG-1.9.md#external-dependencies
+supported_docker_versions:
+  - 1.13.1
+  - 17.03.2-ce
+  - 18.06.1-ce
+  - 18.09.1
+  - 18.09.2
+  - 18.09.5
+  - 18.09.7
+  - 19.03.13
+
+minimum_major_docker_version: 18

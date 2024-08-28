@@ -1,0 +1,24 @@
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: kube-api
+  namespace: kube-system
+spec:
+  ports:
+  - protocol: TCP
+    port: {{ kube_apiserver_port }}
+    targetPort: {{ kube_apiserver_port }}
+
+---
+
+kind: Endpoints
+apiVersion: v1
+metadata:
+  name: kube-api
+  namespace: kube-system
+subsets:
+  - addresses:
+      - ip: {{ kube_apiserver_ip }}
+    ports:
+      - port: {{ kube_apiserver_port }}

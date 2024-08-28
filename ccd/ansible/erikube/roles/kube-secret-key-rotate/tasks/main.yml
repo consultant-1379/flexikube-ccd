@@ -1,0 +1,68 @@
+# The flow to enable encryption or rotate keys depends on initial conditions:
+#
+#              |     Encryption Keys Already Enabled?      |
+#  Master Host |                     |                     |
+#    Count:    | No - first time     | Yes - keys exist    |
+# -------------+---------------------+---------------------+
+#              | Set newkey primary  | Set newkey primary  |
+#      1       | Update kubeadm cfg  | Restart master      |
+#              | Update apisvr cfg** | Reenter secrets     |
+#              | Reenter secrets     | Remove old key      |
+#              |                     | Restart master      |
+# -------------+---------------------+---------------------+
+#              | Set newkey after ID*| Set newkey after EK*|
+#     > 1      | Update kubeadm cfg  | Restart all masters |
+#              | Update apisvr cfgs**| Set newkey primary  |
+#              | Set newkey primary  | Restart all masters |
+#              | Restart all masters | Reenter secrets     |
+#              | Reenter secrets     | Remove old key      |
+#              |                     | Restart all masters |
+# -------------+---------------------+---------------------+
+#
+# * ID is the "identity" provider, and EK is existing aescvc provider key
+# ** updating the kube-apiserver manifest will automatically restart the apiserver.
+
+# Each of the four flows (blocks) in the table above is implemented as a
+# separate task file, and shared steps are implemented as separate action
+# task files. This main script determines initial conditions then executes
+# the required flow.
+
+- name: Determine number of master hosts in cluster
+  set_fact:
+    master_count: "{{ groups['master'] | length }}"
+
+- debug: var=master_count
+
+- name: Check if crypto provider is already set on first master
+  stat:
+    path: "{{ kube_cryptprov_cfg_file }}"
+  register: cryptprov_conf_file
+  run_once: true
+  delegate_to: "{{ first_master }}"
+
+- debug: var=cryptprov_conf_file.stat.exists
+
+- name: Tasks if enabling encryption for first time on single-master cluster
+  include_tasks: single-master-enable-crypt.yml
+  when:
+    - master_count == "1"
+    - not cryptprov_conf_file.stat.exists
+
+- name: Tasks if enabling encryption for first time on multi-master cluster
+  include_tasks: multi-master-enable-crypt.yml
+  when:
+    - master_count != "1"
+    - not cryptprov_conf_file.stat.exists
+
+- name: Tasks if rotating key on single-master cluster
+  include_tasks: single-master-rekey.yml
+  when:
+    - master_count == "1"
+    - cryptprov_conf_file.stat.exists
+
+- name: Tasks if rotating key on multi-master cluster
+  include_tasks: multi-master-rekey.yml
+  when:
+    - master_count != "1"
+    - cryptprov_conf_file.stat.exists
+

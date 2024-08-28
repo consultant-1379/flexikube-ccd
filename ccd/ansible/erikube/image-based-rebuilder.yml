@@ -1,0 +1,14 @@
+---
+
+- name: Gather current host facts
+  hosts: all
+  gather_facts: yes
+
+- name: Deploy Kubernetes masters
+  hosts: master
+  pre_tasks:
+    - include_vars: ../common/container-list.json
+  vars:
+    - kube_image_prefix: "{{ docker_registry_host | default(default_registry) }}/"
+  roles:
+    - { role: kube-master, tags: master }

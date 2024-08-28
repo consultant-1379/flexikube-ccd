@@ -1,0 +1,56 @@
+---
+# Kubernetes commands
+kubectl_path: /usr/local/bin/kubectl
+kubeadm_cmd: /usr/local/bin/kubeadm
+
+coredns_after_upgrade: true
+
+#opt_kubernetes_repo: "armdocker.rnd.ericsson.se/proj_kds/erikube"
+
+kube_config_dir: /etc/kubernetes
+kube_cert_dir: "{{ kube_config_dir }}/pki"
+kube_manifest_dir: "{{ kube_config_dir }}/manifests"
+erikube_config_dir: "{{ kube_config_dir }}/erikube"
+
+# from defaults file for kube-master
+
+# Authorization modes for k8s, see:
+#   - https://kubernetes.io/docs/admin/authorization/
+#   - https://kubernetes.io/docs/admin/authorization/node/
+k8s_authorization_modes: "RBAC,Node"
+
+# K8s etcd
+kube_etcd_client_port: "{{ etcd_client_port | default('2379') }}"
+kube_etcd_url_scheme: "{{ etcd_url_scheme | default('https') }}"
+
+kube_force_update: false
+kube_apiserver_cert_altnames: []
+
+# A CoreDNS per master, so same number of replicas as number of masters
+kube_dns_replicas: "{{ (groups['master'] | length) + (groups['master_add'] | length | default(0)) }}"
+
+kube_dns_success_ttl: 30
+kube_dns_denial_ttl: 30
+
+## Variables for OpenID Connect Configuration https://kubernetes.io/docs/admin/authentication/
+## To use OpenID you have to deploy additional an OpenID Provider (e.g Dex, Keycloak, ...)
+
+# kube_oidc_url: https:// ...
+# kube_oidc_client_id: kubernetes
+## Optional settings for OIDC
+# kube_oidc_ca_file: {{ kube_cert_dir }}/ca.pem
+# kube_oidc_username_claim: sub
+# kube_oidc_groups_claim: groups
+
+kube_manager_cluster_signing_duration: "87600h"
+
+kube_skip_preflight_checks: false
+
+kube_apiserver_bind_address: "{{ master_ip | default(hostvars[inventory_hostname].k8s_ip_address) }}"
+
+# kube-proxy mode
+kube_proxy_mode: "ipvs"
+ipvs_tcp_timeout: 900
+ipvs_tcp_fin_timeout: 120
+ipvs_udp_timeout: 300
+

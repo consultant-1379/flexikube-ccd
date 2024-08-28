@@ -1,0 +1,81 @@
+---
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/erikube-k8s-XXXXXX
+  register: mktemp
+  changed_when: False
+
+- set_fact:
+    tmp_workdir: "{{ mktemp.stdout }}"
+
+- name: Get worker hostnames
+  shell: "hostname"
+  register: worker_hostname
+
+- name: Get IP address of kube apiserver fqdn for defining master vip address
+  shell: grep ' {{ kube_apiserver_fqdn }}' /etc/hosts | awk '{print $1}'
+  register: kube_apiserver_fqdn_ip_address
+
+- name: Slurp CA crt
+  slurp:
+    src: "/etc/pki/trust/anchors/ca.crt"
+  register: worker_ca_base64
+  run_once: true
+  delegate_to: localhost
+
+- name: Slurp CA key
+  slurp:
+    src: "/etc/pki/trust/anchors/ca.key"
+  register: worker_ca_key_base64
+  run_once: true
+  delegate_to: localhost
+
+- name: Create ca crt to temporary folder
+  shell: "echo '{{ worker_ca_base64.content|b64decode }}' > {{ tmp_workdir }}/ca.crt"
+  no_log: true
+
+- name: Create ca key to temporary folder
+  shell: "echo '{{ worker_ca_key_base64.content|b64decode }}' > {{ tmp_workdir }}/ca.key"
+  no_log: true
+
+- name: Create RSA private key for worker nodes
+  shell: >-
+    openssl genrsa -out {{ tmp_workdir }}/worker_{{ worker_hostname.stdout }}.key 2048
+
+- name: Create CSR by using RSA private key
+  shell: >-
+    openssl req -new -key {{ tmp_workdir }}/worker_{{ worker_hostname.stdout }}.key -out {{ tmp_workdir }}/worker_{{ worker_hostname.stdout }}.csr \
+    -subj "/CN={{ worker_hostname.stdout }}/O=eccd-workers"
+
+- name: Create worker nodes certificates
+  shell: >-
+    openssl x509 -req -in {{ tmp_workdir }}/worker_{{ worker_hostname.stdout }}.csr \
+    -CA {{ tmp_workdir }}/ca.crt \
+    -CAkey {{ tmp_workdir }}/ca.key \
+    -CAcreateserial -out {{ tmp_workdir }}/worker_{{ worker_hostname.stdout }}.crt -days 36500
+
+- name: Slurp worker crt
+  slurp:
+    src: "{{ tmp_workdir }}/worker_{{ worker_hostname.stdout }}.crt"
+  register: worker_crt_base64
+
+- name: Slurp worker key
+  slurp:
+    src: "{{ tmp_workdir }}/worker_{{ worker_hostname.stdout }}.key"
+  register: worker_key_base64
+
+- name: Write admin.conf
+  template:
+   src: "admin.conf.j2"
+   dest: "{{ tmp_workdir }}/worker_{{ worker_hostname.stdout }}_admin.conf"
+
+- name: Copy generated admin.conf to //etc/kubernetes folder
+  copy:
+   src: "{{ tmp_workdir }}/worker_{{ worker_hostname.stdout }}_admin.conf"
+   dest: "/etc/kubernetes/admin.conf"
+   remote_src: yes
+
+- name: Delete temp directory
+  file:
+    name: "{{ tmp_workdir }}"
+    state: absent
+  changed_when: False

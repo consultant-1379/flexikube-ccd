@@ -1,0 +1,36 @@
+# CCD specific configurations
+[crio]
+root="/run/containers/storage/root"
+runroot="/run/containers/storage/runroot"
+storage_driver="overlay"
+[crio.image]
+pause_image = "{{ erikube_pause_image }}"
+big_files_temporary_dir = "/run/containers/tmp/"
+
+[crio.runtime]
+conmon_cgroup = "pod"
+cgroup_manager = "systemd"
+default_capabilities = [
+	  "CHOWN",
+	  "DAC_OVERRIDE",
+	  "FSETID",
+	  "FOWNER",
+	  "SETGID",
+	  "SETUID",
+	  "SETPCAP",
+	  "NET_BIND_SERVICE",
+	  "NET_RAW",
+	  "KILL",
+	  "SYS_ADMIN",
+]
+
+[crio.runtime.workloads.management]
+activation_annotation = "ericsson.ccd.workload.io/workload"
+annotation_prefix= "resources.ccd.workload.io"
+
+[crio.runtime.workloads.management.resources]
+cpushares = 0
+cpuset = ""
+
+[crio.runtime.runtimes.runc]
+monitor_exec_cgroup = "container"

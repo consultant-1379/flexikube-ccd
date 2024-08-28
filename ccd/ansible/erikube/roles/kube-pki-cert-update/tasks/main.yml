@@ -1,0 +1,38 @@
+- name: Rotate certificates
+  shell: "/usr/local/bin/kubeadm certs renew {{ item }}"
+  loop:
+    - admin.conf
+    - apiserver
+    - apiserver-kubelet-client
+    - controller-manager.conf
+    - front-proxy-client
+    - scheduler.conf
+- name: Restart Kubernetes control plane
+  vars:
+    target_container_id_name: " {{ item }} "
+  include_role:
+    name: crictl
+    tasks_from: restart-cri-container
+  loop:
+  - kube-scheduler
+  - kube-controller-manager
+  - kube-apiserver
+- name: Copy kube admin conf to .kube
+  copy:
+    remote_src: True
+    src: /etc/kubernetes/admin.conf
+    dest: "/home/{{ ansible_user }}/.kube/config"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+- name: Fetch kube config to local node from first master
+  run_once: true
+  fetch:
+    src: "/home/{{ ansible_user }}/.kube/config"
+    dest: "/home/{{ ansible_user }}/.kube/config"
+    flat: yes
+- name: Make sure that local API is up
+  shell: "curl https://{{ kube_apiserver_fqdn | default('nodelocal-api.eccd.local') }}:{{ kube_apiserver_port | default(6443) }} | jq '.code'"
+  register: container_count
+  until: container_count.stdout.find("403") != -1
+  retries: 20
+  delay: 1

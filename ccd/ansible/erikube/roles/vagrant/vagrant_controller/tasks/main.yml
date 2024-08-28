@@ -1,0 +1,11 @@
+---
+- name: install the required packages
+  package:
+    name: dnsmasq
+    state: present
+
+- name: configure dnsmasq
+  include: configure-dnsmasq.yml
+
+- name: configure NAT
+  include: configure-nat.yml

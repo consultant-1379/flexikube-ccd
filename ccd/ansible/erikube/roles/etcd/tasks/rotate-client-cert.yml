@@ -1,0 +1,39 @@
+---
+- name: Create temp directory for etcd client certificates
+  command: mktemp -d /tmp/etcd-client-certs-XXXXX
+  register: client_cert_dir_tmp
+
+- name: Create etcd client certificates for kubernetes
+  vars:
+    etcd_cert_config_dir: "{{ client_cert_dir_tmp.stdout }}"
+    etcd_cert_subdir: "kubernetes-{{ ansible_hostname }}"
+    etcd_cert_prefix: "{{ kube_etcd_cert_prefix }}"
+    etcd_client_cert_cn: "kubernetes"
+  include_role:
+    name: etcd
+    tasks_from: get-client-cert
+  when: hostvars[host_item].inventory_hostname == inventory_hostname
+  with_items: "{{ ansible_play_hosts }}"
+  loop_control:
+    loop_var: host_item
+
+- name: Copy a "master-client.crt" file on the remote machine
+  copy:
+    src: "{{ client_cert_dir_tmp.stdout }}/master-client.crt"
+    dest: "{{ kube_etcd_cert_dir }}"
+    remote_src: yes
+  become: yes
+
+- name: Copy a "master-client.key" file on the remote machine
+  copy:
+    src: "{{ client_cert_dir_tmp.stdout }}/master-client.key"
+    dest: "{{ kube_etcd_cert_dir }}"
+    remote_src: yes
+  become: yes
+
+- name: Delete temp directory
+  file:
+    name: "{{ client_cert_dir_tmp }}"
+    state: absent
+  changed_when: False
+  become: yes

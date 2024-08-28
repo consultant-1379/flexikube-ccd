@@ -1,0 +1,559 @@
+---
+- name: Delete helm chart for fluent-bit
+  hosts: master[0]
+  become: yes
+  ignore_errors: True
+  roles:
+    - erikube-defaults
+    - role: helm-chart-provisioner
+      vars:
+        - tarball_name: "{{ helm_charts.fluent_bit.name + '-' + helm_charts.fluent_bit.version + '.tgz' }}"
+        - chart_name: fluent-bit
+        - kube_namespace: ccd-logging
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - state: purged
+      when: logger_external_server_enabled | default(false) | bool
+
+- name: Upgrade fluent-bit (Helm chart)
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+    - name: Update fluent-bit HTTP_Listen address
+      set_fact:
+        fluent_bit_http_listen: "{{ '[::]' if (k8s_ip_version == 'ipv6' or default_dualstack_ip_family == 'ipv6') else '0.0.0.0' }}"
+      when:
+        - logger_external_server_enabled | default(false) | bool
+  vars:
+    - tarball_name: "{{ helm_charts.fluent_bit.name + '-' + helm_charts.fluent_bit.version + '.tgz' }}"
+  roles:
+    - erikube-defaults
+    - role: fluent-bit-cert-update
+      when: logger_external_server_enabled | default(false) | bool
+    - role: helm-chart-provisioner
+      when: logger_external_server_enabled | default(false) | bool
+      vars:
+        - chart_name: fluent-bit
+        - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '1200s' }}"
+        - kube_namespace: "ccd-logging"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - state: update-installed
+        - values:
+            env:
+              - name: NODENAME
+                valueFrom:
+                  fieldRef:
+                    fieldPath: spec.nodeName
+            imagePullSecrets:
+              - name: local-registry-secret
+            global:
+              registry:
+                url: "{{ kube_image_prefix | regex_replace('\\/$', '') }}"
+            image:
+              repository: "{{ kube_image_prefix }}{{ containers.logging.fluent_bit.split(':')[0] }}"
+              tag: "{{ containers.logging.fluent_bit.split(':')[1] }}"
+              pullPolicy: IfNotPresent
+            podAnnotations:
+              prometheus.io/path: "/api/v1/metrics/prometheus"
+              prometheus.io/port: "2020"
+              prometheus.io/scrape: "true"
+            resources:
+              limits:
+                cpu: 1
+                memory: 768Mi
+              requests:
+                cpu: 100m
+                memory: 128Mi
+            tolerations:
+              - key: node-role.kubernetes.io/control-plane
+                effect: NoSchedule
+              - operator: Exists
+                effect: NoSchedule
+              - operator: Exists
+                effect: NoExecute
+            config:
+              service: |
+                [SERVICE]
+                    Daemon Off
+                    Flush 1
+                    Log_Level info
+                    Parsers_File parsers.conf
+                    Parsers_File custom_parsers.conf
+                    HTTP_Server On
+                    HTTP_Listen {{ fluent_bit_http_listen }}
+                    HTTP_Port 2020
+                    Health_Check Off
+              inputs: |
+                [INPUT]
+                    Name tail
+                    Path /var/log/containers/*_ingress-nginx_*.log, /var/log/containers/*_kube-system_*.log, /var/log/containers/*_ccd-logging_*.log, /var/log/containers/*_monitoring_*.log
+                    Parser cri
+                    Tag kube.*
+                    DB /var/log/containers_logs.db
+                    Mem_Buf_Limit 8MB
+                    Buffer_Chunk_Size 1MB
+                    Buffer_Max_Size 2MB
+                    Skip_Long_Lines On
+                [INPUT]
+                    Name tail
+                    Path /var/log/messages
+                    Parser docker
+                    Tag messages.*
+                    DB /var/log/var_log_msg.db
+                    Mem_Buf_Limit 5MB
+                    Buffer_Chunk_Size 1MB
+                    Buffer_Max_Size 1MB
+                    Skip_Long_Lines On
+                [INPUT]
+                    Name tail
+                    Path /var/log/audit/audit.log
+                    Parser logfmt
+                    Tag node-audit.*
+                    DB /var/log/flb_audit.db
+                    Mem_Buf_Limit 10MB
+                    Buffer_Chunk_Size 1MB
+                    Buffer_Max_Size 1MB
+                    Skip_Long_Lines On
+                [INPUT]
+                    Name tail
+                    Path /var/log/kube-apiserver/kube-apiserver-audit.log
+                    Parser docker
+                    Tag kube-audit.*
+                    DB /var/log/audit.db
+                    Mem_Buf_Limit 35MB
+                    Buffer_Chunk_Size 2MB
+                    Buffer_Max_Size 10MB
+                    Skip_Long_Lines On
+              filters: |
+                [FILTER]
+                    Name kubernetes
+                    Match kube.*
+                    Kube_Tag_Prefix kube.var.log.containers.
+                    Kube_URL https://kubernetes.default.svc.cluster.local:443
+                    Kube_CA_File /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+                    Kube_Token_File /var/run/secrets/kubernetes.io/serviceaccount/token
+                    Merge_Log On
+                    Keep_Log Off
+                    K8S-Logging.Parser On
+                    K8S-Logging.Exclude Off
+                    Buffer_Size 1Mb
+                [FILTER]
+                    Name modify
+                    Match kube-audit.*
+                    Condition Key_value_equals level Metadata
+                    Add severity DEBUG
+                [FILTER]
+                    Name modify
+                    Match kube-audit*
+                    Condition Key_value_equals level Request
+                    Add severity INFO
+                [FILTER]
+                    Name modify
+                    Match kube-audit*
+                    Condition Key_value_equals level RequestResponse
+                    Add severity DEBUG
+                [FILTER]
+                    Name modify
+                    Match kube-audit*
+                    Condition Key_value_equals level None
+                    Add severity INFO
+                [FILTER]
+                    Name modify
+                    Match node-audit*
+                    Condition Key_value_equals type NETFILTER_CFG
+                    Add severity DEBUG
+                [FILTER]
+                    Name modify
+                    Match node-audit*
+                    Condition Key_value_equals type SERVICE_START
+                    Add severity INFO
+                [FILTER]
+                    Name modify
+                    Match node-audit*
+                    Condition Key_value_equals type SERVICE_STOP
+                    Add severity ERROR
+                [FILTER]
+                    Name record_modifier
+                    Match *
+                    Record nodename fluentd.ccd-logging.${NODENAME}.{{ heat_stack_name }}
+                [FILTER]
+                    Name parser
+                    Match *eric-pm-server-utils*
+                    Key_name message
+                    Parser pm_utils
+                    Reserve_Data True
+                    Preserve_Key True
+                [FILTER]
+                    Name parser
+                    Match *eric-lm-combined-server-license-server-client*
+                    Key_name message
+                    Parser json
+                    Reserve_Data True
+                    Preserve_Key True
+                [FILTER]
+                    Name parser
+                    Match *eric-victoria-metrics-agent*
+                    Key_name message
+                    Parser json
+                    Reserve_Data True
+                    Preserve_Key True
+                [FILTER]
+                    Name parser
+                    Match *eric-pm-node-exporter*
+                    Key_name message
+                    Parser logfmt
+                    Reserve_Data True
+                    Preserve_Key True
+                [FILTER]
+                    Name parser
+                    Match *fluent-bit-*
+                    Key_name message
+                    Parser fluentbit
+                    Reserve_Data True
+                    Preserve_Key True
+                [FILTER]
+                    Name parser
+                    Match *fluentd-*
+                    Key_name message
+                    Parser fluentd
+                    Reserve_Data True
+                    Preserve_Key True
+                [FILTER]
+                    Name modify
+                    Match kube.*
+                    Condition Key_value_equals level info
+                    Add severity INFO
+                [FILTER]
+                    Name modify
+                    Match kube.*
+                    Condition Key_value_equals level debug
+                    Add severity DEBUG
+                [FILTER]
+                    Name modify
+                    Match kube.*
+                    Condition Key_value_equals level err
+                    Add severity ERROR
+                [FILTER]
+                    Name modify
+                    Match kube.*
+                    Condition Key_value_equals level warn
+                    Add severity WARN
+                [FILTER]
+                    Name modify
+                    Match kube.*
+                    Condition Key_value_equals level trace
+                    Add severity TRACE
+                [FILTER]
+                    Name parser
+                    Match *fluent-bit-*
+                    Key_name message
+                    Parser fluentbitError
+                    Reserve_Data True
+                    Preserve_Key True
+                [FILTER]
+                    Name modify
+                    Match kube.var.log.containers.fluent-bit*
+                    Condition Key_value_equals level error
+                    Add severity ERROR
+                [FILTER]
+                    Name parser
+                    Match *nginx-ingress*
+                    Key_name message
+                    Parser ingress_nginx_controller
+                    Reserve_Data True
+                    Preserve_Key True
+                [FILTER]
+                    Name modify
+                    Match kube.*
+                    Condition Key_value_equals level E
+                    Add severity ERROR
+                [FILTER]
+                    Name modify
+                    Match kube.*
+                    Condition Key_value_equals level I
+                    Add severity INFO
+                [FILTER]
+                    Name modify
+                    Match kube.*
+                    Condition Key_value_equals level D
+                    Add severity DEBUG
+                [FILTER]
+                    Name modify
+                    Match kube.*
+                    Condition Key_value_equals level W
+                    Add severity WARN
+                [FILTER]
+                    Name parser
+                    Match messages.var.log.messages
+                    Key_name log
+                    Parser containerdParser
+                    Reserve_Data True
+                    Preserve_Key True
+                [FILTER]
+                    Name parser
+                    Match messages.var.log.messages
+                    Key_name msgContd
+                    Parser containerdErr
+                    Reserve_Data True
+                    Preserve_Key False
+                [FILTER]
+                    Name modify
+                    Match messages.var.log.messages
+                    Condition Key_value_equals level error
+                    Add severity ERROR
+                [FILTER]
+                    Name modify
+                    Match messages.var.log.messages
+                    Condition Key_value_equals level info
+                    Add severity INFO
+                [FILTER]
+                    Name modify
+                    Match messages.var.log.messages
+                    Condition Key_value_equals level warning
+                    Add severity WARN
+                [FILTER]
+                    Name modify
+                    Match messages.var.log.messages
+                    Condition Key_value_equals level debug
+                    Add severity DEBUG
+                [FILTER]
+                    Name parser
+                    Match messages.var.log.messages
+                    Key_name msgContd
+                    Parser logfmt
+                    Reserve_Data True
+                    Preserve_Key False
+                [FILTER]
+                    Name modify
+                    Match messages.var.log.messages
+                    Condition Key_value_equals level error
+                    Add severity ERROR
+                [FILTER]
+                    Name modify
+                    Match messages.var.log.messages
+                    Condition Key_value_equals level info
+                    Add severity INFO
+                [FILTER]
+                    Name modify
+                    Match messages.var.log.messages
+                    Condition Key_value_equals level warning
+                    Add severity WARN
+                [FILTER]
+                    Name modify
+                    Match messages.var.log.messages
+                    Condition Key_value_equals level debug
+                    Add severity DEBUG
+                [FILTER]
+                    Name parser
+                    Match messages.var.log.messages
+                    Key_name log
+                    Parser kubeletParser
+                    Reserve_Data True
+                    Preserve_Key True
+                [FILTER]
+                    Name parser
+                    Match messages.var.log.messages
+                    Key_name messagekubelet
+                    Parser ingress_nginx_controller
+                    Reserve_Data True
+                    Preserve_Key False
+                [FILTER]
+                    Name modify
+                    Match messages.var.log.messages
+                    Condition Key_value_equals level E
+                    Add severity ERROR
+                [FILTER]
+                    Name modify
+                    Match messages.var.log.messages
+                    Condition Key_value_equals level D
+                    Add severity DEBUG
+                [FILTER]
+                    Name modify
+                    Match messages.var.log.messages
+                    Condition Key_value_equals level I
+                    Add severity INFO
+                [FILTER]
+                    Name modify
+                    Match messages.var.log.messages
+                    Condition Key_value_equals level W
+                    Add severity WARN
+                [FILTER]
+                    Name parser
+                    Match messages.var.log.messages
+                    Key_name log
+                    Parser etcdContainer
+                    Reserve_Data True
+                    Preserve_Key True
+                [FILTER]
+                    Name parser
+                    Match messages.var.log.messages
+                    Key_name messagetcd
+                    Parser json
+                    Reserve_Data True
+                    Preserve_Key False
+                [FILTER]
+                    Name modify
+                    Match messages.var.log.messages
+                    Condition Key_value_equals level info
+                    Add severity INFO
+                [FILTER]
+                    Name modify
+                    Match messages.var.log.messages
+                    Condition Key_value_equals level debug
+                    Add severity DEBUG
+                [FILTER]
+                    Name modify
+                    Match messages.var.log.messages
+                    Condition Key_value_equals level warn
+                    Add severity WARN
+                [FILTER]
+                    Name modify
+                    Match messages.var.log.messages
+                    Condition Key_value_equals level err
+                    Add severity ERROR
+                [FILTER]
+                    Name parser
+                    Match messages.var.log.messages
+                    Key_name log
+                    Parser setProcessPriorities
+                    Reserve_Data True
+                    Preserve_Key True
+                [FILTER]
+                    Name parser
+                    Match messages.var.log.messages
+                    Key_name messageSetProcess
+                    Parser ingress_nginx_controller
+                    Reserve_Data True
+                    Preserve_Key False
+                [FILTER]
+                    Name modify
+                    Match messages.var.log.messages
+                    Condition Key_value_equals level E
+                    Add severity ERROR
+                [FILTER]
+                    Name modify
+                    Match messages.var.log.messages
+                    Condition Key_value_equals level I
+                    Add severity INFO
+                [FILTER]
+                    Name modify
+                    Match messages.var.log.messages
+                    Condition Key_value_equals level D
+                    Add severity DEBUG
+                [FILTER]
+                    Name modify
+                    Match messages.var.log.messages
+                    Condition Key_value_equals level W
+                    Add severity WARN
+                [FILTER]
+                    Name parser
+                    Match messages.var.log.messages
+                    Key_name log
+                    Parser registryParser
+                    Reserve_Data True
+                    Preserve_Key True
+                [FILTER]
+                    Name parser
+                    Match messages.var.log.messages
+                    Key_name registryMessage
+                    Parser logfmt
+                    Reserve_Data True
+                    Preserve_Key False
+                [FILTER]
+                    Name modify
+                    Match messages.var.log.messages
+                    Condition Key_value_equals level info
+                    Add severity INFO
+                [FILTER]
+                    Name modify
+                    Match messages.var.log.messages
+                    Condition Key_value_equals level err
+                    Add severity ERROR
+                [FILTER]
+                    Name modify
+                    Match messages.var.log.messages
+                    Condition Key_value_equals level debug
+                    Add severity DEBUG
+                [FILTER]
+                    Name modify
+                    Match messages.var.log.messages
+                    Condition Key_value_equals level warning
+                    Add severity WARN
+              customParsers: |
+                [PARSER]
+                    Name logfmt
+                    Format logfmt
+                [PARSER]
+                    Name pm_utils
+                    Format regex
+                    Regex (?<time>[^ ]* [^ ]*) (?<severity>[^ ]+) (?<message>.*)$
+                    Time_Key time
+                [PARSER]
+                    Name fluentbit
+                    Format regex
+                    Regex \[(?<time>[^ ]* [^ ]*)\] (\[ (?<level>[^ ]*.*)\]) \[(?<message>.*)
+                    Time_Key time
+                [PARSER]
+                    Name fluentbitError
+                    Format regex
+                    Regex \[(?<time>[^ ]* [^ ]*)\] (\[(?<level>[^ ]*.*)\]) \[(?<message>.*)
+                    Time_Key time
+                [PARSER]
+                    Name fluentd
+                    Format regex
+                    Regex (?<time>[^ ]* [^ ]* [^ ]* [^ ]*)\[(?<level>[^ ]*)\]\:(?<message>.*)$
+                    Time_Key time
+                [PARSER]
+                    Name ingress_nginx_controller
+                    Format regex
+                    Regex (?<level>[EIWD])(?<message>.*)$
+                    Time_Key time
+                [PARSER]
+                    Name containerdParser
+                    Format regex
+                    Regex (?<time>[^ \"]*) (?<nodemane>[^ ]+) (?<serviceName>containerd\[\d+\]:)(?<msgContd>.*)$
+                    Time_Key time
+                [PARSER]
+                    Name containerdErr
+                    Format regex
+                    Regex (?<time>[^ ]*) \[(?<level>[^ ]*)\] (?<message>.*)
+                    Time_Key time
+                [PARSER]
+                    Name kubeletParser
+                    Format regex
+                    Regex (?<time>[^ \"]*) (?<nodemane>[^ ]+) (?<serviceName>kubelet\[\d+\]:)(?<messagekubelet>.*)$
+                    Time_Key time
+                [PARSER]
+                    Name etcdContainer
+                    Format regex
+                    Regex (?<time>[^ \"]*) (?<nodemane>[^ ]+) (?<serviceName>etcd_container\[\d+\]:)(?<messagetcd>.*)$
+                    Time_Key time
+                [PARSER]
+                    Name setProcessPriorities
+                    Format regex
+                    Regex (?<time>[^ \"]*) (?<nodemane>[^ ]+) (?<serviceName>set-process-priorities.sh\[\d+]: )(?<messageSetProcess>.*)$
+                    Time_Key time
+                [PARSER]
+                    Name registryParser
+                    Format regex
+                    Regex (?<time>[^ \"]*) (?<nodemane>[^ ]+) (?<serviceName>registry\[\d+\]:)(?<registryMessage>.*)$
+                    Time_Key time
+              outputs: |
+                [OUTPUT]
+                    Name forward
+                    Match *
+                    Host fluentd
+                    Port 24224
+                    tls On
+                    tls.verify On
+                    tls.ca_file /fluentbit-tls/ssl/ca.crt.pem
+                    tls.crt_file /fluentbit-tls/ssl/client.crt.pem
+                    tls.key_file /fluentbit-tls/ssl/client.key.pem
+            extraVolumes:
+              - name: fluentbit-tls
+                secret:
+                  secretName: fluentbit-tls
+            extraVolumeMounts:
+              - name: fluentbit-tls
+                mountPath: /fluentbit-tls/ssl
+

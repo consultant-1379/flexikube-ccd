@@ -1,0 +1,95 @@
+---
+- name: Activate rest of the combined etcd ca related files
+  block:
+  - name: Backup generated etcd certificates
+    command: >
+      tar -czf /tmp/etcd-ca-certificate-backup-{{ ansible_date_time.epoch }}.tgz
+      {{ etcd_conf_dir }}
+    args:
+      warn: no
+
+  - name: Unarchive etcd ca certs to etcd folder
+    become: yes
+    unarchive:
+      src: "{{ hostvars['localhost'].g_etcd_mktemp.stdout }}/etcd-certs.tgz"
+      dest: "{{ etcd_ca_dir }}"
+
+  - name: change master nodes ca crt permission to 700
+    become: yes
+    file:
+      path: "{{ etcd_ca_cert }}"
+      mode: '0700'
+
+  - name: change master-0 ca crt permission to 644
+    become: yes
+    file:
+      path: "{{ etcd_ca_cert }}"
+      mode: '0644'
+    when: inventory_hostname == first_etcd
+
+  - name: Copy ca.crt to etcd folder
+    shell: "cp {{ etcd_ca_cert }} {{ etcd_ca_file }}"
+    become: yes
+
+  - name: change master-0 ca key permission to 600
+    become: yes
+    file:
+      path: "{{ etcd_ca_key }}"
+      mode: '0600'
+    when: inventory_hostname == first_etcd
+
+  - name: Restart etcd_container
+    systemd:
+      state: restarted
+      daemon_reload: yes
+      name: etcd_container
+
+  when: inventory_hostname in groups['etcd'] and rotated_etcd_ca_type == "combined"
+
+- name: activate rest of the new etcd ca related files
+  block:
+  - name: activate new etcd ca
+    become: yes
+    copy:
+      src: "{{ etcd_ca_dir }}/new_ca.crt"
+      dest: "{{ etcd_ca_cert }}"
+      remote_src: true
+
+  - name: activate new etcd ca key
+    become: yes
+    copy:
+      src: "{{ etcd_ca_dir }}/new_ca.key"
+      dest: "{{ etcd_ca_key }}"
+      remote_src: true
+
+  - name: change master nodes ca crt permission to 700
+    become: yes
+    file:
+      path: "{{ etcd_ca_cert }}"
+      mode: '0700'
+
+  - name: change master-0 ca crt permission to 644
+    become: yes
+    file:
+      path: "{{ etcd_ca_cert }}"
+      mode: '0644'
+    when: inventory_hostname == first_etcd
+
+  - name: Copy ca.crt to etcd folder
+    shell: "cp {{ etcd_ca_cert }} {{ etcd_ca_file }}"
+    become: yes
+
+  - name: change master-0 ca key permission to 600
+    become: yes
+    file:
+      path: "{{ etcd_ca_key }}"
+      mode: '0600'
+    when: inventory_hostname == first_etcd
+
+  - name: Restart etcd_container
+    systemd:
+      state: restarted
+      daemon_reload: yes
+      name: etcd_container
+
+  when: inventory_hostname in groups['etcd'] and rotated_etcd_ca_type == "new"

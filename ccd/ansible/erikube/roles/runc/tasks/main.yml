@@ -1,0 +1,29 @@
+---
+- include_vars: "{{ item }}"
+  with_first_found:
+    - files:
+      - "../vars/{{ ansible_distribution }}.yml"
+      - "../vars/{{ ansible_os_family }}.yml"
+      skip: True
+
+- name: Install and setup runc
+  become: yes
+  any_errors_fatal: true
+  block:
+    - include_tasks: install.yml
+
+    - name: Reload systemd daemon
+      become: yes
+      systemd:
+        daemon_reload: yes
+
+    - name: Fetch runc version
+      shell: "runc --version"
+      register: runc_version_after
+      become: yes
+      changed_when: false
+      ignore_errors: yes
+    
+    - name: Print version from runc binary after possible upgrade
+      debug:
+        msg: "{{ runc_version_after.stdout.split('\n') }}"

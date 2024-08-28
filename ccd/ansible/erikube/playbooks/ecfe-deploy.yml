@@ -1,0 +1,82 @@
+---
+- name: Create ecfe ConfigMap and CRDs
+  hosts: master[0]
+  become: yes
+  roles:
+    - role: ecfe
+      when: ecfe_enabled | default(false) | bool
+
+- name: Deploy External Connectivity Front End
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+    - include_vars: ../roles/ecfe/defaults/main.yml
+    - name: "Set nodeSelector to {}"
+      set_fact:
+        ecfe_controller_nodeselector: {}
+        ecfe_speaker_nodeselector: {}
+    - name: Set ecfe controller nodeSelector if infra_node_pool_name is defined
+      set_fact:
+        ecfe_controller_nodeselector:
+          node-pool: "{{ infra_node_pool_name }}"
+      when: infra_node_pool_name is defined
+    - name: Set ecfe speaker nodeSelector if ecfe_speaker_node_selector is defined
+      set_fact:
+        ecfe_speaker_nodeselector:
+          "{{ ecfe_speaker_node_selector }}"
+      when: ecfe_speaker_node_selector is defined
+    - name: "Set ecfe_extra_params to empty string"
+      set_fact:
+        ecfe_extra_params: ""
+    - name: Set ecfe_extra_params
+      set_fact:
+        ecfe_extra_params: --set allocateSpeakers={{ ecfe_allocate_speakers | default(true)  }}
+    - name: "Set enable_guaranteed_qos to false if not specified"
+      set_fact:
+        ecfe_enable_guaranteed_qos: "{{ ecfe_enable_guaranteed_qos | default(false) }}"
+  vars:
+    - kube_image_prefix: "{{ docker_registry_host | default(default_registry) }}/"
+    - tarball_name: "{{ helm_charts.eric_tm_external_connectivity_frontend.name + '-' + helm_charts.eric_tm_external_connectivity_frontend.version + '.tgz'  }}"
+  roles:
+    - erikube-defaults
+    - role: helm-chart-provisioner
+      when: ecfe_enabled | default(false) | bool
+      vars:
+        - chart_name: eric-tm-external-connectivity-frontend
+        - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '600s' }}"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - state: installed
+        - extra_params: "{{ ecfe_extra_params }}"
+        - kube_namespace: kube-system
+        - values:
+            existingConfigMap: "{{ ecfe_configmap_name }}"
+            global:
+              registry:
+                # Remove the / from the registry url
+                url: "{{ kube_image_prefix | regex_replace('\\/$', '') }}"
+              pullSecret: "local-registry-secret"
+            imageCredentials:
+              repoPath: ""
+            rbac:
+              create: true
+            images:
+              controller:
+                name: "{{ containers.erikube.ecfe_controller.split(':')[0] }}"
+                tag: "{{ containers.erikube.ecfe_controller.split(':')[1] }}"
+              speaker:
+                name: "{{ containers.erikube.ecfe_speaker.split(':')[0] }}"
+                tag: "{{ containers.erikube.ecfe_speaker.split(':')[1] }}"
+            nodeSelector:
+              controller: "{{ecfe_controller_nodeselector}}"
+              speaker: "{{ ecfe_speaker_nodeselector }}"
+            qosGuaranteed:
+              enable: "{{ ecfe_enable_guaranteed_qos }}"
+            resources:
+              speaker:
+                limits:
+                  cpu:
+            users:
+              speaker: 264451
+            ipAddressPools:
+              "{{ address_yaml }}"

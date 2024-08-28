@@ -1,0 +1,25 @@
+---
+- name: Deploy CCD License Consumer
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+  - include_vars: ../../common/container-list.json
+  vars:
+    ccd_lc_image: "{{ kube_image_prefix }}{{ containers.erikube.license_consumer }}"
+    license_manager_url: http://eric-lm-combined-server:8080
+    ccd_lc_namespace: kube-system
+    ccd_lc_product_type: ECCD
+    enable_flags:
+      - BASE_LICENSE
+      - "{{ (non_ericsson_infrastructure is defined and non_ericsson_infrastructure == true)  | ternary('3PP_STACK_ENABLE_LICENSE','') }}"
+    ccd_lc_report_type: PEAK
+    ccd_lc_consumer_id: "{{ ansible_date_time.iso8601_micro | to_uuid }}"
+    ccd_lc_log_level: "{{ ccd_licensing_lc_log_level | default('INFO') }}"
+    ccd_lc_cpu_req: "{{ ccd_licensing_lc_cpu_req | default('10m') }}"
+    ccd_lc_mem_req: "{{ ccd_licensing_lc_mem_req | default('50Mi') }}"
+    ccd_lc_cpu_limit: "{{ ccd_licensing_lc_cpu_limit | default('200m') }}"
+    ccd_lc_mem_limit: "{{ ccd_licensing_lc_mem_limit | default('100Mi') }}"
+
+  roles:
+    - erikube-defaults
+    - role: ccd-license-consumer

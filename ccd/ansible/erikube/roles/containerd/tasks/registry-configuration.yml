@@ -1,0 +1,31 @@
+---
+- block:
+    - name: Check certs.d directory.
+      stat:
+        path: "{{ certs_dir }}"
+      register: certs_dir_path
+
+    - name: Create containerd config directory if not exists
+      file:
+        path: "{{ certs_dir }}"
+        state: directory
+      become: yes
+      when: certs_dir_path.stat.exists == false
+
+    - name: Check docker.io directory in certs.d directory.
+      stat:
+        path: "{{ certs_dir }}/docker.io"
+      register: docker_io_config_path
+
+    - name: Create docker.io config directory if not exists
+      file:
+        path: "{{ certs_dir }}/docker.io"
+        state: directory
+      become: yes
+      when: docker_io_config_path.stat.exists == false
+
+    - name: copy hosts.toml file
+      become: yes
+      copy:
+        src: "hosts.toml"
+        dest: "{{ certs_dir }}/docker.io"

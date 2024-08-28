@@ -1,0 +1,74 @@
+---
+{% for worker in worker_nodes %}
+
+apiVersion: projectcalico.org/v3
+kind: HostEndpoint
+metadata:
+  name: {{ worker }}
+spec:
+  node: {{ worker }}
+  interfaceName: "*"
+  profiles:
+  - projectcalico-default-allow
+---
+{% endfor %}
+
+
+
+---
+apiVersion: projectcalico.org/v3
+kind: GlobalNetworkPolicy
+metadata:
+  name: allow-cluster-internal
+spec:
+  preDNAT: true
+  applyOnForward: true
+  ingress:
+    - action: Deny
+      destination:
+        ports:
+        - "{{ kube_service_node_port_ranges }}"
+      protocol: TCP
+      source: {}
+    - action: Deny
+      destination:
+        ports:
+        - "{{ kube_service_node_port_ranges }}"
+      protocol: UDP
+      source: {}
+    - action: Allow
+      source:
+      {% if k8s_ip_version == 'dualstack' %}
+      nets:  ["{{ internal_subnet_cidr }}", "{{ k8s_pod_cidr_v4 }}", "{{ k8s_service_cidr_v4 }}"]
+      {% elif k8s_ip_version == 'ipv6' %}
+      nets:  ["{{ internal_subnet_cidr_ipv6 }}", "{{ k8s_pod_cidr }}", "{{ k8s_service_cidr }}"]
+      {% else %}
+      nets:  ["{{ internal_subnet_cidr }}", "{{ k8s_pod_cidr }}", "{{ k8s_service_cidr }}"]
+      {% endif %}
+
+{% if k8s_ip_version == 'dualstack' %}
+---
+apiVersion: projectcalico.org/v3
+kind: GlobalNetworkPolicy
+metadata:
+  name: allow-cluster-internal-ipv6
+spec:
+  preDNAT: true
+  applyOnForward: true
+  ingress:
+    - action: Deny
+      destination:
+        ports:
+        - "{{ kube_service_node_port_ranges }}"
+      protocol: TCP
+      source: {}
+    - action: Deny
+      destination:
+        ports:
+        - "{{ kube_service_node_port_ranges }}"
+      protocol: UDP
+      source: {}
+    - action: Allow
+      source:
+        nets:  ["{{ internal_subnet_cidr_ipv6 }}", "{{ k8s_pod_cidr_v6 }}", "{{ k8s_service_cidr_v6 }}"]
+{% endif %}

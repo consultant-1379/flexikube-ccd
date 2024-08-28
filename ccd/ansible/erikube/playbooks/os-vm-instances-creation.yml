@@ -1,0 +1,16 @@
+---
+- name: Create erikube instances via Openstack for erikube deployment
+  hosts: localhost
+#  strategy: debug
+  become: yes
+  tasks:
+  - include_role:
+      name: openstack
+      tasks_from: create_keypair
+  - include_role:
+      name: openstack
+      tasks_from: create_loadbalancer_instance
+  - include_role:
+      name: openstack
+      tasks_from: create_erikube_cluster_instances
+    when: os_username is defined and os_username and os_password is defined and os_password

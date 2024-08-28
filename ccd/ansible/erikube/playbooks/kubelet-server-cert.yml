@@ -1,0 +1,29 @@
+---
+# This playbook is required with the introduction of kubelet server cert autorotate (10y signing)
+
+# Workaround to extend the 10y certificates on masters
+- name: Rotate kubelet certificates
+  hosts: master
+  serial: 1
+  become: yes
+  gather_facts: yes
+  vars:
+  - first_master: "{{ groups['master'] | first }}"
+  roles:
+  - erikube-defaults
+  tasks:
+    - name: Rotate kubelet certificates
+      include_tasks: "../roles/kubelet-cert-update/tasks/main.yml"
+
+- name: Sign Kubelet Server CSRs
+  hosts: master
+  serial: 1
+  vars:
+    first_master: "{{ groups['master'] | first }}"
+    kubectl: "/usr/local/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf"
+    node_csr: "{{  ansible_hostname }}"
+  become: yes
+  tasks:
+    - name: Trigger Kubelet Server Signing
+      include_role:
+        name: kubelet-server-cert

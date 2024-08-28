@@ -1,0 +1,161 @@
+---
+- name: Remove vips before updating configuration
+  systemd:
+    name: keepalived
+    state: stopped
+    enabled: yes
+
+- name: Refresh host network facts
+  setup:
+    gather_subset: network
+
+- set_fact:
+    other_director: 'director-0'
+
+- set_fact:
+    other_director: 'director-1'
+  when: inventory_hostname == 'director-0'
+
+- name: Read contents of keepalived.conf
+  register: keepalived_conf_content
+  shell: "cat /etc/keepalived/keepalived.conf"
+
+# Determine int deployment scenario (ipv4, ipv6 or dualstack)
+- name: Set internal NW  scenario to ipv4
+  set_fact:
+    int_scenario: ipv4
+  when:
+    - '"vrrp_internal_group_1" not in keepalived_conf_content.stdout'
+    - k8s_ip_version == 'ipv4'
+
+- name: Set internal NW scenario to ipv6
+  set_fact:
+    int_scenario: ipv6
+  when:
+    - '"vrrp_internal_group_1" not in keepalived_conf_content.stdout'
+    - k8s_ip_version == 'ipv6'
+
+- name: Set internal NW scenario to dualstack
+  set_fact:
+    int_scenario: dualstack
+  when:
+    - '"vrrp_internal_group_1" in keepalived_conf_content.stdout'
+
+- name: Set ips for internal vrrp group 0 if scenario IPv4 ({{ int_scenario }})
+  set_fact:
+    unicast_src_ip_eth0_group0: "{{ hostvars[inventory_hostname]['ansible_eth0']['ipv4']['address'] }}"
+    unicast_peer_ip_eth0_group0: "{{ hostvars[other_director]['ansible_eth0']['ipv4']['address'] }}"
+  when:
+    - int_scenario == 'ipv4' or (int_scenario == 'dualstack' and hostvars[inventory_hostname]['ansible_eth1']['ipv4'] is defined)
+
+
+- name: Set ips for internal vrrp group 0 if scenario IPv6 ({{ int_scenario }})
+  set_fact:
+    unicast_src_ip_eth0_group0: "{{ hostvars[inventory_hostname]['ansible_eth0']['ipv6'][0]['address'] }}"
+    unicast_peer_ip_eth0_group0: "{{ hostvars[other_director]['ansible_eth0']['ipv6'][0]['address'] }}"
+  when:
+   - int_scenario == 'ipv6' or (int_scenario == 'dualstack' and hostvars[inventory_hostname]['ansible_eth1']['ipv4'] is not defined)
+
+- name: Set ips for internal vrrp group 0 and 1 if scenario dualstack ({{ int_scenario }})
+  set_fact:
+    unicast_src_ip_eth0_group0: "{{ hostvars[inventory_hostname]['ansible_eth0']['ipv4']['address'] }}"
+    unicast_peer_ip_eth0_group0: "{{ hostvars[other_director]['ansible_eth0']['ipv4']['address'] }}"
+    unicast_src_ip_eth0_group1: "{{ hostvars[inventory_hostname]['ansible_eth0']['ipv6'][0]['address'] }}"
+    unicast_peer_ip_eth0_group1: "{{ hostvars[other_director]['ansible_eth0']['ipv6'][0]['address'] }}"
+  when:
+    - int_scenario == 'dualstack'
+
+- name: Set unicast src ip for internal VRRP group 0
+  replace:
+    path: /etc/keepalived/keepalived.conf
+    regexp: "unicast_src_ip <vrrp_internal_group_0>"
+    replace: "unicast_src_ip {{ unicast_src_ip_eth0_group0 }}"
+
+- name: Set unicast peer ip for internal VRRP group 0
+  replace:
+    path: /etc/keepalived/keepalived.conf
+    regexp: "<peer_ip vrrp_internal_group_0>"
+    replace: "{{ unicast_peer_ip_eth0_group0 }}"
+
+- name: Set ips for ipv6 in internal dualstack scenario
+  block:
+    - name: Set unicast src ip for internal VRRP group 1
+      replace:
+        path: /etc/keepalived/keepalived.conf
+        regexp: "unicast_src_ip <vrrp_internal_group_1>"
+        replace: "unicast_src_ip {{ unicast_src_ip_eth0_group1 }}"
+
+    - name: Set unicast peer ip for internal VRRP group 1
+      replace:
+        path: /etc/keepalived/keepalived.conf
+        regexp: "<peer_ip vrrp_internal_group_1>"
+        replace: "{{ unicast_peer_ip_eth0_group1 }}"
+  when: int_scenario == 'dualstack'
+
+# Determine ext deployment scenario (ipv4, ipv6 or dualstack)
+- name: Set external NW scenario to singlestack
+  set_fact:
+    ext_scenario: singlestack
+  when:
+    - '"vrrp_external_group_1" not in keepalived_conf_content.stdout'
+
+- name: Set external NW scenario to dualstack
+  set_fact:
+    ext_scenario: dualstack
+  when:
+    - '"vrrp_external_group_1" in keepalived_conf_content.stdout'
+
+- name: Set ips for external vrrp group 0 if scenario singlestack IPv4 ({{ ext_scenario }})
+  set_fact:
+    unicast_src_ip_eth1_group0: "{{ hostvars[inventory_hostname]['ansible_eth1']['ipv4']['address'] }}"
+    unicast_peer_ip_eth1_group0: "{{ hostvars[other_director]['ansible_eth1']['ipv4']['address'] }}"
+  when:
+    - ext_scenario == 'singlestack' and hostvars[other_director]['ansible_eth1']['ipv4']['address'] is defined
+
+- name: Set ips for external vrrp group 0 if scenario singlestack IPv6 ({{ ext_scenario }})
+  set_fact:
+    unicast_src_ip_eth1_group0: "{{ hostvars[inventory_hostname]['ansible_eth1']['ipv6'][0]['address'] }}"
+    unicast_peer_ip_eth1_group0: "{{ hostvars[other_director]['ansible_eth1']['ipv6'][0]['address'] }}"
+  when:
+    - ext_scenario == 'singlestack' and hostvars[other_director]['ansible_eth1']['ipv4']['address'] is not defined
+
+- name: Set ips for vrrp groups 0 and 1 if scenario dualstack ({{ ext_scenario }})
+  set_fact:
+    unicast_src_ip_eth1_group0: "{{ hostvars[inventory_hostname]['ansible_eth1']['ipv4']['address'] }}"
+    unicast_peer_ip_eth1_group0: "{{ hostvars[other_director]['ansible_eth1']['ipv4']['address'] }}"
+    unicast_src_ip_eth1_group1: "{{ hostvars[inventory_hostname]['ansible_eth1']['ipv6'][0]['address'] }}"
+    unicast_peer_ip_eth1_group1: "{{ hostvars[other_director]['ansible_eth1']['ipv6'][0]['address'] }}"
+  when: ext_scenario == 'dualstack'
+
+- name: Set unicast src ip for external VRRP group 0
+  replace:
+    path: /etc/keepalived/keepalived.conf
+    regexp: "unicast_src_ip <vrrp_external_group_0>"
+    replace: "unicast_src_ip {{ unicast_src_ip_eth1_group0 }}"
+
+- name: Set unicast peer ip for external VRRP group 0
+  replace:
+    path: /etc/keepalived/keepalived.conf
+    regexp: "<peer_ip vrrp_external_group_0>"
+    replace: "{{ unicast_peer_ip_eth1_group0 }}"
+
+- name: Set ips for ipv6 in external dualstack scenario
+  block:
+    - name: Set unicast src ip for external VRRP group 1
+      replace:
+        path: /etc/keepalived/keepalived.conf
+        regexp: "unicast_src_ip <vrrp_external_group_1>"
+        replace: "unicast_src_ip {{ unicast_src_ip_eth1_group1 }}"
+
+    - name: Set unicast peer ip for external VRRP group 1
+      replace:
+        path: /etc/keepalived/keepalived.conf
+        regexp: "<peer_ip vrrp_external_group_1>"
+        replace: "{{ unicast_peer_ip_eth1_group1 }}"
+  when: ext_scenario == 'dualstack'
+
+- name: Restart keepalived
+  systemd:
+    name: keepalived
+    state: restarted
+    enabled: yes

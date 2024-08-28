@@ -1,0 +1,9 @@
+---
+
+- name: Install Docker and pre-reqs for RHEL
+  package:
+    name: "{{ docker_packages }}"
+  register: result
+  until: result is success
+  retries: "{{ docker_install_retries if (docker_install_retries is defined) else 0 }}"
+  delay: "{{ docker_install_retry_delay if (docker_install_retry_delay is defined) else 5 }}"

@@ -1,0 +1,9 @@
+# local dnsmasq server
+nameserver 127.0.0.1
+{% for ns in  dns_nameservers  %}
+nameserver {{ ns }}
+{% endfor %}
+{% if dns_search_suffix %}
+search {{ dns_search_suffix }}
+{% endif %}
+

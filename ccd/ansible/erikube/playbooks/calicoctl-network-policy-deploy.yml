@@ -1,0 +1,8 @@
+---
+- name: Deploy Calicoctl Network Policy
+  hosts: master[0]
+  vars:
+  - calicoctl_policy_action: deploy
+  roles:
+  - role: erikube-defaults
+  - role: calicoctl-network-policy

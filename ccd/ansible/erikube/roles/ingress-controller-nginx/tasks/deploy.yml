@@ -1,0 +1,60 @@
+---
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/k8s-nginx-ingress-XXXXXX
+  register: mktemp
+  changed_when: False
+
+- name: Create Self-Signed certificate for ingress controller to increase validity time
+  import_tasks: update-certificate.yml
+  when: (ingress_ctrl_cert_file is undefined and ingress_ctrl_key_file is undefined) or
+        (ingress_ctrl_cert is undefined and ingress_ctrl_key is undefined)
+
+- name: "Set fact k8s_file_loc and ingress controller template files"
+  set_fact:
+    k8s_file_loc: "{{ mktemp.stdout }}"
+    ing_tpl_files:
+      - ingress-ctrl-namespace.yaml
+      - ingress-ctrl-sa.yaml
+      - ingress-ctrl-default-backend.yaml
+      - ingress-ctrl-config-map.yaml
+      - ingress-ctrl-tcp.yaml
+      - ingress-ctrl-udp.yaml
+      - ingress-ctrl-rbac.yaml
+      - ingress-ctrl-with-rbac.yaml
+      - ingress-ctrl-service.yaml
+      - ingress-ctrl-ingressclass.yaml
+
+- name: Prepare ingress controller templates
+  template:
+    src: "{{ tpl_file }}.j2"
+    dest: "{{ k8s_file_loc }}/{{ tpl_file }}"
+  loop: "{{ ing_tpl_files }}"
+  loop_control:
+    loop_var: tpl_file
+
+- name: Create ingress controller namespace
+  become: yes
+  command: "{{ kubectl }} apply -f {{ k8s_file_loc }}/ingress-ctrl-namespace.yaml"
+  register: ns_create
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: ns_create.rc == 0
+  failed_when: ns_create.rc != 0 and 'already exists' not in ns_create.stderr
+  changed_when: ns_create.rc == 0
+
+- name: Deploy internal ingress controller
+  command: "{{ kubectl }} apply -f {{ k8s_file_loc }}/{{ tpl_file }}"
+  become: yes
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+  loop: "{{ ing_tpl_files }}"
+  loop_control:
+    loop_var: tpl_file
+
+- name: Delete temp directory
+  file:
+    name: "{{ mktemp.stdout }}"
+    state: absent
+  changed_when: False

@@ -1,0 +1,11 @@
+---
+
+ingressctrl_servicename: ingress-nginx
+ingressctrl_namespace: ingress-nginx
+ingressctrl_action: deploy
+ingressctrl_replicas: 2
+ingressctrl_service_type: LoadBalancer
+ingressctrl_service_annotations: ""
+ingressctrl_service_https_target: 443
+ingressctrl_allocate_node_port: true
+ingressctrl_cluster_ip_defined: false

@@ -1,0 +1,426 @@
+---
+- name: Calculate size of Kubernetes cluster
+  hosts: "{{ groups.reachable_master[0] | d(groups.master[0]) }}"
+  tasks:
+    - name: Calculate number of expected nodes
+      set_fact:
+        expected: "{{ groups.master | length + groups.worker | length if groups.worker is defined else groups.master | length }}"
+
+- name: Check all kubernetes nodes are in Ready state
+  hosts: "{{ groups.reachable_master[0] | d(groups.master[0]) }}"
+  become: yes
+  roles:
+  - erikube-defaults
+  tasks:
+    - name: Get actual nodes in ready state
+      shell: "{{ kubectl }} get node | grep Ready | grep -cv NotReady"
+      register: nodes
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: (nodes.rc == 0 or "not found" in nodes.stderr)
+      changed_when: false
+    - name: Save number of Ready nodes
+      set_fact:
+        actual: "{{ nodes.stdout }}"
+    - block:
+      - name: Fail if number of expected nodes are not ready
+        fail:
+          msg: 'actual: {{ actual }} not equal to expected: {{ expected }}'
+        when: expected != actual
+      - set_fact:
+          health_checks_list: "{{ health_checks_list }} + ['Check all kubernetes nodes are in Ready state [PASS]']"
+      rescue:
+      - set_fact:
+          health_checks_list: "{{ health_checks_list }} + ['Check all kubernetes nodes are in Ready state [FAIL]']"
+
+- name: Check kube-scheduler is in Healthy state
+  hosts: "{{ groups.reachable_master[0] | d(groups.master[0]) }}"
+  roles:
+  - erikube-defaults
+  vars:
+    pod_name: ""
+    node_ip: ""
+    comp_url: ""
+  become: yes
+  tasks:
+    - block:
+      - name: Get kube-scheduler pod-name and node-ip
+        shell: "{{ kubectl }} get pods -o wide -n kube-system | grep kube-scheduler"
+        register: output
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: (output.rc == 0 or "not found" in output.stderr)
+        failed_when: >
+          (output is not defined) or
+          (output.stderr != "") or
+          (output.rc != 0)
+
+      - name: Extract kube-scheduler pod-name and node-ip
+        set_fact:
+          pod_name: "{{ output.stdout.split()[0] }}"
+          node_ip: "{{ output.stdout.split()[5] }}"
+        when: output.stdout.split()[5] is defined
+
+      - name: Get kube-scheduler liveness url
+        shell: "{{ kubectl }} -n kube-system describe pod {{ pod_name }} | grep Liveness"
+        register: output
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: (output.rc == 0 or "not found" in output.stderr)
+        failed_when: >
+          (output is not defined) or
+          (output.stderr != "") or
+          (output.rc != 0)
+
+      - name: Extract kube-scheduler liveness url
+        set_fact:
+          comp_url: "{{ output.stdout.split()[2]
+                     }}"
+        when: >
+          node_ip is defined and
+          output.stdout.split()[2] is defined
+
+      - name: Get kube-scheduler health status
+        uri:
+          url: "{{ comp_url }}"
+          body_format: json
+          return_content: yes
+          validate_certs: no
+        register: health_status
+        failed_when: "'ok' not in health_status.content"
+        when: comp_url is defined
+
+      - name: Set kube-scheduler health status
+        set_fact:
+          health_checks_list: "{{ health_checks_list }} + ['Check kube-scheduler health [PASS]']"
+      rescue:
+      - set_fact:
+          health_checks_list: "{{ health_checks_list }} + ['Check kube-scheduler health [FAIL]']"
+
+- name: Check kube-controller-manager is in Healthy state
+  hosts: "{{ groups.reachable_master[0] | d(groups.master[0]) }}"
+  roles:
+  - erikube-defaults
+  vars:
+    pod_name: ""
+    node_ip: ""
+    comp_url: ""
+  become: yes
+  tasks:
+    - block:
+      - name: Get kube-controller-manager pod-name and node-ip
+        shell: "{{ kubectl }} get pods -o wide -n kube-system | grep kube-controller-manager"
+        register: output
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: (output.rc == 0 or "not found" in output.stderr)
+        failed_when: >
+          (output is not defined) or
+          (output.stderr != "") or
+          (output.rc != 0)
+
+      - name: Extract kube-controller-manager pod-name and node-ip
+        set_fact:
+          pod_name: "{{ output.stdout.split()[0] }}"
+          node_ip: "{{ output.stdout.split()[5] }}"
+        when: output.stdout.split()[5] is defined
+
+      - name: Get kube-controller-manager liveness url
+        shell: "{{ kubectl }} -n kube-system describe pod {{ pod_name }} | grep Liveness"
+        register: output
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: (output.rc == 0 or "not found" in output.stderr)
+        failed_when: >
+          (output is not defined) or
+          (output.stderr != "") or
+          (output.rc != 0)
+
+      - name: Extract kube-controller-manager liveness url
+        set_fact:
+          comp_url: "{{ output.stdout.split()[2]
+                     }}"
+        when: >
+          node_ip is defined and
+          output.stdout.split()[2] is defined
+
+      - name: Get kube-controller-manager health status
+        uri:
+          url: "{{ comp_url }}"
+          body_format: json
+          return_content: yes
+          validate_certs: no
+        register: health_status
+        failed_when: "'ok' not in health_status.content"
+        when: comp_url is defined
+
+      - name: Set kube-controller-manager health status
+        set_fact:
+          health_checks_list: "{{ health_checks_list }} + ['Check kube-controller-manager health [PASS]']"
+      rescue:
+      - set_fact:
+          health_checks_list: "{{ health_checks_list }} + ['Check kube-controller-manager health [FAIL]']"
+
+- name: Check etcd is in Healthy state
+  hosts: "{{ groups.reachable_master[0] | d(groups.master[0]) }}"
+  become: yes
+  roles:
+  - erikube-defaults
+  tasks:
+    - block:
+      - name: Get etcd health status
+        shell: "{{ kubectl }} get --raw='/readyz?verbose' | grep etcd"
+        register: output
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: (output.rc == 0 or "not found" in output.stderr)
+        failed_when: >
+          ((output is not defined) or
+           (output.stderr != "") or
+           (output.rc != 0)) and
+           'ok' not in output.stdout
+
+      - name: set etcd healt status
+        set_fact:
+          health_checks_list: "{{ health_checks_list }} + ['Check etcd health [PASS]']"
+      rescue:
+      - set_fact:
+          health_checks_list: "{{ health_checks_list }} + ['Check etcd health [FAIL]']"
+
+- name: "Check all PODs in namespaces kube-system/ingress-nginx/monitoring/ccd-logging are in Healthy state"
+  hosts: "{{ groups.reachable_master[0] | d(groups.master[0]) }}"
+  roles:
+  - erikube-defaults
+  vars:
+    namespaces:
+      - kube-system
+      - ingress-nginx
+      - monitoring
+      - ccd-logging
+  tasks:
+    - name: Get all namespaces
+      block:
+        - name: Get all namespaces
+          shell:
+            "{{ kubectl }} get namespaces | awk '{print $1}' | grep -v NAME"
+          register: all_namespaces
+          retries: "{{ kubectl_retry_count }}"
+          delay: "{{ kubectl_retry_delay }}"
+          until: (all_namespaces.rc == 0 or "not found" in all_namespaces.stderr)
+          become: yes
+        - name: set all namespaces
+          set_fact:
+            namespaces: "{{ all_namespaces.stdout_lines | unique }}"
+      when: application_namespaces is defined and application_namespaces == 'ALL'
+
+    - name: Add application namespaces to system namespaces
+      set_fact:
+        namespaces: "{{ (namespaces + application_namespaces) | unique }}"
+      when: application_namespaces is defined and application_namespaces != 'ALL'
+
+    - set_fact:
+        namespaces_str: "{{ namespaces | join('/') }}"
+
+    - name: "Get PODs with .status.phase not in Running/Succeeded/Evicted/Completed in {{ namespaces_str }}"
+      shell:
+        "{{ kubectl }} -n {{ item }} get pods | grep -v -e RESTARTS -e Running -e Succeeded -e Evicted -e Completed"
+      loop: "{{ namespaces }}"
+      register: get_pods
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: (get_pods.rc == 1)
+      failed_when: false
+      changed_when: false
+      become: yes
+
+    - vars:
+          failed_pods: "{{ get_pods.results | selectattr('rc', 'eq', 0) | list }}"
+          failed_ns: "{{ failed_pods | map(attribute='item') | list | join('/') }}"
+
+      block:
+        - name: "Check for failed PODs in {{ namespaces_str }} namespace"
+          fail:
+            msg: "Some pods in {{ failed_ns }} namespace are in failed/error state"
+          when: failed_pods | length > 0
+        - set_fact:
+            health_checks_list: "{{ health_checks_list }} + ['Check all PODs in namespaces \
+                                 {{ namespaces_str }} are in Healthy state [PASS]']"
+
+      rescue:
+        - name: "Log non-running PODs in {{ failed_ns }} namespace"
+          debug:
+            msg: "{{ item.stdout_lines }}"
+          loop: "{{ failed_pods }}"
+          loop_control:
+            label: "{{ item.item }}"
+
+        - set_fact:
+            health_checks_list: "{{ health_checks_list }} + ['Check all PODs in namespaces \
+                                 {{ namespaces_str }} are in Healthy state [FAIL]']"
+
+- name: "Check PVs in namespaces kube-system/ingress-nginx/monitoring/ccd-logging are not in Terminating state"
+  hosts: "{{ groups.reachable_master[0] | d(groups.master[0]) }}"
+  vars:
+    namespaces:
+      - kube-system
+      - ingress-nginx
+      - monitoring
+      - ccd-logging
+  tasks:
+    - name: Get all namespaces
+      block:
+        - name: Get all namespaces
+          shell:
+            "{{ kubectl }} get namespaces | awk '{print $1}' | grep -v NAME"
+          register: all_namespaces
+          become: yes
+        - name: set all namespaces
+          set_fact:
+            namespaces: "{{ all_namespaces.stdout_lines | unique }}"
+      when: application_namespaces is defined and application_namespaces == 'ALL'
+
+    - name: Add application namespaces to system namespaces
+      set_fact:
+        namespaces: "{{ (namespaces + application_namespaces) | unique }}"
+      when: application_namespaces is defined and application_namespaces != 'ALL'
+
+    - set_fact:
+        namespaces_str: "{{ namespaces | join('/') }}"
+
+    - name: "Get PVs with status Terminating in {{ namespaces_str }}"
+      shell:
+        "{{ kubectl }} get pv | grep {{ item }}/ | grep -E Terminating"
+      loop: "{{ namespaces }}"
+      register: get_pvs
+      failed_when: false
+      changed_when: false
+      become: yes
+
+    - vars:
+          terminating_pvs: "{{ get_pvs.results | selectattr('rc', 'eq', 0) | list }}"
+          failed_ns: "{{ terminating_pvs | map(attribute='item') | list | join('/') }}"
+
+      block:
+        - name: "Check for Terminating PVs in {{ namespaces_str }} namespace"
+          fail:
+            msg: "Some PVs in {{ failed_ns }} namespace are in terminating state"
+          when: terminating_pvs | length > 0
+        - set_fact:
+            health_checks_list: "{{ health_checks_list }} + ['Check PVs in namespaces \
+                                 {{ namespaces_str }} are not in Terminating state [PASS]']"
+
+      rescue:
+        - name: "Log Terminating PVs in {{ failed_ns }} namespace"
+          debug:
+            msg: "{{ item.stdout_lines }}"
+          loop: "{{ terminating_pvs }}"
+          loop_control:
+            label: "{{ item.item }}"
+
+        - set_fact:
+            health_checks_list: "{{ health_checks_list }} + ['Check PVs in namespaces \
+                                 {{ namespaces_str }} are not in Terminating state [FAIL]']"
+
+- name: Check kubernetes node, memory, disk and PID status
+  hosts: "{{ groups.reachable_master[0] | d(groups.master[0]) }}"
+  roles:
+  - erikube-defaults
+  vars:
+     JSONPATH: '{range .items[*]}{@.metadata.name}:{range @.status.conditions[*]}{@.type}={@.status};{end}{end}'
+  tasks:
+    - name: Check Memory Pressure of nodes
+      block:
+       - name: Get the list of nodes which has Memory Pressure
+         shell: '{{ kubectl }} get nodes -o jsonpath="{{ JSONPATH }}" | grep "MemoryPressure=False"'
+         register: mem_pressure
+         retries: "{{ kubectl_retry_count }}"
+         delay: "{{ kubectl_retry_delay }}"
+         until: (mem_pressure.rc == 0 or "not found" in mem_pressure.stderr)
+         changed_when: false
+         failed_when: "'MemoryPressure=True' in mem_pressure.stdout"
+         become: true
+       - set_fact:
+           health_checks_list: "{{ health_checks_list }} + ['Check all nodes have memory pressure below threshold [PASS]']"
+      rescue:
+        - set_fact:
+            health_checks_list: "{{ health_checks_list }} + ['Check all nodes have memory pressure below threshold [FAIL]']"
+
+    - name: Check Disk pressure of nodes
+      block:
+       - name: Get the list of nodes which has Disk Pressure
+         shell: '{{ kubectl }} get nodes -o jsonpath="{{ JSONPATH }}" | grep "DiskPressure=False"'
+         register: disk_pressure
+         retries: "{{ kubectl_retry_count }}"
+         delay: "{{ kubectl_retry_delay }}"
+         until: (disk_pressure.rc == 0 or "not found" in disk_pressure.stderr)
+         changed_when: false
+         failed_when: "'DiskPressure=True' in disk_pressure.stdout"
+         become: true
+       - set_fact:
+           health_checks_list: "{{ health_checks_list }} + ['Check all nodes have disk pressure below threshold [PASS]']"
+      rescue:
+        - set_fact:
+            health_checks_list: "{{ health_checks_list }} + ['Check all nodes have disk pressure below threshold [FAIL]']"
+
+    - name: Check PID pressure of nodes
+      block:
+       - name: Get the list of nodes which has PID Pressure
+         shell: '{{ kubectl }} get nodes -o jsonpath="{{ JSONPATH }}" | grep "PIDPressure=False"'
+         register: pid_pressure
+         retries: "{{ kubectl_retry_count }}"
+         delay: "{{ kubectl_retry_delay }}"
+         until: (pid_pressure.rc == 0 or "not found" in pid_pressure.stderr)
+         changed_when: false
+         failed_when: "'PIDPressure=True' in pid_pressure.stdout"
+         become: true
+       - set_fact:
+           health_checks_list: "{{ health_checks_list }} + ['Check all nodes have PID pressure below threshold [PASS]']"
+      rescue:
+        - set_fact:
+            health_checks_list: "{{ health_checks_list }} + ['Check all nodes have PID pressure below threshold [FAIL]']"
+
+- name: Check CPU pressure is below Max Threshold
+  hosts: "{{ groups.worker + groups.reachable_master | d(groups.master) }}"
+  vars:
+    cpu_max_load: 85
+  tasks:
+   - name: Calculate CPU pressure
+     block:
+      - name: "Get the CPU load"
+        shell: mpstat 10 1 -o JSON | jq -r '.sysstat.hosts[].statistics[]."cpu-load"[].idle' | awk '{print 100 - $1}'
+        register: cpu_result
+        failed_when: cpu_result.stdout|int > cpu_max_load|int
+      - name: "Output the CPU load facts"
+        debug:
+          msg:
+           - "CPU Load: {{cpu_result.stdout}}"
+           - "CPU Max Load: {{cpu_max_load}}"
+      - set_fact:
+          health_checks_list: "{{ health_checks_list }} + ['Check CPU pressure is below Max Threshold [PASS]']"
+     rescue:
+      - set_fact:
+          health_checks_list: "{{ health_checks_list }} + ['Check CPU pressure is below Max Threshold [FAIL]']"
+
+- name: "Check all service status on each node"
+  hosts: "{{ groups.worker + groups.reachable_master | d(groups.master) }}"
+  tasks:
+    - name: Check service status
+      block:
+        #       - name: Populate service facts
+        #         service_facts:
+       - name: Get the enabled service list
+         shell: systemctl list-unit-files | grep enabled | grep .service | awk -F ' ' '{print $1}'
+         changed_when: false
+         register: enabled_services
+       - name: Get the inactive service list
+         shell: systemctl --all --type=service  --state=inactive | grep loaded | grep .service | awk -F ' ' '{print $1}'
+         changed_when: false
+         register: inactive_services
+       - name: Dump services that are not running
+         vars:
+            services_not_running: "{{ enabled_services.stdout_lines | intersect(inactive_services.stdout_lines) }}"
+         debug:
+            msg:
+               - "Some services are not running"
+               - "{{ services_not_running }}"
+         when: services_not_running | length > 0

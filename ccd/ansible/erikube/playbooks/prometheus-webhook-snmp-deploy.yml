@@ -1,0 +1,13 @@
+---
+- name: Deploy Prometheus Webhook SNMP
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+  - include_vars: ../../common/container-list.json
+  vars:
+    image_prometheus_webhook_snmp: "{{ kube_image_prefix }}{{ containers.monitoring.prometheus_webhook_snmp }}"
+    image_prometheus_webhook_snmp_sidecar: "{{ kube_image_prefix }}{{ containers.monitoring.prometheus_webhook_snmp_sidecar }}"
+    heat_stack_name_webhook: "{{ heat_stack_name | default('kubernetes') }}"
+  roles:
+    - role: prometheus-webhook-snmp
+      when: prometheus_webhook_snmp_enabled | default('false') | bool

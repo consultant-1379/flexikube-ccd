@@ -1,0 +1,11 @@
+---
+- name: Gather facts as non root
+  hosts: ingress_lb
+  gather_facts: yes
+
+- name: Purge ingress loadbalancer
+  hosts: ingress_lb
+  tasks:
+    - include_role:
+        name: ingress-lb
+        tasks_from: purge

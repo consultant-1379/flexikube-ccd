@@ -1,0 +1,113 @@
+---
+- name: "Disable nginx container service"
+  systemd:
+    name: nginx_container
+    state: stopped
+    enabled: false
+  ignore_errors: yes
+
+- name: "Purge nginx_container service"
+  file:
+    path: "{{ systemd_dir }}/nginx_container.service"
+    state: absent
+  ignore_errors: yes
+
+- name: Assert that 'kube_lb_upstream_servers' is defined properly
+  assert:
+    that:
+      - kube_lb_upstream_servers is defined
+      - kube_lb_upstream_servers | list
+    msg: "'kube_lb_upstream_servers' is not defined properly"
+
+- name: Determine kube_lb image
+  set_fact:
+    kube_lb_image: "{{ haproxy_image }}"
+  when: default_kube_lb is defined and default_kube_lb == 'haproxy'
+
+- name: Log into local registry and force re-authorization
+  docker_login:
+    registry: "{{ kube_image_prefix }}"
+    username: "{{ local_registry_user }}"
+    password: "{{ local_registry_password }}"
+    reauthorize: yes
+  when: local_registry_user is defined and local_registry_user != ""
+
+- name: Pull lb container image
+  become: true
+  shell: >
+    docker pull {{ kube_lb_image }}
+
+- name: Pull lb ingress image
+  become: true
+  shell: >
+    sudo docker pull {{ ingress_lb_image }}
+  when: local_registry_user is defined and local_registry_user != ""
+
+- name: Create kube-lb configuration directory
+  file:
+    path: "{{ kube_lb_config_dir }}"
+    mode: "{{ file_default_mode }}"
+    owner: "{{ file_default_owner }}"
+    group: "{{ file_default_group }}"
+    state: directory
+
+- name: Create the haproxy systemd unit file
+  template:
+    src: haproxy.docker.service.j2
+    dest: "{{ systemd_dir}}/{{ kube_lb_service_name }}.service"
+  when: default_kube_lb is defined and default_kube_lb == 'haproxy'
+
+- name: Enable bind on non local addresses
+  sysctl:
+    name: net.ipv4.ip_nonlocal_bind
+    value: 1
+    sysctl_set: yes
+    state: present
+    reload: yes
+  when:
+    - lb_bind_on_non_local | default(true) | bool
+    - k8s_ip_version == 'ipv4' or k8s_ip_version == 'dualstack'
+
+- name: Enable bind on non local addresses
+  sysctl:
+    name: net.ipv6.ip_nonlocal_bind
+    value: 1
+    sysctl_set: yes
+    state: present
+    reload: yes
+  when:
+    - lb_bind_on_non_local | default(true) | bool
+    - k8s_ip_version == 'ipv6' or k8s_ip_version == 'dualstack'
+
+- name: Configure haproxy service
+  template:
+    src: haproxy.cfg.j2
+    dest: "{{kube_lb_config_dir}}/haproxy.cfg"
+    owner: root
+    mode: 0644
+  notify: Restart haproxy
+  when: default_kube_lb is defined and default_kube_lb == 'haproxy'
+
+
+- name: Enable systemd service
+  systemd:
+    name: "{{ kube_lb_service_name }}"
+    state: started
+    enabled: yes
+    daemon_reload: true
+  register: start_result
+
+- set_fact:
+    kube_lb_start_result_changed: "{{ start_result is changed }}"
+
+
+- meta: flush_handlers
+
+- name: Wait for restored API access
+  command: "{{ kubectl }} -n kube-system get pods"
+  become: yes
+  register: api_status
+  until: api_status.rc == 0
+  retries: 90
+  delay: 2
+  when: kube_api_check | default(true) | bool

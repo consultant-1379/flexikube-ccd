@@ -1,0 +1,34 @@
+---
+
+# We check this on the head master
+- name: Checking pods are up and running and have the correct image deployed
+  delegate_to: "{{ head_master }}"
+  when: pod_images_dict is defined
+  script: "check_pod_status_and_image.sh {{ namespace }} {{ item.key }} {{ item.value }}"
+  register: output
+  until: output.rc == 0
+  retries: "{{ version_check_retries | default(200) }}"
+  delay: "{{ version_check_retry_delay | default(2) }}"
+  with_dict: "{{ pod_images_dict }}"
+
+# This should be checked on the node when we install the container
+
+- name: check docker container up and running and correct image deployed
+  when: container_images_dict is defined
+  script: "check_container_status_and_image.sh {{ item.key }} {{ item.value }} 2>> /tmp/erikube-check_container_status_and_image.log"
+  become: yes
+  register: output
+  until: output.rc == 0
+  retries: "{{ version_check_retries | default(200) }}"
+  delay: "{{ version_check_retry_delay | default(2) }}"
+  with_dict: "{{ container_images_dict }}"
+
+- name: check pod image version
+  delegate_to: "{{ head_master }}"
+  when: pod_image_version_dict is defined
+  script: "check_pod_status_and_image.sh {{ namespace }} {{ item.key }} {{ item.value }} version 2>> /tmp/erikube-check_pod_status_and_image.log"
+  register: output
+  until: output.rc == 0
+  retries: "{{ version_check_retries | default(90) }}"
+  delay: "{{ version_check_retry_delay | default(2) }}"
+  with_dict: "{{ pod_image_version_dict }}"

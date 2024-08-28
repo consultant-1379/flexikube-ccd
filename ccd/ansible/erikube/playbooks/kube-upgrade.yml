@@ -1,0 +1,251 @@
+---
+# Upgrade Kubernetes control plane
+
+- name: Gather facts
+  hosts: master
+  tasks: []
+
+- name: Verify all kubelets are in the started state
+  hosts: master, worker
+  become: true
+  tasks:
+    - name: Start kubelet
+      systemd:
+        state: started
+        daemon_reload: yes
+        name: kubelet
+      become: true
+
+- name: Update etc/host files
+  hosts: master, worker
+  become: true
+  tasks:
+  - name: Update /etc/host files
+    include_role:
+      name: kube-common
+      tasks_from: update-etc-hosts
+
+- name: Update etc/resolv.conf files
+  hosts: master, worker
+  become: true
+  tasks:
+  - name: Update /etc/resolv.conf files
+    include_role:
+      name: kube-common
+      tasks_from: update-etc-resolv
+
+- name: Update admin conf with own IP for API Server
+  hosts: master
+  become: true
+  tasks:
+  - name: Update Master Kubernetes conf files
+    include_role:
+      name: kube-common
+      tasks_from: update-k8s-conf
+
+- name: Generate IdAM certificate
+  hosts: master
+  vars:
+  - idam_certificate_action: update
+  tasks:
+  - include_role:
+      name: idam_certificate
+    when: dex_enabled is defined and dex_enabled
+
+- name: Upgrade
+  hosts: master[0]
+  roles:
+    - role: kube-upgrade-configuration
+      when: image_based_deployment | default(false) | bool
+
+- name: Upgrade
+  hosts: master
+  roles:
+    - role: kube-upgrade-configuration
+      when: not image_based_deployment | default(false) | bool
+
+- name: Prefetch control plane images and upgrade host binaries
+  hosts: master, worker
+  become: true
+  max_fail_percentage: 0
+  roles:
+    - kube-upgrade-preparation
+
+- name: Tag the pause container with the tag k8s expects for workers
+  hosts: worker
+  roles:
+    - update-pause-image-tag
+
+- name: Configure runc
+  hosts: master, worker
+  become: true
+  tasks:
+    - name: Remove built runc binaries in {{ ansible_distribution }} so it can use default binary
+      file:
+        path: "/usr/sbin/runc"
+        state: absent
+      when: ansible_distribution == "SLES"
+
+    - name: Remove built runc binaries in {{ ansible_distribution }} so it can use default binary
+      file:
+        path: "/usr/bin/runc"
+        state: absent
+      when: ansible_distribution == "Ubuntu" or ansible_distribution == "CentOS"
+
+    - name: Configure runc
+      include_role:
+        name: runc
+
+- name: Upgrade to current erikube version
+  hosts: master
+  serial: 1
+  become: yes
+  pre_tasks:
+  - name: Remove master '{{ inventory_hostname }}' from loadbalancer's upstream pool
+    vars:
+      kube_lb_upstream_servers: "{{ groups.master | difference([inventory_hostname]) }}"
+    include_role:
+      name: kube-lb
+      apply:
+        delegate_to: "{{ item }}"
+    with_items: "{{ groups.master }}"
+    when:
+      - kube_api_vip_enabled | default(false) | bool
+      - not image_based_deployment | default(false) | bool
+
+  roles:
+    - kube-upgrade
+
+  post_tasks:
+  - name: Add master '{{ inventory_hostname }}' back to loadbalancer's upstream pool"
+    vars:
+      kube_lb_upstream_servers: "{{ groups.master }}"
+    include_role:
+      name: kube-lb
+      apply:
+        delegate_to: "{{ item }}"
+    with_items: "{{ groups.master }}"
+    when:
+      - kube_api_vip_enabled | default(false) | bool
+      - not image_based_deployment | default(false) | bool
+
+- name: Restart kube controller containers to make sure signer param is updated
+  hosts: master
+  vars:
+    - crictl_cmd: /usr/local/bin/crictl
+  become: yes
+  serial: 1
+  tasks:
+    - include_role:
+        name: erikube-defaults
+      when: kube_network_plugin is not defined or kube_network_plugin == 'calico'
+    - name: Restart kube-controller container
+      shell: "{{ crictl_cmd }} rm -f  $({{ crictl_cmd }} ps | grep kube-controller-manager | awk '{print $1}')"
+    - name: Wait that kube-controller container is restarted
+      shell: "{{ crictl_cmd }} ps --state running | grep kube-controller-manager | awk '{print $1}' | wc -l"
+      register: container_count
+      until: container_count.stdout.find("1") != -1
+      retries: 30
+      delay: 1
+    - name: pause for 10 seconds
+      pause:
+        seconds: 10
+
+- name: Restart kubelet after replacing the api server
+  hosts: master, worker
+  become: true
+  tasks:
+    - name: Enable new kubelet
+      systemd:
+        state: restarted
+        daemon_reload: yes
+        name: kubelet
+      become: true
+
+    - name: verify that new kubelet is running
+      shell: "systemctl status kubelet | grep -i active"
+      register: kubelet_running
+      until: kubelet_running.rc == 0
+      retries: 10
+      delay: 20
+
+- name: Fix the coredns configmap if needed
+  hosts: master[0]
+  become: true
+  vars:
+    - dns_servers_ips: "{{ dns_server_ips | join(' ') }}"
+  tasks:
+  - name: Update coredns configmap
+    include_role:
+      name: kube-upgrade
+      tasks_from: coredns-cm-update
+
+- name: Set affinity and node selector rules for coredns deployment towards master node
+  hosts: master[0]
+  vars:
+    kubectl: "/usr/local/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf"
+    namespace: "kube-system"
+  become: true
+  tasks:
+  - name: Set affinity and node selector rules for coredns deployment
+    include_role:
+      name: coredns-anti-affinity
+
+- name: Set pod disruption budget for coredns
+  hosts: master[0]
+  become: true
+  roles:
+    - coredns-pdb
+
+- name: Removing taint for master
+  hosts: master[0]
+  become: true
+  tasks:
+  - name: Removing taint for master
+    shell: "/usr/local/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf taint nodes --all node-role.kubernetes.io/master:NoSchedule-"
+    register: kubectl_result
+    failed_when: kubectl_result.rc != 0 and "not found" not in kubectl_result.stderr
+    changed_when: kubectl_result.rc == 0
+    retries: 3
+    delay: 3
+    ignore_errors: true
+    until: kubectl_result.rc == 0
+
+- name: Check versions of coredns and kube-proxy containers
+  hosts: worker
+  become: false
+  roles:
+    - version_check
+  vars:
+    namespace: kube-system
+    pod_image_version_dict:
+      coredns: "{{ opt_coredns_version }}"
+      kube-proxy: "v{{ opt_kubernetes_version }}"
+
+- name: Fetch kube config to local node from first master
+  hosts: master[0]
+  become: true
+  tasks:
+    - name: Fetch kube config to local node from first master
+      fetch:
+        src: "/home/{{ ansible_user }}/.kube/config"
+        dest: "/home/{{ ansible_user }}/.kube/config"
+        flat: yes
+      when: image_based_deployment | default(false) | bool
+
+- name: Copy kube config from local host to both directors
+  hosts: director
+  become: yes
+  tasks:
+  - block:
+    - name: Copy kube config from local host to both directors
+      copy:
+        src: "/home/{{ ansible_user }}/.kube/config"
+        dest: "/home/{{ ansible_user }}/.kube/config"
+
+    - name: Copy kube config to admin conf directory
+      copy:
+        src: "/home/{{ ansible_user }}/.kube/config"
+        dest: "/etc/kubernetes/admin.conf"
+        remote_src: yes
+    when: image_based_deployment | default(false) | bool

@@ -1,0 +1,23 @@
+---
+- name: Get helm status
+  shell: "{{ get_helm_status }}"
+  register: chart_status
+  failed_when: false == true
+
+- when: chart_status.rc == 0
+  block:
+    - name: Get {{ chart_name }} values with helm
+      shell: >-
+        {{ helm }} get values {{ chart_name }} --namespace {{ kube_namespace | default('default') }} -o json
+      register: get_helm_result
+      failed_when: false == true
+
+    - name: Store helm values info
+      set_fact:
+        helm_chart_values: "{{ get_helm_result.stdout|from_json }}"
+
+- when: chart_status.rc != 0
+  block:
+    - name: Empty helm values info
+      set_fact:
+        helm_chart_values: ""

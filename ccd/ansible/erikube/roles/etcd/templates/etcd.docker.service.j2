@@ -1,0 +1,22 @@
+[Unit]
+Description=The Etcd Server container
+After={{ docker_cmd }}.service
+Requires={{ docker_cmd }}.service
+PartOf={{ docker_cmd }}.service
+
+[Service]
+EnvironmentFile={{ etcd_conf_dir }}/etcd.conf
+ExecStartPre=-/usr/bin/{{ docker_cmd }} rm -f {{ etcd_service }}
+ExecStart=/usr/bin/{{ docker_cmd }} run --name {{ etcd_service }} --rm \
+	-v {{ etcd_data_dir }}:/var/lib/etcd:z \
+	-v {{ etcd_conf_dir }}:/etc/etcd:ro \
+	--env-file=/etc/etcd/etcd.conf --net=host \
+	{{ etcd_image }}
+ExecStop=/usr/bin/{{ docker_cmd }} stop {{ etcd_service }}
+SyslogIdentifier=etcd_container
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy={{ docker_cmd }}.service
+

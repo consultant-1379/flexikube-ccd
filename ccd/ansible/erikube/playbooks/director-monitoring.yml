@@ -1,0 +1,104 @@
+- name: Get machine IDs from all director nodes
+  hosts: [director]
+  tasks:
+  - name: OpenStack node ID from cloud-init
+    block:
+    - name: Get instance-id from cloud-init
+      command: cloud-init query instance_id
+      register: cloud_init_output
+      ignore_errors: true
+    - name: Register OpenStack instance_id
+      set_fact:
+        machine_id: "{{ cloud_init_output.stdout }}"
+        machine_id_source: "cloud-init"
+      when:
+        - cloud_init_output.rc == 0
+        - cloud_init_output != ""
+
+- name: Read from DMI data
+  hosts: [director]
+  tasks:
+  - name: Get node ID from DMI
+    block:
+    - name: Get instance-id from DMI BIOS data
+      shell: dmidecode --string system-uuid
+      register: dmi_output
+      become: true
+    - name: Register DMI instance-id
+      set_fact:
+        machine_id: "{{ dmi_output.stdout }}"
+        machine_id_source: "dmi"
+      when:
+        - dmi_output is defined
+        - dmi_output.stdout is defined
+        - dmi_output.stdout != ""
+    when: machine_id is not defined
+
+- name: Get director ip address
+  hosts: [director]
+  tasks:
+  - name: Get ip address of ansible_host
+    set_fact:
+      director_ip: "{{ hostvars[inventory_hostname].ansible_host }}"
+
+- name: Create custom Victoria metrics vmagent and vmalert configmap
+  hosts: master[0]
+  become: yes
+  vars:
+    - scrape_interval: "{{ pm_vmagent_scrape_interval | default('30s') }}"
+  tasks:
+    - name: Create custom Victoria metrics vmagent and vmalert configmap
+      include_role:
+        name: victoria-metrics
+        tasks_from: victoria_metrics_config
+      when: pm_monitoring_enabled | default(true) | bool
+
+- name: Remove old instance of node exporter
+  hosts: director
+  become: yes
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+  tasks:
+    - name: find old node exporter
+      shell: docker ps | grep {{ containers.monitoring.eric_pm_node_exporter }} | awk '{print $1}'
+      register: old_node_exporter
+
+    - name: remove old node exporter
+      shell: docker rm -f {{ old_node_exporter.stdout }}
+      when: old_node_exporter.stdout != ""
+
+- name: Run node exporter
+  hosts: director
+  become: yes
+  vars:
+    - local_registry: "127.0.0.1:5000"
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+    - name: Set list of collectors when node exporter default collector is disabled
+      set_fact:
+        collectors_list:
+          - --collector.disable-defaults
+          - --collector.cpu
+          - --collector.filesystem
+          - --collector.loadavg
+          - --collector.meminfo
+          - --collector.mountstats
+          - --collector.netclass
+          - --collector.netdev
+          - --collector.textfile
+          - --collector.timex
+          - --collector.uname
+          - --collector.xfs
+      when: pm_server_nodeExporter_default_collectors_disabled | default(true) | bool
+    - name: Set list of collectors when node exporter default collector is not disabled
+      set_fact:
+        collectors_list:
+          - --collector.mountstats
+      when: not pm_server_nodeExporter_default_collectors_disabled | default(true) | bool
+
+  tasks:
+    - name: log into local registry
+      shell: "sudo docker login -u {{ local_registry_user }} -p {{ local_registry_password }} {{ local_registry }}"
+      when: local_registry_user is defined and local_registry_user != ""
+    - name: run node exporter
+      shell: "sudo docker run -d --restart always --net=\"host\" --pid=\"host\" -v \"/:/host:ro,rslave\" {{ local_registry }}/{{ containers.monitoring.eric_pm_node_exporter }} --path.procfs=/host/proc --path.sysfs=/host/sys --path.rootfs=/host {{ collectors_list | join(' ')}} --web.listen-address={{ director_ip | ipwrap }}:9100"

@@ -1,0 +1,14 @@
+---
+
+ingress_lb_service: erikube-loadbalancer
+ingress_lb_data_dir: /etc/erikube
+ingress_lb_debug: false
+
+cert_clustername: erikube
+cert_deploy_dir: /etc/erikube
+cert_conf_file: config
+cert_ca_cert: ca.crt
+cert_pki_dir: /etc/kubernetes/pki
+
+kube_client_ca: "{{ groups.master.0 }}"
+serviceaccount: erikube-lb-leader

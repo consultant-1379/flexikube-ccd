@@ -1,0 +1,30 @@
+---
+- name: Check if {{ docker_cmd }} is running
+  command: systemctl status {{ docker_cmd }}
+  ignore_errors: yes
+  changed_when: false
+  register: service_docker_status
+
+- name: Report status of {{ docker_cmd }}
+  fail:
+    msg: |
+      Service {{ docker_cmd }} is not running.
+      Output of `systemctl status {{ docker_cmd }}`:
+      {{ service_docker_status.stdout }}
+      {{ service_docker_status.stderr }}
+  when: service_docker_status is failed
+
+- name: Check if {{ containerd_cmd }} is running
+  command: systemctl status {{ containerd_cmd }}
+  ignore_errors: yes
+  changed_when: false
+  register: service_containerd_status
+
+- name: Report status of {{ containerd_cmd }}
+  fail:
+    msg: |
+      Service {{ containerd_cmd }} is not running.
+      Output of `systemctl status {{ containerd_cmd }}`:
+      {{ service_containerd_status.stdout }}
+      {{ service_containerd_status.stderr }}
+  when: service_containerd_status is failed

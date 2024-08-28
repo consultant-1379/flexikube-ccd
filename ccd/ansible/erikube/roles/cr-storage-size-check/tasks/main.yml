@@ -1,0 +1,17 @@
+---
+- name: CR-Storage-Size Setting
+  block:
+    # Check Storage Size
+    - name: Check CR Storage size
+      shell: |
+        {{ kubectl }} get pvc -n kube-system eric-lcm-container-registry  -o json | \
+        jq -r '.status.capacity.storage' | \
+        grep -o -E '[0-9]+'
+      register: shell_result
+    - debug:
+        var: shell_result
+    # Reset Storage size if greater than 10Gi
+    - name: Reset Storage Size
+      set_fact:
+        cr_storage_size: "{{ shell_result.stdout + 'Gi' }}"
+      when: shell_result.stdout | int > 10

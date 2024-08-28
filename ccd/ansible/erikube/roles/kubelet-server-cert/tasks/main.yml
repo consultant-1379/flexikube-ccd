@@ -1,0 +1,37 @@
+---
+
+- set_fact:
+    times: "{{times | int + 1 }}"
+    reattempt: "{{ reattempt | int }}"
+
+- name: Stat Server Certificate
+  stat:
+    path: /var/lib/kubelet/pki/kubelet-server-current.pem
+  register: kubelet_server_cert
+
+- block:
+  - debug: msg=" Attempting to Sign certs for the {{ times }} time, will timeout after {{  reattempt }} reattempts"
+  
+  - name: Get Pending CSRs
+    delegate_to: "{{ first_master }}"
+    shell: "{{ kubectl }} get csr |grep Pending |grep 'system:node:{{  node_csr }}' | awk '{print $1}'"
+    register: kubelet_server_csr
+    until: kubelet_server_csr.stdout != ""
+    retries: 5
+    delay: 1
+    ignore_errors: yes
+
+  - name: Sign Pending CSRs
+    delegate_to: "{{ first_master }}"
+    shell: "{{ kubectl }} certificate approve {{ item }}"
+    ignore_errors: yes
+    with_items:
+    - "{{ kubelet_server_csr.stdout_lines }}"
+    when: kubelet_server_csr.stdout != -1
+
+  - include_tasks: main.yml
+    ignore_errors: yes
+  ## Repeat task until the server exist or has been trying out for numbers of reattempts (default 10)
+  when:
+  - kubelet_server_cert.stat.exists == False
+  - times |int <= reattempt |int

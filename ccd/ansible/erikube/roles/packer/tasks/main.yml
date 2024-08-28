@@ -1,0 +1,199 @@
+---
+- name: Update the /etc/ssh/sshd_config file
+  replace:
+    path: /etc/ssh/sshd_config
+    regexp: "^#UseDNS yes"
+    replace: "UseDNS no"
+  notify:
+    - restart sshd
+  become: true
+
+- name: Install packages
+  package:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - wget
+    - epel-release
+    - jq
+
+- name: config cloud-init for Azure
+  block:
+    - name: install cloud-init for Azure
+      package:
+        name: "{{ item }}"
+        state: present
+      with_items:
+        - cloud-init
+        - gdisk
+
+    - name: set waagent.conf to enable cloud-init
+      command: "{{ item }}"
+      with_items:
+        - sed -i 's/Provisioning.Enabled=y/Provisioning.Enabled=n/g' /etc/waagent.conf
+        - sed -i 's/Provisioning.UseCloudInit=n/Provisioning.UseCloudInit=y/g' /etc/waagent.conf
+
+  when: azure_enable_cloud_provider | default('') == "true"
+
+- name: cloud init configuration
+  copy:
+    src: files/cloud.cfg
+    dest: /etc/cloud/cloud.cfg
+    owner: root
+    group: root
+    mode: 0644
+
+- name: Create save directory /var/lib/erikube
+  file:
+    name: "/var/lib/erikube"
+    state: directory
+    owner: "{{ file_default_owner }}"
+    group: "{{ file_default_group }}"
+    mode: "{{ file_default_mode }}"
+
+- name: Create kubernetes directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: "{{ file_default_mode }}"
+    owner: "{{ file_default_owner }}"
+    group: "{{ file_default_group }}"
+  with_items:
+    - "{{ kube_config_dir }}"
+    - "{{ kube_cert_dir }}"
+    - "{{ kube_manifest_dir }}"
+    - "{{ erikube_config_dir }}"
+
+- name: Check for saved rules
+  stat:
+    path: "/var/lib/erikube/iptables.save"
+  register: iptables_save
+  become: yes
+
+- name: Run iptables-save
+  shell: "/usr/sbin/iptables-save > /var/lib/erikube/iptables.save"
+  when: not iptables_save.stat.exists and not ansible_distribution == 'Ubuntu'
+  become: yes
+
+- name: Configure docker ecr credential helper
+  block:
+    - name: Get the docker credential helper binary
+      get_url:
+        url: "{{ ecr_helper_url }}"
+        dest: /usr/bin/docker-credential-ecr-login
+        mode: '0755'
+        checksum: sha256:b159bf808e97d86bc8969f9866d42bdfe548f908b1a597738ffeb02915163ec8
+
+    - name: Create directory
+      file:
+        path: /root/.docker
+        state: directory
+
+    - name: Create docker config
+      file:
+        path: /root/.docker/config.json
+        state: touch
+
+    - name: Configure docker cred store
+      lineinfile:
+        path: /root/.docker/config.json
+        line: '{"credsStore": "ecr-login"}'
+    - name: Install aws cli prerequisites
+      easy_install:
+        name: pip
+        state: latest
+    - name: Install aws cli
+      pip:
+        name: awscli
+  when: cloud_provider | default('') == "aws"
+
+- name: Install Azure cli
+  block:
+    - name: Import the Microsoft repository key
+      rpm_key:
+        state: present
+        key: https://packages.microsoft.com/keys/microsoft.asc
+
+    - name: Create local azure-cli repository information
+      command: sh -c 'echo -e "[azure-cli]\nname=Azure CLI\nbaseurl=https://packages.microsoft.com/yumrepos/azure-cli\nenabled=1\ngpgcheck=1\ngpgkey=https://packages.microsoft.com/keys/microsoft.asc" > /etc/yum.repos.d/azure-cli.repo'
+
+    - name: Install azure cli
+      package:
+        name: azure-cli
+        state: present
+  when: azure_enable_cloud_provider | default('') == "true"
+
+- debug:
+    msg: "erikube installer image: {{ erikube_pause_image }}  --- {{ erikube_installer_image }}"
+
+- name: Log into local registry and force re-authorization
+  docker_login:
+    registry: "{{ kube_image_prefix }}"
+    username: "{{ local_registry_user }}"
+    password: "{{ local_registry_password }}"
+    reauthorize: yes
+  when: local_registry_user is defined and local_registry_user != ""
+
+- name: Wait up to 20 mins for the erikube-installer image to be available
+  docker_image:
+    name: "{{ erikube_installer_image }}"
+    pull: yes
+  register: result
+  until: result.failed == false
+  retries: 120
+  delay: 10
+
+- name: Wait for the erikube-pause image to be available
+  docker_image:
+    name: "{{ erikube_pause_image }}"
+    pull: yes
+  register: result
+  until: result.failed == false
+  retries: 12
+  delay: 10
+
+- name: Install kubelet, kubeadm, kubectl binary file via erikube-installer
+  docker_container:
+    name: erikube-installer
+    image: "{{ erikube_installer_image }}"
+    state: started
+    command: install
+    volumes:
+      - /usr/local:/target
+      - /var/run/docker.sock:/var/run/docker.sock:rw
+    env:
+      PAUSE_IMAGE: "{{ erikube_pause_image }}"
+  register: output
+
+- debug:
+    msg: "installer run gave {{ output }}"
+
+- name: Wait until erikube_setup is present before continuing
+  wait_for:
+    path: /usr/local/lib/erikube_setup
+    timeout: 30
+
+# requires on top level: import_playbook: playbooks/get-container-list.yml
+- name: Install container-list.json
+  copy:
+    src: ../../../../common/container-list.json
+    dest: /usr/local/lib/erikube_setup/image-list.json
+
+- name: Cache docker images
+  docker_image:
+    name: "{{ item }}"
+    pull: yes
+  with_items:
+  - "{{ calico_node_image }}"
+  - "{{ calico_cni_image }}"
+  - "{{ erikube_client_image }}"
+  - "{{ kubernetes_apiserver_image }}"
+  - "{{ kubernetes_controller_manager_image }}"
+  - "{{ kubernetes_scheduler_image }}"
+  - "{{ kubernetes_proxy_image }}"
+  - "{{ coredns_image }}"
+  - "{{ metrics_server_image }}"
+  - "{{ etcd_image }}"
+  - "{{ kubernetes_dns_node_cache_image }}"
+
+- meta: flush_handlers

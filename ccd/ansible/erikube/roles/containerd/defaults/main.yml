@@ -1,0 +1,12 @@
+---
+containerd_version: 1.6.6
+
+SystemdCgroup_value: "true"
+
+containerd_config_dir: /etc/containerd
+
+kubelet_service_path : /usr/local/lib/systemd/system/kubelet.service
+
+certs_dir : /etc/containerd/certs.d
+
+containerd_svc_file: containerd.service

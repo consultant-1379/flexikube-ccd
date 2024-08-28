@@ -1,0 +1,40 @@
+---
+- name: Gather facts as non root
+  hosts: master[0]
+  gather_facts: yes
+
+- name: Update auth-client certificates
+  hosts: master[0]
+  pre_tasks:
+  - include_vars: ../../common/container-list.json
+  vars:
+  - auth_client_action: cert_update
+  roles:
+  - auth-client
+
+- name: Update auth-client
+  hosts: master[0]
+  pre_tasks:
+  - include_vars: ../../common/container-list.json
+  vars:
+  - kube_image_prefix: "{{ docker_registry_host | default(default_registry) }}/"
+  - image: "{{ kube_image_prefix }}{{ containers.erikube.auth_client }}"
+  - auth_client_image: "{{ auth_client_ext_image | default(image) }}"
+  - auth_client_action: update
+  - auth_client_cpu_req: "{{ ccd_auth_client_cpu_req | default('50m') }}"
+  - auth_client_mem_req: "{{ ccd_auth_client_mem_req | default('30Mi') }}"
+  - auth_client_cpu_limit: "{{ ccd_auth_client_cpu_limit | default('100m') }}"
+  - auth_client_mem_limit: "{{ ccd_auth_client_mem_limit | default('60Mi') }}"
+  roles:
+  - auth-client
+
+- name: Restart API Server
+  hosts: master
+  become: yes
+  serial: 1
+  vars:
+    target_container_id_name: "kube-apiserver"
+  tasks:
+  - include_role:
+      name: crictl
+      tasks_from: restart-cri-container

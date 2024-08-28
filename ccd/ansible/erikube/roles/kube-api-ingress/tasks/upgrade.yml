@@ -1,0 +1,44 @@
+---
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/erikube-k8s-XXXXXX
+  register: mktemp
+  changed_when: False
+
+- set_fact:
+    k8s_file_loc: "{{ mktemp.stdout }}"
+
+- name: Create service and endpoints for Kubernetes API Server
+  template:
+    src: "kube-api-service-endpoint.yaml.j2"
+    dest: "{{ k8s_file_loc }}/kube-api-service-endpoint.yaml"
+  vars:
+    - ingress_class: "{{ kube_api_ingress_controller | default(default_ingress_controller) | default('') }}"
+
+- name: Deploy Service and Endpoint resources for Kubernetes API Server
+  shell: "{{ kubectl }} apply -f {{ k8s_file_loc }}/kube-api-service-endpoint.yaml"
+  become: yes
+  register: deploy_service_endpoint
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: deploy_service_endpoint.rc == 0
+
+- name: Create new ingress manifest for Kubernetes API
+  template:
+    src: "kube-api-{{ default_ingress_controller }}-ingress.yaml.j2"
+    dest: "{{ k8s_file_loc }}/kube-api-ingress.yaml"
+  vars:
+    - ingress_class: "{{ kube_api_ingress_controller | default(default_ingress_controller) | default('') }}"
+
+- name: Deploy updated ingress resource for Kubernetes API
+  shell: "{{ kubectl }} apply -f {{ k8s_file_loc }}/kube-api-ingress.yaml"
+  become: yes
+  register: deploy_ingress
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: deploy_ingress.rc == 0
+
+- name: Delete temp directory
+  file:
+    name: "{{ mktemp.stdout }}"
+    state: absent
+  changed_when: False

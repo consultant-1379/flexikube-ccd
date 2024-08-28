@@ -1,0 +1,57 @@
+
+- name: Slurp kube-apiserver config
+  slurp:
+    src: "{{ apisvr_cfg_loc }}"
+  register: result
+  become: yes
+
+- name: parse yaml
+  set_fact:
+    currentcfg: "{{ result['content'] | b64decode | from_yaml }}"
+
+- name: extract apiserver params
+  set_fact:
+    apiparams: "{{ currentcfg.spec.containers[0].command }}"
+
+- name: add new params to apiparams
+  set_fact:
+    apiparams: "{{ apiparams + added_apisvr_params }}"
+
+# NB. Because the currentcfg dict has nested lists, using
+# combine(recursive=True) loses data elements. To avoid that we build up
+# the updated struct from the inside out:
+
+- name: create config struct with updated params
+  set_fact:
+    newcmd: "{\"command\":{{ apiparams }} }"
+
+- name: insert updated apiparms to create new container spec
+  set_fact:
+    newcont: "{{ currentcfg.spec.containers[0] | combine(newcmd) }}"
+
+- name: insert updated container to create new spec
+  set_fact:
+    newspec: "{{ currentcfg.spec | combine({\"containers\":[newcont]}) }}"
+
+- name: insert updated spec to create new manifest
+  set_fact:
+    newcfg: "{{ currentcfg | combine({\"spec\":newspec}) }}"
+
+- debug: var=newcfg
+
+- name: Write kube-apiserver.yaml config
+  copy:
+    content: "{{ newcfg | to_nice_yaml(indent=2) }}"
+    dest: "{{ apisvr_cfg_loc }}"
+  become: true
+
+- name: Wait for apiserver to be Ready
+  shell: >
+    sleep 1;
+    {{ kubectl }} -n kube-system get pod kube-apiserver-{{ ansible_nodename }}
+    -o 'jsonpath={.status.conditions[?(@.type=="Ready")].status}' | grep True
+  register: get_pod
+  become: true
+  retries: 90
+  delay: 1
+  until: get_pod.rc == 0

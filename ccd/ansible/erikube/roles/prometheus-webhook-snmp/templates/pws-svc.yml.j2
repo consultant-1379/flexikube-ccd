@@ -1,0 +1,17 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: prometheus-webhook-snmp
+  name: prometheus-webhook-snmp
+  namespace: monitoring
+spec:
+  ports:
+  - port: {{ webhook_listen_port }}
+    name: webhook-port
+    targetPort: {{ webhook_listen_port }}
+    protocol: TCP
+  selector:
+    app: prometheus-webhook-snmp
+  type: ClusterIP

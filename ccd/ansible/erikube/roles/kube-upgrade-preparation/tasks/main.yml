@@ -1,0 +1,28 @@
+---
+
+- name: Prefetch Master K8S images
+  command: "{{ crictl_cmd }} pull {{ opt_kubernetes_repo }}{{ item }}:v{{ opt_kubernetes_version }}"
+  become: true
+  when: inventory_hostname in groups['master']
+  with_items:
+    - kube-apiserver
+    - kube-controller-manager
+    - kube-scheduler
+
+- name: Prefetch Node K8S images
+  command: "{{ crictl_cmd }} pull {{ opt_kubernetes_repo }}{{ item }}:v{{ opt_kubernetes_version }}"
+  become: true
+  with_items:
+    - kube-proxy
+
+- name: Prefetch Node DNS images
+  command: "{{ crictl_cmd }} pull {{ opt_kubernetes_repo }}{{ item }}:{{ opt_coredns_version }}"
+  become: true
+  with_items:
+    - coredns
+
+- name: Deploy erikube installer
+  include_tasks: "{{ role_path}}/../kube-common/tasks/deploy-erikube-installer.yml"
+  when: not image_based_deployment | default(false) | bool
+
+# NB. kubelet not restarted to allow kubeadm upgrade tasks to complete first.

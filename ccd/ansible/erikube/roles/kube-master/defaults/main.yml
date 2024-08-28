@@ -1,0 +1,95 @@
+---
+# defaults file for kube-master
+
+# Authorization modes for k8s, see:
+#   - https://kubernetes.io/docs/admin/authorization/
+#   - https://kubernetes.io/docs/admin/authorization/node/
+k8s_authorization_modes: "RBAC,Node"
+
+# K8s etcd
+kube_etcd_client_port: "{{ etcd_client_port | default('2379') }}"
+kube_etcd_url_scheme: "{{ etcd_url_scheme | default('https') }}"
+kube_etcd_cert_dir: "/etc/kubernetes/etcd"
+kube_etcd_cert_prefix: "master-"
+
+kube_force_update: false
+kube_apiserver_cert_altnames: []
+
+# A CoreDNS per master, so same number of replicas as number of masters
+kube_dns_replicas: "{{ (groups['master'] | length) + (groups['add_master'] | default([]) | length) }}"
+
+kube_dns_success_ttl: 30
+kube_dns_denial_ttl: 30
+
+## Variables for OpenID Connect Configuration https://kubernetes.io/docs/admin/authentication/
+## To use OpenID you have to deploy additional an OpenID Provider (e.g Dex, Keycloak, ...)
+
+# kube_oidc_url: https:// ...
+# kube_oidc_client_id: kubernetes
+## Optional settings for OIDC
+# kube_oidc_ca_file: {{ kube_cert_dir }}/ca.pem
+# kube_oidc_username_claim: sub
+# kube_oidc_groups_claim: groups
+
+kube_skip_preflight_checks: false
+
+kube_apiserver_bind_address: "{{ master_ip | default(hostvars[inventory_hostname].k8s_ip_address) }}"
+
+# Advanced Audit logging settings
+# Backend types: "log" writes to disk, "" disables audit logging.
+kube_auditlog_backend: log
+# These paths refer to master host and are mounted to the same location in
+# the kube-apiserver-master container
+kube_auditlog_policy_file: "{{ erikube_config_dir }}/audit-policy.yaml"
+kube_apiserver_log_dir: /var/log/kube-apiserver
+kube_auditlog_file: "{{ kube_apiserver_log_dir }}/kube-apiserver-audit.log"
+# rotate the log when it hits 100MB:
+kube_auditlog_maxsize_mb: 100
+# limit total no. of rotated logs to 50
+kube_auditlog_maxbackup_count: 50
+# remove rotated logs after 30 days
+kube_auditlog_maxage_days: 30
+# enable compression of audit logs as gzip
+kube_auditlog_enable_compression: true
+
+# which API groups get detailed logging:
+kube_auditlog_known_apis:
+  - "admissionregistration.k8s.io"
+  - "apiextensions.k8s.io"
+  - "apiregistration.k8s.io"
+  - "apps"
+  - "authentication.k8s.io"
+  - "authorization.k8s.io"
+  - "autoscaling"
+  - "batch"
+  - "certificates.k8s.io"
+  - "extensions"
+  - "metrics.k8s.io"
+  - "networking.k8s.io"
+  - "policy"
+  - "rbac.authorization.k8s.io"
+  - "settings.k8s.io"
+  - "storage.k8s.io"
+
+kube_oidc_use_dex_crt_as_ca: yes
+kube_oidc_auth: false
+kube_oidc_username_claim: email
+kube_oidc_groups_claim: groups
+kube_cluster_admin_group: admins
+kube_oidc_url: "{{ dex_issuer_url }}"
+kube_oidc_client_id: "{{ oidc_client_id }}"
+
+kube_strict_transport_security: "max-age=15724800,includeSubDomains"
+
+cloud_provider: ""
+
+kube_manager_cluster_signing_duration: "87600h"
+
+autoscale_token_cron_script: "{{ autoscale_scripts_path }}/kubeadm-token.sh"
+
+# kube-proxy mode
+kube_proxy_mode: "ipvs"
+
+ipvs_tcp_timeout: 900
+ipvs_tcp_fin_timeout: 120
+ipvs_udp_timeout: 300

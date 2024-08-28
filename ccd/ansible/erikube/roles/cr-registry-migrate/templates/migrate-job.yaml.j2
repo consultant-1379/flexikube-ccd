@@ -1,0 +1,49 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k8s-cr-registry-migration
+  namespace: kube-system
+spec:
+  template:
+    metadata:
+      name: migration
+    spec:
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - eric-lcm-container-registry
+            topologyKey: kubernetes.io/hostname
+      restartPolicy: OnFailure
+      serviceAccountName: ""
+      serviceAccount: ""
+      imagePullSecrets:
+      - name: local-registry-secret
+      containers:
+      - name: k8s-cr-registry-migration
+        image: {{ registry_migration_image }}
+        command: ['/bin/bash']
+        args: ['-c', 'if [ -d "/registry-old/docker" ];then cp -r /registry-old/docker /registry-new; fi']
+        resources:
+        volumeMounts:
+        - name: registry-data-new
+          mountPath: /registry-new
+          subPath: reg-data
+        - name: registry-data-old
+          mountPath: /registry-old
+          subPath: reg-data
+      volumes:
+      - name: registry-data-new
+        persistentVolumeClaim:
+          claimName: eric-lcm-container-registry
+      - name: registry-data-old
+        persistentVolumeClaim:
+          claimName: registry-data-eric-lcm-container-registry-registry-0
+  backoffLimit: 20
+  completions: 1
+  parallelism: 1

@@ -1,0 +1,5 @@
+# /etc/sysconfig/docker
+
+# The recommended configuration method for Docker is now /etc/docker/daemon.json
+# See https://docs.docker.com/v1.13/engine/reference/commandline/dockerd/#/linux-configuration-file
+# for details.

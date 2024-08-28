@@ -1,0 +1,9 @@
+# Dnsmasq uses this file for lookups 
+{% for host in groups['all'] %}
+{% if hostvars[host].ansible_host is defined %}
+{{ hostvars[host].ansible_host }} {{ hostvars[host]['inventory_hostname'] }}
+{% endif %}
+{% endfor %}
+{% if dex_ingress_host is defined and lb_external_ip is defined %}
+{{ lb_external_ip }} {{ dex_ingress_host }}
+{% endif %}

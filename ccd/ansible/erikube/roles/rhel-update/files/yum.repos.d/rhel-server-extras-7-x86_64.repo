@@ -1,0 +1,6 @@
+[rhel-server-extras-7-x86_64]
+name=rhel-server-extras-7-x86_64
+baseurl=http://yum.linux.ericsson.se/repos/rhel-x86_64-server-extras-7/
+enabled=1
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release

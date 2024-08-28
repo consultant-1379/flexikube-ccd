@@ -1,0 +1,45 @@
+---
+# Don't think we need to accomodate for is_atomic here because of skip:true
+- name: Include OS Specific vars
+  include_vars: "{{ item }}"
+  with_first_found:
+    - files:
+      - "vars/{{ ansible_os_family }}.yml"
+      skip: true
+
+- name: Check user privilege
+  import_tasks: user_privilege.yml
+
+- name: Check for a supported Operating System
+  import_tasks: operation_system.yml
+
+- name: Check for network connectivity
+  import_tasks: network_connectivity.yml
+
+- name: Check for supported Docker version
+  import_tasks: docker_version.yml
+
+- name: Check for Docker Storage Driver requirements
+  import_tasks: docker_storage.yml
+
+- name: Check for installed packages
+  import_tasks: packages.yml
+
+# TODO: enable after we figure out the minimal requirement
+#- name: Check for available disk space requirements
+#  import_tasks: disk_space.yml
+
+#- name: Check for system memory requirements
+#  import_tasks: memory_size.yml
+
+#- name: Check for CPU requirements
+#  import_tasks: cpu_number.yml
+
+- name: Check for NTP synchronization
+  import_tasks: ntp_sync.yml
+
+- name: Check for running services
+  import_tasks: services.yml
+
+- name: Check for correct system settings
+  import_tasks: system.yml

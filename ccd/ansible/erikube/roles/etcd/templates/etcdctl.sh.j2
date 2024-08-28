@@ -1,0 +1,19 @@
+#! /bin/bash
+
+# Works on etcd nodes
+
+etcdctl2() {
+    /usr/local/bin/etcdctl \
+        --ca-file {{ etcd_peer_ca_file }} \
+        --cert-file {{ etcd_peer_cert_file }} \
+        --key-file {{ etcd_peer_key_file }} \
+        --endpoints https://{{ etcd_ip | ipwrap }}:{{ etcd_client_port }} ${@}
+}
+
+etcdctl3() {
+    ETCDCTL_API=3 /usr/local/bin/etcdctl \
+        --cacert {{ etcd_peer_ca_file }} \
+        --cert {{ etcd_peer_cert_file }} \
+        --key {{ etcd_peer_key_file }} \
+        --endpoints https://{{ etcd_ip | ipwrap }}:{{ etcd_client_port }} ${@}
+}

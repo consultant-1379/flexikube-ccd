@@ -1,0 +1,53 @@
+---
+- name: Check /proc/mounts exists
+  stat:
+    path: /proc/mounts
+  register: proc_mounts_stat
+
+- name: Gather kubelet mounts
+  shell: grep '/var/lib/kubelet' /proc/mounts
+  register: kubelet_mounts
+  when: proc_mounts_stat.stat.exists
+  ignore_errors: yes
+
+- name: Cleanup mounts
+  shell: "echo {{ kubelet_mounts.stdout }} | awk '{print $2}' | xargs -r -n1 umount"
+  when: not kubelet_mounts.failed and proc_mounts_stat.stat.exists
+
+- name: List all k8s_ containers
+  shell: "{{ docker_cmd }} ps -f name=k8s_ --all -q"
+  register: k8s_containers
+  ignore_errors: true
+
+- name: Clean all k8s_ containers
+  shell: "{{ docker_cmd }} rm -f {{ item }}"
+  with_items:
+    - "{{ k8s_containers.stdout_lines }}"
+
+- name: List all exited containers
+  shell: "{{ docker_cmd }} ps -f status=exited -q"
+  register: exited_containers
+  ignore_errors: true
+
+- name: Clean exited containers
+  shell: "{{ docker_cmd }} rm -f {{ item }}"
+  with_items:
+    - "{{ exited_containers.stdout_lines }}"
+
+- name: List all volumes
+  shell: "{{ docker_cmd }} volume ls -qf dangling=true"
+  register: exited_volumes
+  ignore_errors: true
+
+- name: Clean docker volumes
+  shell: "{{ docker_cmd }} volume rm {{ item }}"
+  with_items:
+    - "{{ exited_volumes.stdout_lines }}"
+
+- name: Restore kubernetes binaries
+  command: tar -xzvf /tmp/k8s-bins.tgz -C /
+
+- name: Delete /tmp/k8s-bins.tgz
+  file:
+    path: /tmp/k8s-bins.tgz
+    state: absent

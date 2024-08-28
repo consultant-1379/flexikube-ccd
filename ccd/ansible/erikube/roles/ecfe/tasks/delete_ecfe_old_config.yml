@@ -1,0 +1,10 @@
+- name: Delete old Secret if the new Secret is not defined
+  shell: "{{ kubectl }} delete secret {{ ecfe_secret_name }} -n {{ ecfe_configmap_name_space }}"
+  ignore_errors: yes
+  when: (ecfe_enabled == false) or (ecfe_secrets is undefined) or (ecfe_secrets | length > 0)
+
+
+- name: Delete old Config Map if the new config Map is not defined
+  shell: "{{ kubectl }} delete configmap  {{ ecfe_configmap_name }} -n {{ ecfe_configmap_name_space }}"
+  ignore_errors: yes
+  when: ecfe_enabled == false

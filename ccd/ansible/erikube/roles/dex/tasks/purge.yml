@@ -1,0 +1,16 @@
+---
+
+- name: Purge all dex resources
+  become: yes
+  command: "{{ kubectl }} -n kube-system delete {{ item }} --ignore-not-found"
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (result.rc == 0 or "not found" in result.stderr)
+  with_items:
+    - "ing/dex"
+    - "svc/dex"
+    - "deploy/dex"
+    - "secret/dex-tls"
+    - "secret/dex-ldap-ca"
+    - "cm/dex"

@@ -1,0 +1,22 @@
+- name: Delete given Pod Security Policy's
+  block:
+  - name: Delete PSPs
+    shell: "{{ kubectl }} delete psp {{ item }} -n {{ kube_namespace }} --grace-period=0 --force"
+    loop: "{{ psp_names | list }}"
+    failed_when: false == true
+
+  - name: Check the status of PSPs after deletion
+    shell: "{{ kubectl }} get psp {{ item }} -n {{ kube_namespace }}"
+    loop: "{{ psp_names | list }}"
+    register: result
+    until: '"Error from server (NotFound): podsecuritypolicies.policy" in result.stderr'
+    retries: 5
+    delay: 10
+    ignore_errors: true
+
+  - name: Check that PSPs are removed
+    assert:
+      that:
+        - '"Error from server (NotFound): podsecuritypolicies.policy" in item.stderr'
+      msg: "Error: Pod Security Policy still exists!"
+    loop: "{{ result.results }}"

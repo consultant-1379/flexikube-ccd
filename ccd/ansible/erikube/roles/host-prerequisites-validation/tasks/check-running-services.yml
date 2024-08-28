@@ -1,0 +1,25 @@
+---
+- name: Include services
+  include_vars: "{{ item }}"
+  with_first_found:
+    - files:
+      - "vars/services.yml"
+
+- name: Check whether services are running
+  become: true
+  block:
+    - name: Get service status
+      command: systemctl -p SubState show "{{item}}"
+      register: run_status
+      with_items: "{{running_services | default([])}}"
+      ignore_errors: True
+      failed_when: false
+
+    - name: Displaying services which are currently not running
+      assert:
+        that: item.rc == 0 and item.stdout.split('=')[1] == "running"
+        fail_msg: "Please enable the {{item.item}} service in {{ansible_hostname}}"
+        quiet: true
+      loop: "{{run_status.results}}"
+      loop_control:
+        label: "{{item.item}}"

@@ -1,0 +1,74 @@
+---
+- name: Create ca certs for fluent-bit
+  block:
+    - name: Create client private key
+      shell: openssl genrsa -out {{ dir }}/private/client.key.pem 4096
+
+    - name: Create client csr
+      shell: >-
+        openssl req -config {{ dir }}/openssl.cnf -key {{ dir }}/private/client.key.pem \
+        -new -sha256 -out {{ dir }}/csr/client.csr.pem \
+        -subj "/CN=fluent-bit"
+
+    - name: Get serial number
+      shell: >-
+        openssl x509 -noout -serial -in {{ dir }}/certs/client.crt.pem | cut -d'=' -f2
+      register: serial_result
+
+    - name: Revoke certificate if it already exists
+      shell: >-
+        openssl ca -revoke {{ dir }}/certs/client.crt.pem -config {{ dir }}/openssl.cnf
+      when:
+        - serial_result.stdout != 1000
+        - not serial_result.stderr
+        - not "Already revoked" in serial_result.stderr
+
+    - name: Create client certificate
+      shell: >-
+        openssl ca -batch -config {{ dir }}/openssl.cnf -outdir {{ dir }}/certs  \
+        -cert {{ dir }}/certs/ca.crt.pem -keyfile {{ dir }}/private/ca.key.pem \
+        -extensions client_cert -days 3650 -notext -md sha256 \
+        -in {{ dir }}/csr/client.csr.pem -out {{ dir }}/certs/client.crt.pem \
+        -subj "/CN=fluent-bit"
+
+    - name: Check if namespace already exists
+      shell: "{{ kubectl }} get namespaces ccd-logging"
+      register: ns_result
+      ignore_errors: True
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: (ns_result.rc == 0 or "not found" in ns_result.stderr)
+
+    - name: Create logging namespace
+      shell: >-
+        {{ kubectl }} create namespace ccd-logging
+      register: result
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: result.rc == 0
+      when: ns_result.stderr
+
+    - name: Create fluent-bit secret
+      shell:  >-
+        {{ kubectl }} create secret generic fluentbit-tls -n ccd-logging \
+        --from-file=ca.crt.pem={{ dir }}/certs/ca.crt.pem \
+        --from-file=client.crt.pem={{ dir }}/certs/client.crt.pem \
+        --from-file=client.key.pem={{ dir }}/private/client.key.pem \
+        --dry-run=client -o yaml | {{ kubectl }} apply -f -
+      register: result
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: result.rc == 0
+
+    - name: Create ccd-logging secret for accessing local registry
+      shell: |
+        {{ kubectl }} create secret docker-registry local-registry-secret \
+        --docker-server={{ 'registry.eccd.local:5000' if local_registry_user is defined and local_registry_user != "" else 'null.eccd.local' }} \
+        --docker-username={{ local_registry_user if local_registry_user is defined and local_registry_user != "" else 'null' }} \
+        --docker-password={{ local_registry_password if local_registry_password is defined and local_registry_password != "" else 'nopassword' }} -n ccd-logging \
+        --dry-run=client -o yaml | {{ kubectl }} apply -f -
+      register: result
+      become: yes
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: result.rc == 0

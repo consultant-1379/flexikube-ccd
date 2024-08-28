@@ -1,0 +1,8 @@
+debug          = false
+debug_full     = false
+address        = "unix:///run/containerd/containerd.sock"
+namespace      = "k8s.io"
+data_root      = "/var/lib/nerdctl"
+cni_path       = "{{ cni_path }}"
+hosts_dir      = ["{{ certs_dir }}"]
+cgroup_manager = "{{ containerd_default_cgroup_driver }}"

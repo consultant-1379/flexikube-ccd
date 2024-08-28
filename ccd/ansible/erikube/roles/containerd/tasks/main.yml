@@ -1,0 +1,79 @@
+---
+- include_vars: "{{ item }}"
+  with_first_found:
+    - files:
+      - "../vars/{{ ansible_distribution }}.yml"
+      - "../vars/{{ ansible_os_family }}.yml"
+      skip: True
+
+- name: Install and setup containerd
+  become: yes
+  any_errors_fatal: true
+  block:
+    - include_tasks: install.yml
+
+- name: docker.io registry configuration
+  become: yes
+  block:
+    - include_tasks: registry-configuration.yml
+
+- block:
+  - name: Check containerd config directory.
+    stat:
+      path: "{{ containerd_config_dir }}"
+    register: containerd_config_path
+
+  - name: Create containerd config directory if not exists
+    file:
+      path: "{{ containerd_config_dir }}"
+      state: directory
+    become: yes
+    when: containerd_config_path.stat.exists == false
+
+  - name: Copy containerd config file
+    template:
+      src: "containerd.toml-v2.j2"
+      dest: "{{ containerd_config_dir }}/config.toml"
+    become: yes
+    register: containerd_config
+
+  - name: Grep sandbox value
+    shell: "cat {{ containerd_config.dest }} | grep sandbox"
+    ignore_errors: yes
+    register: sandbox
+
+  - debug:
+      msg: "sandbox image: {{ sandbox.stdout }}"
+
+  - name: Start the containerd service
+    systemd:
+      name: containerd
+      enabled: yes
+      state: restarted
+      daemon_reload: yes
+    become: yes
+
+  - name: pause for containerd sock to be ready
+    pause:
+      seconds: 20
+
+  - name: Fetch containerd version
+    shell: "/usr/local/bin/containerd --version"
+    register: containerd_version_latest
+    become: true
+    changed_when: false
+    ignore_errors: yes
+
+  - name: Print version from containerd binary after possible upgrade
+    debug:
+      msg: "{{ containerd_version_latest.stdout.split('\n') }}"
+
+  - name: Start the docker service
+    systemd:
+      name: docker
+      enabled: yes
+      state: restarted
+      daemon_reload: yes
+    become: yes
+
+  when: not is_atomic

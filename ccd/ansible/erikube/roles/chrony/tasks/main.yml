@@ -1,0 +1,62 @@
+---
+- name: add the OS specific variables
+  include_vars: '{{ ansible_os_family }}.yml'
+  tags: [ 'configuration', 'package', 'service', 'chrony' ]
+
+
+- name: check if it is Atomic host
+  stat: path=/run/ostree-booted
+  register: stat_ostree
+
+- name: set fact for using Atomic host
+  set_fact:
+    is_atomic: "{{ stat_ostree.stat.exists }}"
+
+- name: install the required packages in RHEL derivatives
+  yum: name=chrony state={{ chrony_pkg_state }}
+  when: ansible_os_family == 'RedHat' and not is_atomic
+  tags: [ 'package', 'chrony' ]
+
+
+- name: remove NTP if installed on RHEL
+  yum: name=ntp state=absent
+  when: ansible_os_family == 'RedHat' and not is_atomic
+  tags: [ 'package', 'chrony' ]
+
+- name: Install the required packages in Debian derivatives
+  apt:
+    name: chrony
+    state: "{{ chrony_pkg_state }}"
+  when: ansible_os_family == 'Debian'
+  tags: [ 'package', 'chrony' ]
+
+
+- name: Install the required packages in SUSE derivatives
+  zypper:
+    name: chrony
+    state: "{{ chrony_pkg_state }}"
+  retries: 3
+  delay: 3
+  register: result
+  until: result.rc == 0
+  when: ansible_os_family == 'Suse'
+  tags: [ 'package', 'chrony' ]
+
+- name: copy the chrony.conf template file
+  template: >
+    src=chrony.conf.j2
+    dest="{{ chrony_config_location }}"
+    owner=root
+    group=root
+    mode=0755
+
+  notify:
+  - restart chrony
+  tags: [ 'configuration', 'package', 'chrony' ]
+
+- name: start/stop chrony service
+  service: >
+    name="{{ chrony_service_name }}"
+    state="{{ chrony_service_state }}"
+    enabled="{{ chrony_service_enabled }}"
+  tags: [ 'service', 'chrony' ]

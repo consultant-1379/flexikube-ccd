@@ -1,0 +1,105 @@
+---
+- name: check if it is Atomic host
+  stat: path=/run/ostree-booted
+  register: stat_ostree
+
+- name: set fact for using Atomic host
+  set_fact:
+    is_atomic: "{{ stat_ostree.stat.exists }}"
+
+- name: load variable files
+  include_vars: "{{ item }}"
+  with_items:
+    - roles/kube-common/defaults/main.yml
+
+- name: check {{ kubeadm_cmd }} stat
+  stat:
+    path: "{{ kubeadm_cmd }}"
+  register: kubeadm_cmd_stat
+
+- name: kubeadm reset
+  shell: "{{ kubeadm_cmd }} reset --force"
+  ignore_errors: true
+  when: kubeadm_cmd_stat.stat.exists
+
+- name: stop kubelet
+  systemd:
+    name: kubelet
+    enabled: no
+    state: stopped
+  ignore_errors: true
+
+- name: remove erikube
+  shell: "docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:rw -v /usr/local:/target {{ erikube_installer_image }} uninstall"
+  ignore_errors: true
+
+- name: check /proc/mounts exists
+  stat:
+    path: /proc/mounts
+  register: proc_mounts_stat
+
+- name: gather any remaining kubelet mounts
+  shell: grep '/var/lib/kubelet' /proc/mounts | awk '{print $2}' | sort -ur
+  register: kubelet_mounts
+  when: proc_mounts_stat.stat.exists
+  ignore_errors: yes
+
+- name: cleanup any remaining kublet mounts, verifying that each one is still mounted, avoiding possible race condition
+  shell: "grep -q {{ item }} /proc/mounts && umount -fv {{ item }}"
+  with_items: "{{ kubelet_mounts.stdout_lines }}"
+  register: umount_dir
+  retries: 4
+  until: umount_dir.rc == 0
+  delay: 5
+  when: not kubelet_mounts.failed and proc_mounts_stat.stat.exists
+
+- name: Check for saved rules
+  stat:
+    path: "/var/lib/erikube/iptables.save"
+  register: iptables_save
+  become: yes
+
+- name: Restore previous packet filter rules
+  shell: "iptables-restore < /var/lib/erikube/iptables.save"
+  when: iptables_save.stat.exists
+  become: yes
+
+- name: clean up directories
+  file:
+    path: "{{ item }}"
+    state: absent
+  with_items:
+  - /var/lib/kubelet
+  - /etc/cni
+  - /etc/kubernetes
+  - /usr/local/bin/kubelet
+  - /usr/local/bin/kubeadm
+  - /usr/local/bin/kubectl
+  - /usr/local/etc/cni
+  - /usr/local/lib/cni
+  - /usr/local/lib/erikube_setup
+  - /usr/local/lib/systemd/system/dhcp-proxy.service
+  - /run/calico
+  - /root/.kube
+  - "{{ ansible_env.HOME }}/.kube"
+  - /var/lib/erikube
+
+- name: list all exited containers
+  shell: "{{ crictl_cmd }} ps --state exited -q"
+  register: exited_containers
+  ignore_errors: true
+
+- name: clean exited containers
+  shell: "{{ crictl_cmd }} rm -f {{ item }}"
+  with_items:
+    - "{{ exited_containers.stdout_lines }}"
+
+- name: list all volumes
+  shell: "docker volume ls -qf dangling=true"
+  register: exited_volumes
+  ignore_errors: true
+
+- name: clean docker volumes
+  shell: "docker volume rm {{ item }}"
+  with_items:
+    - "{{ exited_volumes.stdout_lines }}"

@@ -1,0 +1,18 @@
+
+- name: Disable keepalived service
+  systemd:
+    name: keepalived
+    state: stopped
+    enabled: false
+  failed_when: false
+
+- name: Purge keepalived directories/files
+  file:
+    path: /etc/keepalived/keepalived.conf
+    state: absent
+  failed_when: false
+
+- name: Purge kube-lb
+  include_role:
+    name: kube-lb
+    tasks_from: purge

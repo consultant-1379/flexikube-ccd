@@ -1,0 +1,46 @@
+---
+- name: prepare configuration directory
+  file:
+    path: /etc/dnsmasq
+    state: directory
+    owner: "{{ file_default_owner }}"
+    group: "{{ file_default_group }}"
+    mode: "{{ file_default_mode }}"
+
+- name: configure dnsmasq
+  template:
+    src: dnsmasq.conf.j2
+    dest: /etc/dnsmasq.conf
+    owner: "{{ file_default_owner }}"
+    group: "{{ file_default_group }}"
+    mode: "{{ file_default_mode }}"
+  notify: restart dnsmasq
+
+- name: configure dnsmasq hosts reserved ips
+  template:
+    src: dnsmasq_static_hosts.conf.j2
+    dest: /etc/dnsmasq/dnsmasq_static_hosts.conf
+    owner: "{{ file_default_owner }}"
+    group: "{{ file_default_group }}"
+    mode: "{{ file_default_mode }}"
+  notify: restart dnsmasq
+
+- name: add upstream nameservers
+  template:
+    src: upstream-ns.conf.j2
+    dest: /etc/dnsmasq/upstream-ns.conf
+    owner: root
+    group: root
+    mode: 0744
+  notify: restart dnsmasq
+
+- name: enable and start dnsmasq
+  service: name=dnsmasq enabled=yes state=started daemon_reload=yes
+
+- name: make dnsmasq as local forwarder of all requests
+  template:
+    src: resolv.conf.j2
+    dest: /etc/resolv.conf
+    owner: root
+    group: root
+    mode: 0744

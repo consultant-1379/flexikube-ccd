@@ -1,0 +1,36 @@
+# A pseudo service for providing etcd server IP address(es).
+# Etcd metrics can be scraped by endpoints sd rule
+apiVersion: v1
+kind: Service
+metadata:
+  name: etcd
+  annotations:
+    # The default scrape value is "true", which is reserved
+    prometheus.io/scrape: "etcd"
+    # Default value of prometheus.io/scheme: "https"
+    # Default value of prometheus.io/port = Service/spec.ports.port
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - name: api
+    port: {{ etcd_client_port }}
+    protocol: TCP
+
+---
+
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: etcd
+  labels:
+    k8s-app: etcd
+subsets:
+- addresses:
+{% for host in etcd_peers | default([]) %}
+  - ip: {{ hostvars[host].etcd_ip | default(hostvars[host].k8s_ip_address) }}
+{% endfor %}
+  ports:
+  - name: api
+    port: {{ etcd_client_port }}
+    protocol: TCP

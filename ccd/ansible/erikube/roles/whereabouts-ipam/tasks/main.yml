@@ -1,0 +1,37 @@
+---
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/erikube-whereabouts-XXXXXX
+  register: temp_whereabouts
+  changed_when: False
+
+- name: Create whereabouts deployment yaml files
+  template:
+    src: "{{item}}.j2"
+    dest: "{{ temp_whereabouts.stdout }}/{{item}}"
+  with_items:
+    - whereabouts-deployment.yml
+    - whereabouts.cni.cncf.io_ippools.yml
+    - whereabouts.cni.cncf.io_overlappingrangeipreservations.yaml
+
+- name: Apply whereabouts IPAM yaml files
+  shell: "{{ kubectl }} apply -f {{ temp_whereabouts.stdout }}/{{item}}"
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+  with_items:
+    - whereabouts.cni.cncf.io_ippools.yml
+    - whereabouts.cni.cncf.io_overlappingrangeipreservations.yaml
+    - whereabouts-deployment.yml
+
+# ip-reconciler job needs to be removed during upgrade,
+# since its not needed after 2.25.0 whereabouts uplift
+- name: Remove whereabouts ip-reconciler job
+  shell: "{{ kubectl }} delete cronjob -n kube-system ip-reconciler"
+  ignore_errors: true
+
+- name: Delete temp directory
+  file:
+    name: "{{ temp_whereabouts.stdout }}"
+    state: absent
+  changed_when: False

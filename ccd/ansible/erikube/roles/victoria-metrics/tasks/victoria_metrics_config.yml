@@ -1,0 +1,34 @@
+---
+
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/eric-victoria_metrics-server-config-map-XXXXXX
+  register: temp_victoria_metrics_cm_dir
+  changed_when: False
+
+- set_fact:
+    victoria_metrics_cm_file_loc: "{{ temp_victoria_metrics_cm_dir.stdout }}"
+
+- name: Create new manifest for victoria_metrics-agent cm
+  template:
+    src: "vmagent-config-map.yml.j2"
+    dest: "{{ victoria_metrics_cm_file_loc }}/vmagent-config-map.yml"
+
+- name: Create new manifest for victoria_metrics-alert configmap
+  template:
+    src: "vmalert-config-map.yml.j2"
+    dest: "{{ victoria_metrics_cm_file_loc }}/vmalert-config-map.yml"
+  become: yes
+
+- name: Deploy updated victoria metrics agent cm for Kubernetes API
+  shell: "{{ kubectl }} apply -f {{ victoria_metrics_cm_file_loc }}/vmagent-config-map.yml"
+  become: yes
+
+- name: Deploy updated victoria metrics alert cm for Kubernetes API
+  shell: "{{ kubectl }} apply -f {{ victoria_metrics_cm_file_loc }}/vmalert-config-map.yml"
+  become: yes
+
+- name: Delete temp directory
+  file:
+    name: "{{ victoria_metrics_cm_file_loc }}"
+    state: absent
+  changed_when: False

@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: eric-si-application-sys-info-handler-swim-configmap
+  namespace: {{ kube_namespace }}
+  labels:
+    ericsson.com/swim: "enabled"
+    app.kubernetes.io/instance: eric-si-application-sys-info-handler
+  annotations:
+    ericsson.com/product-name: {{ release_version_dict.ProductName }}
+    ericsson.com/product-number: {{ release_version_dict.ProductNumber }}
+    ericsson.com/product-revision: {{ release_version_dict.ProductRevision }}
+    ericsson.com/production-date: {{ release_version_dict.ProductionDate }}
+    ericsson.com/description: {{ release_version_dict.Description }}
+    ericsson.com/type: {{ release_version_dict.Type }}
+    ericsson.com/semantic-version: {{ release_version_dict.SemanticVersion }}
+    ericsson.com/commercial-version: {{ release_version_dict.CommercialName }}

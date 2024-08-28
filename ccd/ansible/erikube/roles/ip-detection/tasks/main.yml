@@ -1,0 +1,65 @@
+---
+
+# In case there are no interfaces without default route, we choose the Ansible IP address.
+- name: Use interface used by Ansible for Kubernetes internal traffic
+  set_fact:
+      k8s_ip_address: "{{ ansible_host }}"
+  when:
+    - k8s_ip_address is undefined
+    - inventory_hostname != '127.0.0.1'
+    - inventory_hostname != 'localhost'
+    - inventory_hostname != '::1'
+    - kubernetes_interface is undefined
+
+- set_fact:
+      k8s_ip_address: "{{ hostvars[inventory_hostname]['ansible_'+kubernetes_interface]['ipv4'].address }}"
+  when:
+    - k8s_ip_version == 'ipv4'
+    - k8s_ip_address is undefined
+    - inventory_hostname != '127.0.0.1'
+    - inventory_hostname != 'localhost'
+    - inventory_hostname != '::1'
+
+- set_fact:
+      k8s_ip_address: "{{ hostvars[inventory_hostname]['ansible_'+kubernetes_interface]['ipv6'][0].address }}"
+  when:
+    - k8s_ip_version == 'ipv6'
+    - k8s_ip_address is undefined
+    - inventory_hostname != '127.0.0.1'
+    - inventory_hostname != 'localhost'
+    - inventory_hostname != '::1'
+
+- name: Set k8s_ip_address (dualstack)
+  block:
+    - name: Set k8s_ip_address_ipv4 and k8s_ip_address_ipv6
+      set_fact:
+        k8s_ip_address_ipv4: "{{ hostvars[inventory_hostname]['ansible_'+kubernetes_interface]['ipv4'].address }}"
+        k8s_ip_address_ipv6: "{{ hostvars[inventory_hostname]['ansible_'+kubernetes_interface]['ipv6'][0].address }}"
+    - name: Set k8s_ip_address (dualstack)
+      set_fact:
+        k8s_ip_address: "{% if default_dualstack_ip_family | default('ipv4') == 'ipv4' %}{{ k8s_ip_address_ipv4 }}{% else %}{{ k8s_ip_address_ipv6 }}{% endif %}"
+  when:
+    - k8s_ip_version == 'dualstack'
+    - k8s_ip_address is undefined
+    - inventory_hostname != '127.0.0.1'
+    - inventory_hostname != 'localhost'
+    - inventory_hostname != '::1'
+
+# Ansible < 2.8 has a bug that will only have one IPv6 address getting facts
+# Due to this one of the master nodes will use the VIP address for k8s config
+# This workaround detects that case and will use the IP address configured on the inventory
+- name: "Ansible bug workaround: use inventory IP address for this K8s host"
+  set_fact:
+      k8s_ip_address: "{{ ansible_host }}"
+  when:
+    - k8s_ip_version == 'ipv6'
+    - inventory_hostname != '127.0.0.1'
+    - inventory_hostname != 'localhost'
+    - inventory_hostname != '::1'
+    - k8s_ip_address is defined
+    - kube_apiserver_ip is defined
+    - k8s_ip_address == kube_apiserver_ip
+
+- debug:
+    msg: "Host, IP --> '{{inventory_hostname}}', '{{hostvars[inventory_hostname].k8s_ip_address}}'"
+  when: k8s_ip_address is defined

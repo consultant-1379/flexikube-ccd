@@ -1,0 +1,34 @@
+---
+- name: Activate combined etcd CA in master-ca.crt
+  block:
+  - name: Create temp workspace directory
+    become: yes
+    command: mktemp -d /tmp/erikube-etcd-XXXXXX
+    register: mktemp1
+    changed_when: False
+
+  - name: Backup generated kubernetes client certificates
+    command: >
+      tar -czf /tmp/etcd-master-client-certificate-backup-{{ ansible_date_time.epoch }}.tgz
+      {{ kube_etcd_cert_dir }}
+    args:
+      warn: no
+
+  - name: Unarchive etcd ca cert tarballs
+    become: yes
+    unarchive:
+      src: "{{ hostvars['localhost'].g_etcd_mktemp.stdout }}/etcd-certs.tgz"
+      dest: "{{ mktemp1.stdout}}"
+
+  - name: Replace master nodes etcd kubernetes CA certificate with combined CA
+    shell: "cp {{ mktemp1.stdout}}/ca.crt {{ kube_etcd_cert_dir }}/master-ca.crt"
+
+  when: inventory_hostname in groups['etcd'] and rotated_etcd_ca_type == "combined"
+
+- name: Replace combined etcd ca with new etcd ca for master-ca.crt
+  block:
+
+  - name: Replace master nodes etcd kubernetes combined CA certificate with new CA
+    shell: "cp {{ etcd_ca_dir }}/new_ca.crt {{ kube_etcd_cert_dir }}/master-ca.crt"
+
+  when: inventory_hostname in groups['etcd'] and rotated_etcd_ca_type == "new"

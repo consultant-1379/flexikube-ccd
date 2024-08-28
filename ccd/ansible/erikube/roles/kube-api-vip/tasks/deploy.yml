@@ -1,0 +1,45 @@
+---
+- name: Assert that 'keepalived_virtual_router_id' is defined properly
+  assert:
+    that:
+      - keepalived_virtual_router_id is defined
+      - keepalived_virtual_router_id | int >= 1
+      - keepalived_virtual_router_id | int <= 255
+    msg: "'keepalived_virtual_router_id' is not correctly defined"
+
+- name: Create keepalived_script user
+  user:
+    name: keepalived_script
+    shell: /sbin/nologin
+    system: true
+
+- name: Set keepalived VRRP state for master
+  set_fact:
+    keepalived_vrrp_state: "MASTER"
+  when: inventory_hostname == keepalived_master
+
+- name: Set keepalived VRRP state for backup
+  set_fact:
+    keepalived_vrrp_state: "BACKUP"
+  when: inventory_hostname != keepalived_master
+
+- name: Set OS specific systemctl binary
+  set_fact:
+    systemctl_bin: "{{ '/bin/systemctl' if (ansible_distribution == 'Ubuntu') else '/usr/bin/systemctl' }}"
+
+- name: Create keepalived configuration file
+  template:
+    src: keepalived.conf.j2
+    dest: "/etc/keepalived/keepalived.conf"
+    mode: '0600'
+  notify: restart keepalived
+
+- name: Create API loadbalancer
+  include_role:
+    name: kube-lb
+
+- name: Enable and start keepalived
+  systemd:
+    name: keepalived
+    state: started
+    enabled: yes

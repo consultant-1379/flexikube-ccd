@@ -1,0 +1,149 @@
+---
+- name: Check for existing secret
+  command: "{{ kubectl }} -n {{ tls_secret_namespace }} get secret {{ tls_secret }}"
+  register: get_cert
+  failed_when: false
+  changed_when: false
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (get_cert.rc == 0 or "not found" in get_cert.stderr)
+
+- name: Create tmp directory
+  file: path="{{ container_registry_tmp_dir }}" state=directory
+
+- name: create SAN config file
+  copy:
+    dest: "{{ container_registry_tmp_dir }}/sanconfigfile_cr"
+    content: |
+      [ req ]
+      distinguished_name = req_distinguished_name
+      req_extensions     = req_ext
+
+      [ req_distinguished_name ]
+
+      [ req_ext  ]
+      subjectAltName     = @alt_names
+
+      [alt_names]
+      DNS.1              = {{ cr_hostname }}
+  become: yes
+
+- block:
+  - name: Copy CA cert to tmp dir
+    copy:
+      content: "{{ ca_cert }}"
+      dest: "{{ container_registry_tmp_dir }}/ca.crt"
+
+  - name: Copy CA key to tmp dir
+    copy:
+      content: "{{ ca_key }}"
+      dest: "{{ container_registry_tmp_dir }}/ca.key"
+
+  - name: Generate csr for registry certificate
+    command: |
+      openssl req -nodes -days 3650 -newkey rsa:2048 \
+        -keyout "{{ container_registry_tmp_dir }}/container_registry.key" \
+        -out "{{ container_registry_tmp_dir }}/container_registry.csr" \
+        -subj "{{ container_registry_ssl_subj }}" \
+        -extensions req_ext -config "{{ container_registry_tmp_dir }}/sanconfigfile_cr"
+
+  - name: Create a certificate for registry and sign it with trusted cert
+    command: |
+      openssl x509 -req -days 3650 \
+        -in "{{ container_registry_tmp_dir }}/container_registry.csr" \
+        -CA "{{ container_registry_tmp_dir }}/ca.crt" \
+        -CAkey "{{ container_registry_tmp_dir }}/ca.key" \
+        -CAcreateserial \
+        -out "{{ container_registry_tmp_dir }}/container_registry.crt" \
+        -extensions req_ext -extfile "{{ container_registry_tmp_dir }}/sanconfigfile_cr"
+  when:
+  - ca_key is defined
+  - ca_cert is defined
+  - container_registry_ssl_cert is not defined or container_registry_ssl_key is not defined
+
+- block:
+  - name: Patch req_extensions file for self-signed certificates
+    lineinfile:
+      path: "{{ container_registry_tmp_dir }}/sanconfigfile_cr"
+      regexp: 'basicConstraints = CA:TRUE'
+      insertafter: subjectAltName
+      line: 'basicConstraints = CA:TRUE'
+
+  - name: Generate self-signed certificate
+    command: |
+      openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+        -keyout "{{ container_registry_tmp_dir }}/container_registry.key" \
+        -out "{{ container_registry_tmp_dir }}/container_registry.crt" \
+        -subj "{{ container_registry_ssl_subj }}" \
+        -extensions req_ext -config "{{ container_registry_tmp_dir }}/sanconfigfile_cr"
+
+  - name: Create local temp dir
+    shell: mktemp -d
+    register: tmpdir
+  - set_fact:
+      local_tmpdir: "{{ tmpdir.stdout }}"
+
+  - name: Fetch cert to temp dir
+    fetch:
+      src: "{{ container_registry_tmp_dir }}/container_registry.crt"
+      dest: "{{ local_tmpdir }}/ca.crt"
+      flat: yes
+
+  - name: Install certs in containerd trust store
+    copy:
+      src: "{{ local_tmpdir }}/ca.crt"
+      dest: "/etc/containerd/certs.d/{{ cr_hostname }}/"
+    delegate_to: "{{ item }}"
+    loop: "{{ groups['master'] + groups['worker'] + (groups['add_worker'] | default([])) }}"
+
+  - name: Delete local temp dir
+    file:
+      path: "{{ local_tmpdir }}"
+      state: absent
+
+  when:
+  - ca_key is not defined or ca_cert is not defined
+  - container_registry_ssl_cert is not defined or container_registry_ssl_key is not defined
+
+- block:
+  - name: Copy Container Registry TLS cert
+    copy:
+      content: "{{ container_registry_ssl_cert }}"
+      dest: "{{ container_registry_tmp_dir }}/container_registry.crt"
+
+  - name: Copy Container Registry TLS key
+    copy:
+      content: "{{ container_registry_ssl_key }}"
+      dest: "{{ container_registry_tmp_dir }}/container_registry.key"
+  when:
+  - container_registry_ssl_cert is defined
+  - container_registry_ssl_key is defined
+
+
+- name: Create secret for TLS
+  command: "{{ kubectl }} create secret --namespace {{ tls_secret_namespace }} tls \
+          {{ tls_secret }} \
+          --key {{ container_registry_tmp_dir }}/container_registry.key \
+          --cert {{ container_registry_tmp_dir }}/container_registry.crt"
+  register: create_cert
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: create_cert.rc == 0
+  when: (get_cert.rc != 0 and "not found" in get_cert.stderr)
+
+- name: Update registry tls secret with new certificates
+  shell:
+    executable: /bin/bash
+    cmd: "{{ kubectl }} create secret --namespace {{ tls_secret_namespace }} tls \
+          {{ tls_secret }} \
+          --key {{ container_registry_tmp_dir }}/container_registry.key \
+          --cert {{ container_registry_tmp_dir }}/container_registry.crt \
+          --dry-run=client -o yaml | {{ kubectl }} apply -f -"
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+  when: get_cert.rc == 0
+
+- name: Delete tmp directory
+  file: path="{{ container_registry_tmp_dir }}" state=absent

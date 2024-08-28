@@ -1,0 +1,17 @@
+---
+
+plugin_action: "install"
+
+# You can set MTU value here. If left undefined or empty, it will
+# not be specified in calico CNI config, so Calico will use built-in
+# defaults. The value should be a number, not a string.
+# calico_mtu: 1500
+
+calico_secret_name: calico-etcd-secrets
+
+# IP-in-IP encapsulation mode to use for the IPv4 Pool created at start up.
+# Possible values: Off, Always, CrossSubnet
+calico_ipv4pool_ipip_mode: "Always"
+
+# Calico IPv6 NAT, disabled by default
+calico_ipv6_nat: false

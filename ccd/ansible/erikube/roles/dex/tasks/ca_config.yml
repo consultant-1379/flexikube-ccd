@@ -1,0 +1,39 @@
+---
+- include_vars: "{{ item }}"
+  with_first_found:
+    - files:
+      - "../vars/{{ ansible_distribution }}.yml"
+      - "../vars/{{ ansible_os_family }}.yml"
+      skip: True
+
+- name: Copy dex cert as trusted ca in masters
+  copy:
+    src: "{{ dex_cert_dir }}/dex.crt"
+    dest: "{{ ca_certs_path }}"
+    remote_src: yes
+  become: yes
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['master'] }}"
+
+- name: Copy dex cert as trusted ca in directors (ibd)
+  synchronize:
+    src: "{{ dex_cert_dir }}/dex.crt"
+    dest: "{{ ca_certs_path }}"
+    mode: pull
+  become: yes
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['director'] }}"
+  when: "'director' in groups"
+
+- name: Update CA trust in masters
+  shell: "{{ ca_cert_update_cmd }}"
+  become: yes
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['master'] }}"
+
+- name: Update CA trust in directors (ibd)
+  shell: "{{ ca_cert_update_cmd }}"
+  become: yes
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['director'] }}"
+  when: "'director' in groups"

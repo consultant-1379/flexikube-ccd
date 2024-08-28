@@ -1,0 +1,33 @@
+---
+- import_playbook: playbooks/ansible-check.yml
+
+- name: Gather facts as non root
+  hosts: all
+  gather_facts: yes
+
+- include: playbooks/ingress-lb-purge.yml
+- include: playbooks/cinder-purge.yml
+- include: playbooks/kube-purge.yml
+
+- name: Purge loadbalancer and VIP for Kubernetes API
+  hosts: master
+  become: yes
+  tasks:
+  - include_role:
+      name: kube-api-vip
+      tasks_from: purge
+
+
+- include: playbooks/etcd-purge.yml
+
+# Purge of Prometheus cert to Etcd (Secret) is not supported,
+# similar to Calico. It might be improved.
+
+
+- name: Purge docker config
+  hosts: all
+  become: yes
+  tasks:
+  - include_role:
+      name: docker
+      tasks_from: purge

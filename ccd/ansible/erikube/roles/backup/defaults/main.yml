@@ -1,0 +1,32 @@
+---
+# The backup archive name (erikube-<timestamp>.tgz by default)
+# backup_file_name: my-backup.tgz
+
+# Path to a directory on a Ansible machine, where all the backups should be stored.
+backups_folder_path: erikube-backups
+
+# Name of the snapshot to store in a backup
+etcd_snapshot_name: etcd-snapshot.db
+
+# Paths to include into the backup of master and worker nodes
+kube_backup_paths:
+  - /etc/cni
+  - /etc/kubernetes
+  - /var/lib/kubelet/pki
+  - "{{ (ansible_distribution == 'SLES') |
+         ternary('/usr/lib/systemd/system/kubelet.service',
+                 '/usr/local/lib/systemd/system/kubelet.service') }}"
+
+# Paths to include into the backup of etcd nodes
+etcd_backup_paths:
+  - "{{ etcd_conf_dir }}"
+  - /etc/profile.d/etcdctl.sh
+  - /etc/systemd/system/etcd_container.service
+
+# Paths to include into the backup of lb nodes
+lb_backup_paths:
+  - /etc/erikube
+  - /etc/systemd/system/erikube-loadbalancer.service
+
+insecure_registry_access: false
+check_free_space: true

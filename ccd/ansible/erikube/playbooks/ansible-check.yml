@@ -1,0 +1,20 @@
+---
+- name: Check local Ansible and Ansible-Python version
+  hosts: "localhost, {{ groups.reachable_master[0] | d(groups.master[0]) }}"
+  roles:
+    - erikube-defaults
+  tasks:
+    - name: Verify playbook running from supported Ansible version
+      assert:
+        that:
+          - "ansible_version.full is version(ansible_version_gt_eq_to, '>=')"
+          - "ansible_version.full is version(ansible_version_lt, '<')"
+        msg: "Ansible version must be >= {{ ansible_version_gt_eq_to }} and < {{ ansible_version_lt }}. Detected {{ ansible_version.full }}"
+      delegate_to: localhost
+    - name: Verify supported Ansible-Python interpreter version is used
+      assert:
+        that:
+          - "ansible_python_version is version(ansible_python_version_gt_eq_to, '>=')"
+          - "ansible_python_version is version(ansible_python_version_lt, '<')"
+        msg: "Python interpreter version must be >= {{ ansible_python_version_gt_eq_to }} and < {{ ansible_python_version_lt }}. Detected {{ ansible_python_version }}"
+      delegate_to: localhost

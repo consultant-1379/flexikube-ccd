@@ -1,0 +1,8 @@
+---
+- name: Delete existing NRI secret created earlier
+  command: "{{ kubectl }} -n {{ kube_namespace }} delete secret {{ nri_secret }} --ignore-not-found"
+  become: yes
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (result.rc == 0 or "not found" in result.stderr)

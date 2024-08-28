@@ -1,0 +1,76 @@
+- name: Set fact for subport_manager_image and subport_controller_image
+  set_fact:
+    subport_manager_image: "{{ kube_image_prefix }}{{ containers.erikube.subport_manager }}"
+    subport_controller_image: "{{ kube_image_prefix }}{{ containers.erikube.subport_controller }}"
+
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/erikube-k8s-XXXXXX
+  register: oscommunicatotemp
+  changed_when: False
+
+- name: Create files for subport manager
+  template:
+    src: "{{item}}.j2"
+    dest: "{{ oscommunicatotemp.stdout }}/{{item}}"
+  loop:
+    - clouds.yaml
+    - subport-manager-ds.yml
+    - subport-controller-service.yml
+    - subport-controller-ds.yml
+
+- name: Handle OS CA cert
+  block:
+    - name: Create OS CA cert
+      copy:
+        content: "{{ openstack_ca_cert }}"
+        dest: "{{ oscommunicatotemp.stdout }}/os_cacert"
+
+    - name: Delete secret os_cecert if exists
+      shell: "{{ kubectl }} delete secret openstack-ca-cert -n kube-system"
+      register: delete_secret
+      ignore_errors: yes
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: (delete_secret.rc == 0 or "not found" in delete_secret.stderr)
+
+    - name: Create secret openstack-ca-cert to kube-system namespace when it deleted from previous step
+      shell: "{{ kubectl }} create secret generic openstack-ca-cert --from-file={{ oscommunicatotemp.stdout }}/os_cacert -n kube-system"
+      register: result
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: result.rc == 0
+      when: delete_secret.rc == 0
+
+  when: openstack_ca_cert != ""
+
+- name: "Delete secret {{ subport_manager_secret_name }} if exists"
+  shell: "{{ kubectl }} delete secret {{ subport_manager_secret_name }} -n kube-system"
+  ignore_errors: yes
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (result.rc == 0 or "not found" in result.stderr)
+
+- name: "Create secret {{ subport_manager_secret_name }} to kube-system namespace"
+  shell: "{{ kubectl }} create secret generic {{ subport_manager_secret_name }} --from-file={{ oscommunicatotemp.stdout }}/clouds.yaml -n kube-system"
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+
+- name: Apply Subport manager and controller templates
+  shell: "{{ kubectl }} apply -f {{ oscommunicatotemp.stdout }}/{{item}}"
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+  loop:
+    - subport-manager-ds.yml
+    - subport-controller-service.yml
+    - subport-controller-ds.yml
+
+- name: Delete temp directory
+  file:
+    name: "{{ oscommunicatotemp.stdout }}"
+    state: absent
+  changed_when: False

@@ -1,0 +1,25 @@
+---
+- name: Deploy Network Resource Injector
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+  vars:
+    - tarball_name: "{{ helm_charts.network_resources_injector.name + '-' + helm_charts.network_resources_injector.version + '.tgz' }}"
+  roles:
+    - erikube-defaults
+    - role: helm-chart-provisioner
+      when: kube_network_extra_plugin is defined and kube_network_extra_plugin is search("multus") and network_resources_injector_enabled | default(false) | bool
+      vars:
+        - chart_name: network-resources-injector
+        - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '600s' }}"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - kube_namespace: kube-system
+        - state: installed
+        - values:
+            imagePullSecrets:
+              - name: local-registry-secret
+            image:
+              repo: "{{ docker_registry_host | default(default_registry) }}"
+              tag: "{{ containers.erikube.network_resources_injector.split(':')[1] }}"
+            nodeSelector: "{{ network_resources_injector_node_selector | default({}) }}"

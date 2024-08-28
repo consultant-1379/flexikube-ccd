@@ -1,0 +1,8 @@
+---
+- name: Add yum.linux.ericsson.se repo file
+  become: yes
+  copy:
+    src: "etc.yum.repos.d/rhel_yum.repo"
+    dest: "/etc/yum.repos.d/rhel_yum.repo"
+    mode: 0644
+  when: enable_ericsson_rhel_mirror | default(false) | bool

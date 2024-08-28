@@ -1,0 +1,19 @@
+---
+- name: Include OS Specific vars
+  include_vars: "{{ item }}"
+  with_first_found:
+    - files:
+      - "../../host-prepare/vars/{{ ansible_distribution }}-{{ ansible_distribution_major_version }}.yml"
+      - "../../host-prepare/vars/{{ ansible_os_family }}.yml"
+
+- name: Enable disabled services
+  include_tasks: enable-services.yml
+
+- name: Check if given services are disabled
+  include_tasks: check-disabled-services.yml
+
+- name: Check packages are installed
+  include_tasks: check-installed-packages.yml
+
+- name: Check if given services are running
+  include_tasks: check-running-services.yml

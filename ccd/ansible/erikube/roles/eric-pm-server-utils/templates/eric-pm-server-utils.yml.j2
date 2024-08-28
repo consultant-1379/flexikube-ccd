@@ -1,0 +1,171 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eric-pm-server-utils
+  namespace: monitoring
+  labels:
+    app: eric-pm-server-utils
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: eric-pm-server-utils
+  template:
+    metadata:
+      labels:
+        app: eric-pm-server-utils
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        container.apparmor.security.beta.kubernetes.io/eric-pm-server-utils: "runtime/default"
+    spec:
+      priorityClassName: system-cluster-critical
+      serviceAccountName: eric-pm-server-utils
+      imagePullSecrets:
+        - name: local-registry-secret
+      containers:
+        - name: eric-pm-server-utils
+          image: {{ pm_server_utils_image }}
+          env:
+          - name: PM_SERVER_UTILS_LOG_LEVEL
+            value: {{ pm_server_utils_log_level }}
+          - name: DEPLOYMENT_TYPE
+            value: {{ pm_server_utils_deployment_type }}
+          - name: KUBE_API_IP
+            value: "{{ pm_server_utils_kube_api_ip }}"
+          - name: KUBE_API_PORT
+            value: "{{ pm_server_utils_kube_api_port }}"
+          - name: CR_INGRESS_TLS_PASSTHROUGH_ENABLED
+            value: "{{ cr_ingress_tls_passthrough_enabled }}"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 50Mi
+            limits:
+              cpu: 20m
+              memory: 100Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            privileged: false
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - containerPort: 8000
+              name: http
+              protocol: TCP
+          volumeMounts:
+          - mountPath: /var/run/secrets/etcd/client
+            name: etcd-certs
+            readOnly: true
+          - name: hosts
+            mountPath: /etc/hosts
+            readOnly: true
+      volumes:
+      - name: etcd-certs
+        secret:
+          defaultMode: 420
+          secretName: etcd-certs
+      - name: hosts
+        hostPath:
+          path: /etc/hosts
+{% if pm_server_utils_schedule_in_masternode %}
+      nodeSelector:
+        node-role.kubernetes.io/master: ""
+      tolerations:
+        - key: node-role.kubernetes.io/master
+          effect: NoSchedule
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 10
+        - key: node.kubernetes.io/unreachable
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 10
+{% else %}
+      tolerations:
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 10
+        - key: node.kubernetes.io/unreachable
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 10
+{% endif %}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cr-registry-credentials
+  namespace: monitoring
+data:
+  username: "{{ pm_server_utils_cr_custom_user_id | b64encode }}"
+  password: "{{ pm_server_utils_cr_custom_pwd | b64encode }}"
+type: Opaque
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app: eric-pm-server-utils
+  name: eric-pm-server-utils
+  namespace: monitoring
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: reader-for-eric-pm-server-utils
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "pods", "services"]
+  verbs: ["get", "watch", "list"]
+
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: eric-pm-server-utils-clusterrolebinding
+subjects:
+- kind: ServiceAccount
+  name: eric-pm-server-utils
+  namespace: monitoring
+roleRef:
+  kind: ClusterRole
+  name: reader-for-eric-pm-server-utils
+  apiGroup: ""
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: reader-for-eric-pm-server-utils
+  namespace: monitoring
+rules:
+- apiGroups:
+  - apps
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: eric-pm-server-utils-rolebinding
+  namespace: monitoring
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: reader-for-eric-pm-server-utils
+subjects:
+- kind: ServiceAccount
+  name: eric-pm-server-utils
+  namespace: monitoring

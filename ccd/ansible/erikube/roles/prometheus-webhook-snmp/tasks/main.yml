@@ -1,0 +1,72 @@
+---
+- name: Create namespace {{ prometheus_namespace }}
+  command: "{{ kubectl }} create namespace {{ prometheus_namespace }}"
+  register: ns_create
+  failed_when: ns_create.rc != 0 and not ns_create.stderr.find("already exists") != -1
+  changed_when: ns_create.rc == 0
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: ns_create.rc == 0
+  become: true
+
+- name: Create {{ prometheus_namespace }} secret for accessing local registry
+  shell: |
+    {{ kubectl }} create secret docker-registry local-registry-secret \
+    --docker-server={{ 'registry.eccd.local:5000' if local_registry_user is defined and local_registry_user != "" else 'null.eccd.local' }} \
+    --docker-username={{ local_registry_user if local_registry_user is defined and local_registry_user != "" else 'null' }} \
+    --docker-password={{ local_registry_password if local_registry_password is defined and local_registry_password != "" else 'nopassword' }} -n {{ prometheus_namespace }} \
+    --dry-run=client -o yaml | {{ kubectl }} apply -f -
+  register: result
+  become: true
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/erikube-k8s-XXXXXX
+  register: mktemp_pws
+  changed_when: False
+
+- name: Check for existing prometheus webhook snmp deployment
+  command: "{{ kubectl }} -n {{ prometheus_namespace }} get deployment prometheus-webhook-snmp"
+  register: deployment_exist
+  failed_when: false
+  changed_when: false
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (deployment_exist.rc == 0 or "not found" in deployment_exist.stderr)
+
+- name: Delete prometheus webhook snmp deployment
+  command: "{{ kubectl }} -n {{ prometheus_namespace }} delete deployment prometheus-webhook-snmp"
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+  when:
+    - deployment_exist.rc == 0
+
+- name: Create Prometheus Webhook SNMP yml files
+  template:
+    src: "{{item}}.j2"
+    dest: "{{ mktemp_pws.stdout }}/{{item}}"
+  with_items:
+    - pws-cm.yml
+    - pws-deployment.yml
+    - pws-svc.yml
+
+- name: Apply Prometheus Webhook SNMP yml files
+  shell: "{{ kubectl }} apply -f {{ mktemp_pws.stdout }}/{{item}}"
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+  with_items:
+    - pws-cm.yml
+    - pws-deployment.yml
+    - pws-svc.yml
+
+- name: Delete temp directory
+  file:
+    name: "{{ mktemp_pws.stdout }}"
+    state: absent
+  changed_when: False

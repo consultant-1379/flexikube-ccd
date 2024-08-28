@@ -1,0 +1,30 @@
+---
+#Fix for CCD-9103 master not ready after containerd reboot issue
+- name: Bind docker service to containerd service(Ubuntu)
+  become: yes
+  replace:
+    path: /lib/systemd/system/docker.service
+    regexp: 'Wants=containerd.service'
+    replace: 'BindsTo=containerd.service'
+  when: ansible_distribution == "Ubuntu"
+
+- block:
+  - name: Replace parameter in docker service descriptor file(Sles)
+    become: yes
+    replace:
+      path: /usr/lib/systemd/system/docker.service
+      regexp: 'After=.*'
+      replace: 'After=network.target lvm2-monitor.service SuSEfirewall2.service containerd.service'
+
+  - name: Bind docker service to containerd service(Sles)
+    become: yes
+    lineinfile:
+      path: /usr/lib/systemd/system/docker.service
+      insertafter: '\[Unit\]'
+      line: BindsTo=containerd.service
+
+  when: ansible_distribution == "SLES"
+
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes

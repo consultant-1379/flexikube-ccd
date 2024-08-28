@@ -1,0 +1,28 @@
+---
+- name: Create minimal kubelet config file
+  template:
+    src: kubelet-config.yaml.j2
+    dest: /var/lib/kubelet/config.yaml
+  become: yes
+
+- name: Create temporary directory for configuration files
+  command: mktemp -d /tmp/eccd-configs-XXXXXX
+  register: mktemp
+  changed_when: False
+
+- set_fact:
+    tempdir: "{{ mktemp.stdout }}"
+
+- name: Copy clusterrole for system:node
+  copy:
+    src: "system-node-clusterrole.yml"
+    dest: "{{ tempdir }}/system-node-clusterrole.yml"
+    mode: 0644
+
+- name: Apply system:node clusterrole
+  command: "{{ kubectl }} apply -f {{ tempdir }}/system-node-clusterrole.yml"
+  register: cmd_status
+  until: cmd_status.rc == 0
+  retries: 50
+  delay: 5
+  become: yes

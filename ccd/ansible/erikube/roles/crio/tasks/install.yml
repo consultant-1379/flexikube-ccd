@@ -1,0 +1,42 @@
+---
+- include_vars: "{{ item }}"
+  with_first_found:
+    - files:
+      - "../vars/{{ ansible_distribution }}.yml"
+      - "../vars/{{ ansible_os_family }}.yml"
+      skip: True
+
+- name: Print crio_version variable
+  debug:
+    msg: "{{ crio_version }}"
+
+- block:
+  - name: Stop crio service
+    service:
+      name: crio
+      state: stopped
+    ignore_errors: yes
+
+  #- name: "Do OS specific installation steps of containerd for {{ ansible_distribution }}"
+  #  include_tasks: "{{ containerd_install_item }}"
+  #  with_first_found:
+  #    - files:
+  #      - "install-{{ ansible_distribution }}.yml"
+  #      - "install-{{ ansible_os_family }}.yml"
+  #      skip: True
+  #  loop_control:
+  #    loop_var: containerd_install_item
+  #
+  #when: not is_atomic and ansible_os_family != 'Debian'
+
+- name: copy crio.service (Suse)
+  copy:
+    src: crio.service
+    dest: /usr/lib/systemd/system/crio.service
+  when: ansible_distribution == "SLES"
+
+- name: copy crio-wipe.service (Suse)
+  copy:
+    src: crio-wipe.service
+    dest: /usr/lib/systemd/system/crio-wipe.service
+  when: ansible_distribution == "SLES"

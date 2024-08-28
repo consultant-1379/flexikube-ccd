@@ -1,0 +1,408 @@
+---
+- name: Deploy fluentd (Helm chart)
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+    - name: convert logger external host field to list if string
+      set_fact:
+        logger_external_server_host: ['{{ logger_external_server_host }}']
+      when :  logger_external_server_enabled | default(false) | bool and logger_external_server_host is string
+    - name: convert logger external host port field to list if string or not defined
+      set_fact:
+        logger_external_server_port: ['{{ logger_external_server_port | default(514) }}']
+      when : logger_external_server_enabled | default(false) | bool  and  (logger_external_server_port is string or logger_external_server_port is undefined )
+    - name: initialize fluentd secure output config
+      set_fact:
+        fluentd_secure_output: ""
+      when: logger_external_server_enabled | default(false) | bool
+    - name: initialize fluentd output config
+      set_fact:
+        fluentd_output: ""
+      when: logger_external_server_enabled | default(false) | bool
+    - name: update fluentd secure output config
+      set_fact:
+        fluentd_secure_output: |
+          {{ fluentd_secure_output }}
+          <store>
+            @type syslog_tls
+            host {{ logger_external_server_host[index] }}
+            port {{ logger_external_server_port[index] | default(514) }}
+            ca_cert /fluentd-out/ssl/ca.crt
+            client_cert /fluentd-out/ssl/tls.crt
+            client_key /fluentd-out/ssl/tls.key
+            verify_cert_name true
+            hostname_key nodename
+            facility AUTH
+            severity_key severity
+            format json
+          </store>
+      loop: "{{ logger_external_server_host }}"
+      loop_control:
+        index_var: index
+      when: logger_external_server_enabled | default(false) | bool
+    - name: update fluentd output config
+      set_fact:
+        fluentd_output: |
+          {{ fluentd_output }}
+          <store>
+            @type syslog_tls
+            host {{ logger_external_server_host[index] }}
+            port {{ logger_external_server_port[index] | default(514) }}
+            ca_cert /fluentd-out/ssl/ca.crt
+            client_cert /fluentd-out/ssl/tls.crt
+            client_key /fluentd-out/ssl/tls.key
+            verify_cert_name true
+            hostname_key nodename
+            facility SYSLOG
+            severity_key severity
+            format json
+          </store>
+      loop: "{{ logger_external_server_host }}"
+      loop_control:
+        index_var: index
+      when: logger_external_server_enabled | default(false) | bool
+    - name: Update fluentd bind address
+      set_fact:
+        fluentd_bind_address: "{{ '::' if (k8s_ip_version == 'ipv6' or default_dualstack_ip_family == 'ipv6') else '0.0.0.0' }}"
+      when:
+        - logger_external_server_enabled | default(false) | bool
+  vars:
+    - tarball_name: "{{ helm_charts.fluentd.name + '-' + helm_charts.fluentd.version + '.tgz' }}"
+    - fluentd_replicas: "{{ logger_replicas | default('1') | int }}"
+  roles:
+    - erikube-defaults
+    - role: fluentd
+      when: logger_external_server_enabled | default(false) | bool
+    - role: helm-chart-provisioner
+      when: logger_external_server_enabled | default(false) | bool
+      vars:
+        - chart_name: fluentd
+        - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '1200s' }}"
+        - kube_namespace: "ccd-logging"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - state: installed
+        - values:
+            global:
+              registry:
+                url: "{{ kube_image_prefix | regex_replace('\\/$', '') }}"
+            image:
+              repository: "{{ kube_image_prefix }}{{ containers.logging.fluentd.split(':')[0] }}"
+              tag: "{{ containers.logging.fluentd.split(':')[1] }}"
+              pullPolicy: IfNotPresent
+            kind: Deployment
+            imagePullSecrets:
+              - name: local-registry-secret
+            replicaCount: "{{ fluentd_replicas }}"
+            mountVarLogDirectory: false
+            mountDockerContainersDirectory: false
+            priorityClassName: "system-cluster-critical"
+            configMapConfigs:
+              - fluentd-prometheus-conf
+            service:
+              type: NodePort
+              ports:
+                - name: fluentd
+                  protocol: TCP
+                  containerPort: 24224
+                - name: fluentd-ext
+                  protocol: TCP
+                  containerPort: 24225
+            volumes:
+              - name: fluentd-out
+                secret:
+                  secretName: fluentd-out-tls
+              - name: fluentd-tls
+                secret:
+                  secretName: fluentd-tls
+            volumeMounts:
+              - name: fluentd-out
+                mountPath: /fluentd-out/ssl
+              - name: fluentd-tls
+                mountPath: /fluentd-tls/ssl
+            fileConfigs:
+              01_sources.conf: |-
+                <source>
+                  @type forward
+                  port 24224
+                  bind {{ fluentd_bind_address }}
+                  <transport tls>
+                    version                TLSv1_3
+                    ca_path                /fluentd-tls/ssl/ca.crt.pem
+                    cert_path              /fluentd-tls/ssl/server.crt.pem
+                    private_key_path       /fluentd-tls/ssl/server.key.pem
+                  </transport>
+                </source>
+                <source>
+                  @type syslog
+                  port 24225
+                  bind {{ fluentd_bind_address }}
+                  tag director_messages
+                  <transport tls>
+                    version                TLSv1_3
+                    ca_path                /fluentd-tls/ssl/ca.crt.pem
+                    cert_path              /fluentd-tls/ssl/server.crt.pem
+                    private_key_path       /fluentd-tls/ssl/server.key.pem
+                  </transport>
+                </source>
+              02_filters.conf:
+              03_dispatch.conf:
+              04_outputs.conf: |-
+                <match {node-audit.var.log.audit.audit.log}>
+                  @type copy
+                  {{ fluentd_secure_output }}
+                </match>
+                <match {kube-audit.var.log.kube-apiserver.kube-apiserver-audit.log}>
+                  @type copy
+                  {{ fluentd_secure_output }}
+                </match>
+                <match {messages.var.log.messages}>
+                  @type copy
+                  {{ fluentd_output }}
+                </match>
+                <match {**_ingress-nginx_**}>
+                  hostname_command cat /etc/hostname
+                  @type rewrite_tag_filter
+                  <rule>
+                    key message
+                    pattern ^.+$
+                    tag kube.var.log.containers.ingress-nginx
+                  </rule>
+                </match>
+                <match {**_kube-system_**}>
+                  hostname_command cat /etc/hostname
+                  @type rewrite_tag_filter
+                  <rule>
+                    key message
+                    pattern ^.+$
+                    tag kube.var.log.containers.kube-system
+                  </rule>
+                </match>
+                <match {**_ccd-logging_**}>
+                  hostname_command cat /etc/hostname
+                  @type rewrite_tag_filter
+                  <rule>
+                    key message
+                    pattern ^.+$
+                    tag kube.var.log.containers.ccd-logging
+                  </rule>
+                </match>
+                <match {**_monitoring_**}>
+                  hostname_command cat /etc/hostname
+                  @type rewrite_tag_filter
+                  <rule>
+                    key stream
+                    pattern ^.+$
+                    tag kube.var.log.containers.monitoring
+                  </rule>
+                </match>
+                <match {kube.var.log.containers.**}>
+                  @type copy
+                  {{ fluentd_output }}
+                </match>
+                <match {**director_messages**}>
+                  @type rewrite_tag_filter
+                  hostname_command cat /etc/hostname
+                  <rule>
+                    key ident
+                    pattern /director_audit_log/
+                    tag director-audit.var.log.audit.audit.log
+                  </rule>
+                  <rule>
+                    key ident
+                    pattern /director_audit_log/
+                    tag director-messages.var.log.messages
+                    invert true
+                  </rule>
+                </match>
+                <match {director-audit.var.log.audit.audit.log}>
+                  @type copy
+                  {{ fluentd_secure_output }}
+                </match>
+                <match {director-messages.var.log.messages}>
+                  @type copy
+                  {{ fluentd_output }}
+                </match>
+
+- name: Create directory for rsyslog certs on director
+  hosts: director
+  become: yes
+  tasks:
+    - name: Create directory for rsyslog certs
+      file:
+        path: /etc/rsyslog/ssl/certs
+        state: directory
+        owner: root
+        group: root
+        mode: 0775
+        recurse: yes
+
+- name: Copy rsyslog ca cert to director
+  hosts: master[0]
+  become: yes
+  vars:
+    dir2: /tmp/erikube-fluent-rsyslog
+    directors: "{{ ['director-0','director-1'] if groups['director'] | length | int > 1 else 'director-0' }}"
+  tasks:
+    - name: Copy certs to directors
+      synchronize:
+        src: "{{ item.0 }}"
+        dest: "{{ item.1 }}"
+        mode: pull
+      delegate_to: "{{ item.2 }}"
+      with_nested:
+        - ["{{ dir2 }}/certs/ca.crt.pem"]
+        - ["/etc/rsyslog/ssl/certs/rsyslog_ca.crt.pem"]
+        - "{{ directors }}"
+      when: logger_external_server_enabled | default(false) | bool
+
+- name: Copy rsyslog client cert to director
+  hosts: master[0]
+  become: yes
+  vars:
+    dir2: /tmp/erikube-fluent-rsyslog
+    directors: "{{ ['director-0','director-1'] if groups['director'] | length | int > 1 else 'director-0' }}"
+  tasks:
+    - name: Copy certs to directors
+      synchronize:
+        src: "{{ item.0 }}"
+        dest: "{{ item.1 }}"
+        mode: pull
+      delegate_to: "{{ item.2 }}"
+      with_nested:
+        - ["{{ dir2 }}/certs/client.crt.pem"]
+        - ["/etc/rsyslog/ssl/certs/rsyslog_client.crt.pem"]
+        - "{{ directors }}"
+      when: logger_external_server_enabled | default(false) | bool
+
+- name: Copy rsyslog client key to director
+  hosts: master[0]
+  become: yes
+  vars:
+    dir2: /tmp/erikube-fluent-rsyslog
+    directors: "{{ ['director-0','director-1'] if groups['director'] | length | int > 1 else 'director-0' }}"
+  tasks:
+    - name: Copy certs to directors
+      synchronize:
+        src: "{{ item.0 }}"
+        dest: "{{ item.1 }}"
+        mode: pull
+      delegate_to: "{{ item.2 }}"
+      with_nested:
+        - ["{{ dir2 }}/private/client.key.pem"]
+        - ["/etc/rsyslog/ssl/certs/rsyslog_client.key.pem"]
+        - "{{ directors }}"
+      when: logger_external_server_enabled | default(false) | bool
+
+- name: Delete CA main directory
+  hosts: master[0]
+  become: yes
+  vars:
+    dir: /tmp/erikube-fluent-ca
+    dir2: /tmp/erikube-fluent-rsyslog
+  tasks:
+  - name: Delete main dir
+    file:
+      name: "{{ item }}"
+      state: absent
+    with_items:
+      - "{{ dir }}"
+      - "{{ dir2 }}"
+    when: logger_external_server_enabled | default(false) | bool
+
+- name: Get first nodes internal IP address and fluentd nodePort
+  hosts: master[0]
+  roles:
+  - erikube-defaults
+  tasks:
+  - name: Get ip and port
+    block:
+      - name: Get ip
+        shell: >
+          kubectl get nodes -o jsonpath='{ $.items[*].status.addresses[?(@.type=="InternalIP")].address }' | awk '{print $1;}'
+        register: ip_result
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: (ip_result.rc == 0 or "not found" in ip_result.stderr)
+      - name: Get port
+        shell: >
+          kubectl get -o jsonpath="{.spec.ports[2].nodePort}" services fluentd -n ccd-logging
+        register: port_result
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: (port_result.rc == 0 or "not found" in port_result.stderr)
+      - name: Add ip address to dummy host for access
+        add_host:
+          name: "external_ip_dummy_host"
+          ext_ip_addr: "{{ ip_result.stdout }}"
+          ext_port: "{{ port_result.stdout }}"
+    when: logger_external_server_enabled | default(false) | bool
+
+- name:  Add log streaming for fluentd for directors
+  hosts: director
+  become: yes
+  vars:
+    ip_addr: "{{ hostvars['external_ip_dummy_host']['ext_ip_addr'] }}"
+    port_number: "{{ hostvars['external_ip_dummy_host']['ext_port'] }}"
+  tasks:
+  - name: Add forwarding rule to rsyslog conf file
+    blockinfile:
+      path: /etc/rsyslog.conf
+      block: |
+        # ### begin forwarding rule ###
+        $DefaultNetstreamDriver gtls
+
+        $DefaultNetstreamDriverCAFile /etc/rsyslog/ssl/certs/rsyslog_ca.crt.pem
+        $DefaultNetstreamDriverCertFile /etc/rsyslog/ssl/certs/rsyslog_client.crt.pem
+        $DefaultNetstreamDriverKeyFile /etc/rsyslog/ssl/certs/rsyslog_client.key.pem
+
+        $ActionSendStreamDriverAuthMode x509/name
+        $ActionSendStreamDriverPermittedPeer fluentd
+        $ActionSendStreamDriverMode 1 # run driver in TLS-only mode
+
+        $WorkDirectory /var/spool/rsyslog # where to place spool files
+        $ActionQueueFileName fwdRule1 # unique name prefix for spool files
+        $ActionQueueMaxDiskSpace 1g # 1gb space limit (use as much as possible)
+        $ActionQueueSaveOnShutdown on # save messages to disk on shutdown
+        $ActionQueueType LinkedList # run asynchronously
+        $ActionResumeRetryCount -1 # infinite retries if host is down
+
+        #audit log
+        $ModLoad imfile
+        $InputFileName /var/log/audit/audit.log
+        $InputFileTag director_audit_log:
+        $InputFileStateFile audit_log
+        $InputFileSeverity info
+        $InputFileFacility local6
+        $InputRunFileMonitor
+
+        *.* @@{{ ip_addr }}:{{ port_number }}
+
+        # ### end of the forwarding rule ###
+    when: logger_external_server_enabled | default(false) | bool
+
+- name: Restart rsyslog to take new config into use
+  hosts: director
+  become: yes
+  tasks:
+  - name: Restart rsyslog
+    systemd:
+      name: rsyslog
+      state: restarted
+    when: logger_external_server_enabled | default(false) | bool
+
+- name: Backup rsyslog certs and config file
+  hosts: director
+  become: yes
+  tasks:
+  - name: Copy certs from local to mount volume
+    copy:
+      src: /etc/rsyslog/ssl/certs
+      dest: /mnt/config/rsyslog
+    when: logger_external_server_enabled | default(false) | bool
+
+  - name: Copy rsyslog.conf from local to mount volume
+    copy:
+      src: /etc/rsyslog.conf
+      dest: /mnt/config/rsyslog/rsyslog.conf
+    when: logger_external_server_enabled | default(false) | bool

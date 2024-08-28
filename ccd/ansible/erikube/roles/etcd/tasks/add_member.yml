@@ -1,0 +1,27 @@
+- name: check if etcd member already exist
+  shell: source /etc/profile.d/etcdctl.sh && etcdctl3 member list | awk '{print $3}' | sed 's/,//g'
+  args:
+    executable: /bin/bash
+  register: etcd_member_list
+  delegate_to: "{{ working_etcd }}"
+
+- name: Add new etcd node to cluster
+  shell: source /etc/profile.d/etcdctl.sh && etcdctl3 member add "{{ ansible_hostname }}" --peer-urls="https://{{ etcd_ip | ipwrap }}:2380"
+  args:
+    executable: /bin/bash
+  delegate_to: "{{ working_etcd }}"
+  when: etcd_member_list is defined and etcd_member_list.stdout is defined and etcd_member_list.stdout is not search(ansible_hostname)
+
+- name: Form a mapping between ansible hostname and inventory hostname
+  set_fact:
+    host_mapping: "{{ host_mapping | default({}) | combine ({ hostvars[item].ansible_hostname : item }) }}"
+  with_items: "{{ etcd_peers }}"
+  when: not image_based_deployment | default(false) | bool
+
+- name: Change ansible hostname to inventory hostnames in etcd member list
+  set_fact:
+    etcd_members: "{{ etcd_members | default([]) }} + {{ [item.value] }}"
+  when:
+    - not image_based_deployment | default(false) | bool
+    - etcd_member_list is defined and etcd_member_list.stdout_lines is defined and item.key in etcd_member_list.stdout_lines
+  with_items: "{{ query('dict', host_mapping | default({})) }}"

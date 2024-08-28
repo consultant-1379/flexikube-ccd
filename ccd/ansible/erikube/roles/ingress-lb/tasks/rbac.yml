@@ -1,0 +1,52 @@
+---
+- name: Create ServiceAccount for LB
+  command: "{{ kubectl }} create serviceaccount {{ serviceaccount }}"
+  register: createsa
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: createsa.rc == 0
+  failed_when: createsa.rc != 0 and 'already exists' not in createsa.stderr
+
+- name: Upload RBAC temporary files
+  template:
+    src: "{{ item }}.j2"
+    dest: "/tmp/{{ item }}.yml"
+    mode: "u+rw,g=,o="
+  with_items: ['secret', 'lb-clusterrole', 'lb-clusterrolebinding']
+
+- name: Check if Secret exists for LB
+  shell: "{{ kubectl }} get serviceaccount {{ serviceaccount }} -o json |jq -r '. |select(.secrets != null) |select(.secrets[] != null) |.secrets[0] |select(.name != null) |.name |contains(\"{{ serviceaccount }}\")'"
+  register: get_secret
+  failed_when: false
+  changed_when: false
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (get_secret.rc == 0)
+
+- name: Create Secret for LB
+  command: "{{ kubectl }} apply -f /tmp/secret.yml"
+  register: secret
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: secret.rc == 0
+  when: (get_secret.rc == 0 and "true" not in get_secret.stdout)
+
+- name: Create ClusterRole for LB
+  command: "{{ kubectl }} apply -f /tmp/lb-clusterrole.yml"
+  register: cluster_role
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: cluster_role.rc == 0
+
+- name: Create ClusterRoleBinding for LB
+  command: "{{ kubectl }} apply -f /tmp/lb-clusterrolebinding.yml"
+  register: cluster_role_binding
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: cluster_role_binding.rc == 0
+
+- name: Delete RBAC temporary files
+  file:
+    path: '/tmp/{{ item }}.yml'
+    state: absent
+  with_items: ['secret', 'lb-clusterrole', 'lb-clusterrolebinding']

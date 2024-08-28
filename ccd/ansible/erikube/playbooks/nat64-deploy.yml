@@ -1,0 +1,43 @@
+---
+- name: Deploy ADP NAT64
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+  vars:
+    - kube_image_prefix: "{{ docker_registry_host | default(default_registry) }}/"
+    - tarball_name: "{{ helm_charts.eric_tm_nat64.name + '-' + helm_charts.eric_tm_nat64.version + '.tgz' }}"
+  roles:
+    - erikube-defaults
+    - role: helm-chart-provisioner
+      when: nat64_enabled | default(false) | bool
+      vars:
+        - chart_name: eric-tm-nat64
+        - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '600s' }}"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - state: installed
+        - kube_namespace: kube-system
+        - values:
+            global:
+              registry:
+                # Remove the / from the registry url
+                url: "{{ kube_image_prefix | regex_replace('\\/$', '') }}"
+              pullSecret: "local-registry-secret"
+            imageCredentials:
+              repoPath: ""
+            rbac:
+              create: true
+            images:
+              nat64:
+                name: "{{ containers.erikube.eric_tm_nat64.split(':')[0] }}"
+                tag: "{{ containers.erikube.eric_tm_nat64.split(':')[1] }}"
+            prefix: "{{ nat64.prefix }}"
+            Ipv4Xrange: "{{ nat64.Ipv4Xrange | default('')}}"
+            configparams: "{{ nat64.configparams }}"
+            resources:
+              limits:
+                cpu: "{{ nat64_limits_cpu | default('100m')}}"
+                memory: "{{ nat64_limits_memory | default('100Mi')}}"
+              requests:
+                cpu: "{{ nat64_requests_cpu | default('60m')}}"
+                memory: "{{ nat64_requests_memory | default('100Mi')}}"

@@ -1,0 +1,53 @@
+---
+# Deploy k8s
+
+- name: Create save directory /var/lib/erikube
+  file:
+    name: "/var/lib/erikube"
+    state: directory
+    owner: "{{ file_default_owner }}"
+    group: "{{ file_default_group }}"
+    mode: "{{ file_default_mode }}"
+  become: yes
+
+# Save iptables configuration so it can be reproduced when purging erikube
+- name: Check for saved rules
+  stat:
+    path: "/var/lib/erikube/iptables.save"
+  register: iptables_save
+  become: yes
+
+- name: Run iptables-save
+  shell: "/usr/sbin/iptables-save > /var/lib/erikube/iptables.save"
+  when: not iptables_save.stat.exists and not ansible_distribution == 'Ubuntu'
+  become: yes
+
+- name: Run iptables-save
+  shell: "/sbin/iptables-save > /var/lib/erikube/iptables.save"
+  when: not iptables_save.stat.exists and ansible_distribution == 'Ubuntu'
+  become: yes
+
+# Required by kubeadm
+- name: Update etc/hosts file
+  include_tasks: "{{ role_path}}/tasks/update-etc-hosts.yml"
+
+- name: Deploy erikube installer
+  include_tasks: "{{ role_path}}/tasks/deploy-erikube-installer.yml"
+
+- name: Check if containerd service is running
+  shell: systemctl is-active --quiet containerd
+  register: containerd_systemd
+  changed_when: false
+  ignore_errors: yes
+
+- name: Update etc/resolv.conf file
+  include_tasks: "{{ role_path}}/tasks/update-etc-resolv.yml"
+
+- name: Daemon-reload, enable/start kubelet
+  systemd:
+    state: restarted
+    daemon_reload: yes
+    name: kubelet
+    enabled: yes
+  when: containerd_systemd is succeeded
+  become: yes

@@ -1,0 +1,22 @@
+---
+- name: Upgrade (redeploy) Pod Security Standards
+  hosts: master[0]
+  become: yes
+  roles:
+    - erikube-defaults
+  tasks:
+    - name: Create pss rules directory
+      file:
+        path: /etc/kubernetes/policies
+        state: directory
+        mode: 0700
+
+    - name: Prepare default pss template
+      template: >
+        src="roles/kube-master/templates/{{ item }}.j2"
+        dest="/etc/kubernetes/policies/{{ item }}"
+      with_items:
+        - pss-default-rules.yaml
+
+    - include_role:
+        name: kube-pss

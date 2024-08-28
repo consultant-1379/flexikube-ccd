@@ -1,0 +1,1798 @@
+{
+  "erikube_version": "2.29.0",
+  "default_registry": "armdocker.rnd.ericsson.se/proj_kds/erikube",
+  "value_packages": {
+    "baremetal": [
+      {
+        "name": "hosted_storage",
+        "containers": [
+          ".containers.erikube.rook_ceph_operator",
+          ".containers.erikube.rook_ceph_cluster"
+        ],
+        "package_name_prefix": "CXP9043229"
+      },
+      {
+        "name": "local_storage_provisioner",
+        "containers": [
+          ".containers.erikube.volume_group_manager",
+          ".containers.erikube.topolvm"
+        ],
+        "package_name_prefix": "CXP9043234"
+      },
+      {
+        "name": "falco",
+        "containers": [
+          ".containers.erikube.falco"
+        ],
+        "package_name_prefix": "CXP9043230"
+      }
+    ],
+    "virtualmachine": [
+      {
+        "name": "falco",
+        "containers": [
+          ".containers.erikube.falco"
+        ],
+        "package_name_prefix": "CXP9043230"
+      }
+    ],
+    "singleserver": [
+      {
+        "name": "local_storage_provisioner",
+        "containers": [
+          ".containers.erikube.volume_group_manager",
+          ".containers.erikube.topolvm"
+        ],
+        "package_name_prefix": "CXP9043234"
+      },
+      {
+        "name": "falco",
+        "containers": [
+          ".containers.erikube.falco"
+        ],
+        "package_name_prefix": "CXP9043230"
+      }
+    ]
+  },
+  "helm_charts": {
+    "network_resources_injector": {
+      "name": "network-resources-injector",
+      "version": "0.0.11",
+      "source": "helm-charts/network-resources-injector"
+    },
+    "ovs_cni": {
+      "name": "ovs-cni",
+      "version": "0.0.1",
+      "source": "helm-charts/ovs-cni"
+    },
+    "sriov_network_device_plugin": {
+      "name": "sriov-network-device-plugin",
+      "version": "0.3.5",
+      "source": "helm-charts/sriov-network-device-plugin"
+    },
+    "csi-driver-nfs": {
+      "name": "csi-driver-nfs",
+      "version": "v4.6.0",
+      "source": "helm-charts/csi-driver-nfs"
+    },
+    "draino": {
+      "name": "draino",
+      "version": "0.0.3",
+      "source": "helm-charts/draino"
+    },
+    "eric_lcm_container_registry": {
+      "name": "eric-lcm-container-registry",
+      "tarball": "eric-lcm-container-registry-8.2.0+18.tgz",
+      "source": "https://arm.rnd.ki.sw.ericsson.se/artifactory/proj-adp-gs-all-helm/eric-lcm-container-registry/",
+      "patch": "helm-charts/eric-lcm-container-registry.patch",
+      "hash": true
+    },
+    "centralize-container-registry": {
+      "name": "ccd-central-registry",
+      "tarball": "eric-lcm-container-registry-8.2.0+18.tgz",
+      "source": "https://arm.rnd.ki.sw.ericsson.se/artifactory/proj-adp-gs-all-helm/eric-lcm-container-registry/",
+      "patch": "helm-charts/ccd-central-registry.patch",
+      "hash": true
+    },
+    "eric_si_application_sys_info_handler": {
+      "name": "eric-si-application-sys-info-handler",
+      "tarball": "eric-si-application-sys-info-handler-2.21.0+20.tgz",
+      "source": "https://arm.sero.gic.ericsson.se/artifactory/proj-adp-eric-application-sys-info-handler-released-helm-local//eric-si-application-sys-info-handler/",
+      "hash": true
+    },
+    "eric_lm_combined_server": {
+      "name": "eric-lm-combined-server",
+      "tarball": "eric-lm-combined-server-9.16.0+22.tgz",
+      "source": "https://arm.rnd.ki.sw.ericsson.se/artifactory/proj-adp-gs-all-helm/eric-lm-combined-server/",
+      "hash": true
+    },
+    "eric_tm_external_connectivity_frontend": {
+      "name": "eric-tm-external-connectivity-frontend",
+      "version": "2.10.1-1",
+      "source": "helm-charts/eric-tm-external-connectivity-frontend"
+    },
+    "eric_tm_dns64": {
+      "name": "eric-tm-dns64",
+      "version": "v1.11.1-1",
+      "source": "helm-charts/eric-tm-dns64"
+    },
+    "eric_tm_nat64": {
+      "name": "eric-tm-nat64",
+      "version": "1.2.1-57",
+      "source": "helm-charts/eric-tm-nat64"
+    },
+    "power_metrics_exporter": {
+      "name": "power-metrics-exporter",
+      "version": "1.0.0-2",
+      "source": "helm-charts/power-metrics-exporter"
+    },
+    "eric_pm_alertmanager": {
+      "name": "eric-pm-alertmanager",
+      "version": "1.6.0",
+      "source": "helm-charts/eric-pm-alertmanager",
+      "chart_version": "v2"
+    },
+    "eric_data_document_database_pg": {
+      "name": "eric-data-document-database-pg",
+      "tarball": "eric-data-document-database-pg-9.1.0+9.tgz",
+      "source": "https://arm.rnd.ki.sw.ericsson.se/artifactory/proj-adp-gs-all-helm/eric-data-document-database-pg/",
+      "hash": true
+    },
+    "eric_pm_bulk_reporter": {
+      "name": "eric-pm-bulk-reporter",
+      "tarball": "eric-pm-bulk-reporter-9.21.0+21.tgz",
+      "source": "https://arm.rnd.ki.sw.ericsson.se/artifactory/proj-adp-gs-all-helm/eric-pm-bulk-reporter/",
+      "patch": "helm-charts/eric-pm-bulk-reporter.patch",
+      "hash": true
+    },
+    "eric_pm_kube_state_metrics": {
+      "name": "eric-pm-kube-state-metrics",
+      "tarball": "eric-pm-kube-state-metrics-2.13.0+26.tgz",
+      "source": "https://arm.seli.gic.ericsson.se/artifactory/proj-adp-pm-kube-state-metrics-released-helm-local/eric-pm-kube-state-metrics/",
+      "hash": true
+    },
+    "eric_pm_node_exporter": {
+      "name": "eric-pm-node-exporter",
+      "tarball": "eric-pm-node-exporter-2.10.0+20.tgz",
+      "source": "https://arm.seli.gic.ericsson.se/artifactory/proj-adp-pm-node-exporter-released-helm-local/eric-pm-node-exporter/",
+      "hash": true
+    },
+    "openstack_manila_csi": {
+      "name": "openstack-manila-csi",
+      "version": "1.6.0+2",
+      "source": "helm-charts/openstack-manila-csi"
+    },
+    "metrics_server": {
+      "name": "metrics-server",
+      "version": "3.12.0",
+      "source": "helm-charts/metrics-server",
+      "chart_version": "v2"
+    },
+    "node_feature_discovery": {
+      "name": "node-feature-discovery",
+      "version": "0.11.1-3",
+      "source": "helm-charts/node-feature-discovery"
+    },
+    "node_problem_detector": {
+      "name": "node-problem-detector",
+      "version": "0.8.14",
+      "source": "helm-charts/node-problem-detector"
+    },
+    "rook_cluster": {
+      "name": "rook-ceph-cluster",
+      "version": "1.12.6-3",
+      "source": "helm-charts/rook-cluster",
+      "chart_version": "v2"
+    },
+    "rook_operator": {
+      "name": "rook-ceph",
+      "version": "1.12.6-3",
+      "source": "helm-charts/rook-operator",
+      "chart_version": "v2"
+    },
+    "sriov_vf": {
+      "name": "sriov-vf",
+      "version": "0.1.2",
+      "source": "helm-charts/sriov-vf"
+    },
+    "fluent_bit": {
+      "name": "fluent-bit",
+      "version": "0.46.7",
+      "source": "helm-charts/fluent-bit"
+    },
+    "fluentd": {
+      "name": "fluentd",
+      "version": "0.4.3",
+      "source": "helm-charts/fluentd",
+      "chart_version": "v2"
+    },
+    "isp_logger": {
+      "name": "isp-logger",
+      "version": "0.3.4",
+      "source": "helm-charts/isp-logger"
+    },
+    "node_cert_exporter": {
+      "name": "node-cert-exporter",
+      "version": "1.1.5",
+      "source": "helm-charts/node-cert-exporter"
+    },
+    "ceph_csi_rbd": {
+      "name": "ceph-csi-rbd",
+      "version": "3.3.1-2",
+      "source": "helm-charts/ceph-csi-rbd"
+    },
+    "eric_victoria_metrics_cluster": {
+      "name": "eric-victoria-metrics-cluster",
+      "version": "0.9.56",
+      "source": "helm-charts/victoria-metrics/charts/eric-victoria-metrics-cluster"
+    },
+    "eric_victoria_metrics_agent": {
+      "name": "eric-victoria-metrics-agent",
+      "version": "0.8.33",
+      "source": "helm-charts/victoria-metrics/charts/eric-victoria-metrics-agent"
+    },
+    "eric_victoria_metrics_alert": {
+      "name": "eric-victoria-metrics-alert",
+      "version": "0.5.18",
+      "source": "helm-charts/victoria-metrics/charts/eric-victoria-metrics-alert"
+    },
+    "x509_certificate_exporter": {
+      "name": "x509-certificate-exporter",
+      "version": "3.14.0",
+      "source": "helm-charts/x509-certificate-exporter"
+    },
+    "local_storage_provisioner": {
+      "name": "topolvm",
+      "version": "14.0.0",
+      "source": "helm-charts/topolvm",
+      "chart_version": "v2"
+    },
+    "k8s_power_manager": {
+      "name": "k8s-power-manager",
+      "version": "0.0.3",
+      "source": "helm-charts/k8s-power-manager"
+    },
+    "kube_scheduler_tas": {
+      "name": "kube-scheduler-tas",
+      "version": "0.9.3",
+      "source": "helm-charts/kube-scheduler-tas"
+    },
+    "openstack_cinder_csi": {
+      "name": "openstack-cinder-csi",
+      "version": "2.2.0+7",
+      "source": "helm-charts/openstack-cinder-csi",
+      "chart_version": "v1"
+    },
+    "ptp_operator": {
+      "name": "ptp-operator",
+      "version": "0.1.0-1",
+      "source": "helm-charts/ptp-operator"
+    },
+    "sriov_network_metrics_exporter": {
+      "name": "sriov-network-metrics-exporter",
+      "version": "0.4.1",
+      "source": "helm-charts/sriov-network-metrics-exporter"
+    },
+    "subport_controller_manager": {
+      "name": "subport-controller-manager",
+      "version": "0.1.1",
+      "source": "helm-charts/subport-controller-manager"
+    },
+    "qpid_dispatch": {
+      "name": "qpid-dispatch",
+      "version": "0.1.0",
+      "source": "helm-charts/qpid-dispatch"
+    },
+    "eric_sec_sip_tls_crd": {
+      "name": "eric-sec-sip-tls-crd",
+      "tarball": "eric-sec-sip-tls-crd-6.1.0+1.tgz",
+      "source": "https://arm.sero.gic.ericsson.se/artifactory/proj-adp-gs-all-helm/eric-sec-sip-tls-crd/",
+      "hash": true
+    },
+    "eric_sec_sip_tls": {
+      "name": "eric-sec-sip-tls",
+      "tarball": "eric-sec-sip-tls-10.2.0+15.tgz",
+      "source": "https://arm.sero.gic.ericsson.se/artifactory/proj-adp-gs-all-helm/eric-sec-sip-tls/",
+      "hash": true
+    },
+    "descheduler": {
+      "name": "descheduler",
+      "version": "0.28.1",
+      "source": "helm-charts/descheduler"
+    },
+    "kyverno": {
+      "name": "kyverno",
+      "version": "3.1.4",
+      "source": "helm-charts/kyverno"
+    }
+  },
+  "included_containers": {
+    "virtualmachine": [
+      {
+        "path": "containers.monitoring.alertmanager"
+      },
+      {
+        "path": "containers.calico.ctl"
+      },
+      {
+        "path": "containers.calico.kube_controllers"
+      },
+      {
+        "path": "containers.monitoring.ccd_fm_monitor"
+      },
+      {
+        "path": "containers.erikube.fw_manager"
+      },
+      {
+        "path": "containers.erikube.infra_controller"
+      },
+      {
+        "path": "containers.erikube.license_consumer"
+      },
+      {
+        "path": "containers.erikube.ccd_task_execution_framework"
+      },
+      {
+        "path": "containers.erikube.ccd_task_execution_job"
+      },
+      {
+        "path": "containers.erikube.ccd_troubleshooting_tools"
+      },
+      {
+        "path": "containers.erikube.cert_manager_cainjector"
+      },
+      {
+        "path": "containers.erikube.cert_manager_controller"
+      },
+      {
+        "path": "containers.erikube.cert_manager_webhook"
+      },
+      {
+        "path": "containers.erikube.cinder_csi_plugin"
+      },
+      {
+        "path": "containers.erikube.cluster_api_controller"
+      },
+      {
+        "path": "containers.erikube.cluster_api_provider_openstack"
+      },
+      {
+        "path": "containers.calico.cni"
+      },
+      {
+        "path": "containers.erikube.common_snapshotter_controller"
+      },
+      {
+        "path": "containers.erikube.common_snapshotter_validation_webhook"
+      },
+      {
+        "path": "containers.monitoring.configmap_reload"
+      },
+      {
+        "path": "containers.kubernetes.coredns",
+        "strip_hash": true,
+        "strip_hash_in_file": true
+      },
+      {
+        "path": "containers.erikube.crregistry_ha_manager"
+      },
+      {
+        "path": "containers.erikube.csi_attacher_cinder"
+      },
+      {
+        "path": "containers.erikube.nfsplugin_csi_driver_nfs_manila"
+      },
+      {
+        "path": "containers.erikube.csi_provisioner_cinder"
+      },
+      {
+        "path": "containers.erikube.csi_provisioner_manila"
+      },
+      {
+        "path": "containers.erikube.csi_resizer_cinder"
+      },
+      {
+        "path": "containers.erikube.csi_resizer_hpe"
+      },
+      {
+        "path": "containers.erikube.csi_resizer_manila"
+      },
+      {
+        "path": "containers.erikube.csi_snapshotter_cinder"
+      },
+      {
+        "path": "containers.erikube.csi_snapshotter_manila"
+      },
+      {
+        "path": "containers.erikube.ingressdefaultbackend"
+      },
+      {
+        "path": "containers.erikube.dex"
+      },
+      {
+        "path": "containers.erikube.draino"
+      },
+      {
+        "path": "containers.monitoring.pmbr_config_manager"
+      },
+      {
+        "path": "containers.erikube.eric_cr_bragent"
+      },
+      {
+        "path": "containers.erikube.eric_cr_hooklauncher"
+      },
+      {
+        "path": "containers.erikube.eric_cr_init"
+      },
+      {
+        "path": "containers.erikube.eric_cr_migration"
+      },
+      {
+        "path": "containers.erikube.eric_cr_registry"
+      },
+      {
+        "path": "containers.erikube.eric_cr_sidecar"
+      },
+      {
+        "path": "containers.erikube.eric_data_document_database_kube_client"
+      },
+      {
+        "path": "containers.erikube.eric_data_document_database_pg13"
+      },
+      {
+        "path": "containers.erikube.eric_data_document_database_hook_launcher"
+      },
+      {
+        "path": "containers.erikube.adp_lm_db_migration"
+      },
+      {
+        "path": "containers.erikube.adp_lm_hook_launcher"
+      },
+      {
+        "path": "containers.erikube.adp_lm_consumer_handler"
+      },
+      {
+        "path": "containers.erikube.adp_lm_server_client"
+      },
+      {
+        "path": "containers.erikube.adp_lm_model_init"
+      },
+      {
+        "path": "containers.monitoring.eric_lcm_smart_helm_hooks_hooklauncher"
+      },
+      {
+        "path": "containers.monitoring.eric_pm_br_initcontainer"
+      },
+      {
+        "path": "containers.monitoring.eric_pm_bulk_reporter"
+      },
+      {
+        "path": "containers.monitoring.eric_pm_kube_state_metrics"
+      },
+      {
+        "path": "containers.monitoring.eric_pm_node_exporter"
+      },
+      {
+        "path": "containers.monitoring.eric_pm_server_utils"
+      },
+      {
+        "path": "containers.monitoring.eric_pm_sftp"
+      },
+      {
+        "path": "containers.monitoring.x509_certificate_exporter"
+      },
+      {
+        "path": "containers.erikube.eric_si_application_sys_info_handler"
+      },
+      {
+        "path": "containers.erikube.eric_si_application_sys_info_handler_hooklauncher"
+      },
+      {
+        "path": "containers.erikube.ecfe_controller"
+      },
+      {
+        "path": "containers.erikube.ecfe_speaker"
+      },
+      {
+        "path": "containers.erikube.etcd"
+      },
+      {
+        "path": "containers.logging.fluent_bit"
+      },
+      {
+        "path": "containers.logging.fluentd"
+      },
+      {
+        "path": "containers.erikube.httpd"
+      },
+      {
+        "path": "containers.erikube.ip_address_manager"
+      },
+      {
+        "path": "containers.erikube.keepalived"
+      },
+      {
+        "path": "containers.kubernetes.apiserver"
+      },
+      {
+        "path": "containers.kubernetes.controller_manager"
+      },
+      {
+        "path": "containers.kubernetes.dns_node_cache"
+      },
+      {
+        "path": "containers.kubernetes.proxy"
+      },
+      {
+        "path": "containers.erikube.kube_rbac_proxy"
+      },
+      {
+        "path": "containers.kubernetes.scheduler"
+      },
+      {
+        "path": "containers.erikube.kube_scheduler_tas"
+      },
+      {
+        "path": "containers.erikube.kubeadm_bootstrap_controller"
+      },
+      {
+        "path": "containers.erikube.kubeadm_control_plane_controller"
+      },
+      {
+        "path": "containers.erikube.auth_client"
+      },
+      {
+        "path": "containers.erikube.csi_livenessprobe_cinder"
+      },
+      {
+        "path": "containers.erikube.livenessprobe_csi_driver_nfs_manila"
+      },
+      {
+        "path": "containers.erikube.manila_csi_plugin"
+      },
+      {
+        "path": "containers.monitoring.metrics_server"
+      },
+      {
+        "path": "containers.erikube.multus"
+      },
+      {
+        "path": "containers.erikube.network_resources_injector"
+      },
+      {
+        "path": "containers.erikube.ingressctrl"
+      },
+      {
+        "path": "containers.erikube.nginx_tls_terminator"
+      },
+      {
+        "path": "containers.calico.node"
+      },
+      {
+        "path": "containers.monitoring.node_cert_exporter"
+      },
+      {
+        "path": "containers.erikube.csi_node_driver_registrar_csi_driver_nfs_manila"
+      },
+      {
+        "path": "containers.erikube.csi_node_driver_registrar_manila"
+      },
+      {
+        "path": "containers.erikube.csi_node_driver_registrar_cinder"
+      },
+      {
+        "path": "containers.erikube.node_feature_discovery"
+      },
+      {
+        "path": "containers.erikube.node_problem_detector"
+      },
+      {
+        "path": "containers.erikube.openstack_cloud_controller_manager"
+      },
+      {
+        "path": "containers.erikube.ovs_cni_marker"
+      },
+      {
+        "path": "containers.erikube.ovs_cni_plugin"
+      },
+      {
+        "path": "containers.kubernetes.pause",
+        "strip_hash": true
+      },
+      {
+        "path": "containers.calico.pod2daemon"
+      },
+      {
+        "path": "containers.monitoring.prometheus_webhook_isp_logger"
+      },
+      {
+        "path": "containers.monitoring.prometheus_webhook_snmp"
+      },
+      {
+        "path": "containers.monitoring.prometheus_webhook_snmp_sidecar"
+      },
+      {
+        "path": "containers.erikube.sriov_network_device_plugin"
+      },
+      {
+        "path": "containers.monitoring.sriov_network_metrics_exporter"
+      },
+      {
+        "path": "containers.erikube.subport_controller"
+      },
+      {
+        "path": "containers.erikube.subport_manager"
+      },
+      {
+        "path": "containers.monitoring.vmagent"
+      },
+      {
+        "path": "containers.monitoring.vmalert"
+      },
+      {
+        "path": "containers.monitoring.vmbackup"
+      },
+      {
+        "path": "containers.monitoring.vmctl"
+      },
+      {
+        "path": "containers.monitoring.vminsert"
+      },
+      {
+        "path": "containers.monitoring.vmrestore"
+      },
+      {
+        "path": "containers.monitoring.vmselect"
+      },
+      {
+        "path": "containers.monitoring.vmstorage"
+      },
+      {
+        "path": "containers.erikube.whereabouts"
+      },
+      {
+        "path": "containers.erikube.sip_tls"
+      },
+      {
+        "path": "containers.erikube.sip_tls_supervisor"
+      },
+      {
+        "path": "containers.erikube.sip_tls_hooklauncher"
+      },
+      {
+        "path": "containers.erikube.descheduler"
+      },
+      {
+        "path": "containers.erikube.kyverno",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.kyverno_pre",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.kyverno_background_controller",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.kyverno_cleanup_controller",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.kyverno_reports_controller",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.kubectl_client",
+        "ephemeral": true
+      }
+    ],
+    "baremetal": [
+      {
+        "path": "containers.erikube.hpe3parprimera_csp"
+      },
+      {
+        "path": "containers.erikube.baremetal_operator",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.monitoring.alertmanager"
+      },
+      {
+        "path": "containers.calico.ctl",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.calico.kube_controllers",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.monitoring.ccd_fm_monitor"
+      },
+      {
+        "path": "containers.erikube.fw_manager"
+      },
+      {
+        "path": "containers.erikube.infra_controller",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.license_consumer"
+      },
+      {
+        "path": "containers.erikube.ccd_task_execution_framework"
+      },
+      {
+        "path": "containers.erikube.ccd_task_execution_job"
+      },
+      {
+        "path": "containers.erikube.ccd_troubleshooting_tools"
+      },
+      {
+        "path": "containers.erikube.cephcsi"
+      },
+      {
+        "path": "containers.erikube.cert_manager_cainjector",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.cert_manager_controller",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.cert_manager_webhook",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.cloud_event_proxy"
+      },
+      {
+        "path": "containers.erikube.cluster_api_controller",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.cluster_api_provider_metal3",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.calico.cni",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.common_snapshotter_controller"
+      },
+      {
+        "path": "containers.erikube.common_snapshotter_validation_webhook"
+      },
+      {
+        "path": "containers.monitoring.configmap_reload"
+      },
+      {
+        "path": "containers.kubernetes.coredns",
+        "strip_hash": true,
+        "strip_hash_in_file": true,
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.crregistry_ha_manager"
+      },
+      {
+        "path": "containers.erikube.managementCpuOverride",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.csi_attacher_ceph"
+      },
+      {
+        "path": "containers.erikube.csi_attacher_block_nexentastor"
+      },
+      {
+        "path": "containers.erikube.csi_attacher_hpe"
+      },
+      {
+        "path": "containers.erikube.hpe_storage"
+      },
+      {
+        "path": "containers.erikube.csi_extensions_hpe"
+      },
+      {
+        "path": "containers.erikube.csi_attacher_powerflex"
+      },
+      {
+        "path": "containers.erikube.csi_node_driver_registrar_block_nexentastor"
+      },
+      {
+        "path": "containers.erikube.csi_node_driver_registrar_nexentastor"
+      },
+      {
+        "path": "containers.erikube.csi_provisioner_block_nexentastor"
+      },
+      {
+        "path": "containers.erikube.csi_provisioner_hpe"
+      },
+      {
+        "path": "containers.erikube.csi_provisioner_ceph"
+      },
+      {
+        "path": "containers.erikube.csi_provisioner_nexentastor"
+      },
+      {
+        "path": "containers.erikube.csi_provisioner_topolvm"
+      },
+      {
+        "path": "containers.erikube.csi_provisioner_powerflex"
+      },
+      {
+        "path": "containers.erikube.csi_resizer_hpe"
+      },
+      {
+        "path": "containers.erikube.csi_resizer_block_nexentastor"
+      },
+      {
+        "path": "containers.erikube.csi_resizer_ceph"
+      },
+      {
+        "path": "containers.erikube.csi_resizer_powerflex"
+      },
+      {
+        "path": "containers.erikube.csi_resizer_nexentastor"
+      },
+      {
+        "path": "containers.erikube.csi_resizer_topolvm"
+      },
+      {
+        "path": "containers.erikube.csi_snapshotter_block_nexentastor"
+      },
+      {
+        "path": "containers.erikube.csi_snapshotter_nexentastor"
+      },
+      {
+        "path": "containers.erikube.csi_snapshotter_hpe"
+      },
+      {
+        "path": "containers.erikube.csi_snapshotter_ceph"
+      },
+      {
+        "path": "containers.erikube.csi_snapshotter_topolvm"
+      },
+      {
+        "path": "containers.erikube.powerflex_driver"
+      },
+      {
+        "path": "containers.erikube.ingressdefaultbackend"
+      },
+      {
+        "path": "containers.erikube.dex"
+      },
+      {
+        "path": "containers.erikube.draino"
+      },
+      {
+        "path": "containers.monitoring.pmbr_config_manager"
+      },
+      {
+        "path": "containers.erikube.eric_cr_bragent"
+      },
+      {
+        "path": "containers.erikube.eric_cr_hooklauncher"
+      },
+      {
+        "path": "containers.erikube.eric_cr_init"
+      },
+      {
+        "path": "containers.erikube.eric_cr_migration"
+      },
+      {
+        "path": "containers.erikube.eric_cr_registry"
+      },
+      {
+        "path": "containers.erikube.eric_cr_sidecar"
+      },
+      {
+        "path": "containers.erikube.eric_data_document_database_kube_client"
+      },
+      {
+        "path": "containers.erikube.eric_data_document_database_pg13"
+      },
+      {
+        "path": "containers.erikube.eric_data_document_database_hook_launcher"
+      },
+      {
+        "path": "containers.erikube.adp_lm_db_migration"
+      },
+      {
+        "path": "containers.erikube.adp_lm_hook_launcher"
+      },
+      {
+        "path": "containers.erikube.adp_lm_consumer_handler"
+      },
+      {
+        "path": "containers.erikube.adp_lm_server_client"
+      },
+      {
+        "path": "containers.erikube.adp_lm_model_init"
+      },
+      {
+        "path": "containers.monitoring.eric_lcm_smart_helm_hooks_hooklauncher"
+      },
+      {
+        "path": "containers.monitoring.eric_pm_br_initcontainer"
+      },
+      {
+        "path": "containers.monitoring.eric_pm_bulk_reporter"
+      },
+      {
+        "path": "containers.monitoring.eric_pm_kube_state_metrics"
+      },
+      {
+        "path": "containers.monitoring.eric_pm_node_exporter"
+      },
+      {
+        "path": "containers.monitoring.eric_pm_server_utils"
+      },
+      {
+        "path": "containers.monitoring.eric_pm_sftp"
+      },
+      {
+        "path": "containers.monitoring.x509_certificate_exporter"
+      },
+      {
+        "path": "containers.erikube.eric_si_application_sys_info_handler"
+      },
+      {
+        "path": "containers.erikube.eric_si_application_sys_info_handler_hooklauncher"
+      },
+      {
+        "path": "containers.erikube.ecfe_controller"
+      },
+      {
+        "path": "containers.erikube.ecfe_speaker"
+      },
+      {
+        "path": "containers.erikube.etcd",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.logging.fluent_bit"
+      },
+      {
+        "path": "containers.logging.fluentd"
+      },
+      {
+        "path": "containers.erikube.httpd",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.sftp"
+      },
+      {
+        "path": "containers.erikube.ip_address_manager",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.ironic",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.ironic_ipa_downloader",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.keepalived",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.kubernetes.apiserver",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.kubernetes.controller_manager",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.kubernetes.dns_node_cache",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.kubernetes.proxy",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.kube_rbac_proxy",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.kubernetes.scheduler",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.kube_scheduler_tas"
+      },
+      {
+        "path": "containers.erikube.kubeadm_bootstrap_controller",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.kubeadm_control_plane_controller",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.auth_client"
+      },
+      {
+        "path": "containers.erikube.linuxptp_daemon"
+      },
+      {
+        "path": "containers.erikube.mdm_config_powerflex"
+      },
+      {
+        "path": "containers.monitoring.metrics_server"
+      },
+      {
+        "path": "containers.erikube.multus"
+      },
+      {
+        "path": "containers.erikube.network_resources_injector"
+      },
+      {
+        "path": "containers.erikube.nexentastor_csi_plugin"
+      },
+      {
+        "path": "containers.erikube.nexentastor_block_csi_plugin"
+      },
+      {
+        "path": "containers.erikube.ingressctrl"
+      },
+      {
+        "path": "containers.erikube.nginx_tls_terminator"
+      },
+      {
+        "path": "containers.calico.node",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.monitoring.node_cert_exporter"
+      },
+      {
+        "path": "containers.erikube.csi_node_driver_registrar_hpe"
+      },
+      {
+        "path": "containers.erikube.csi_node_driver_registrar_nsf"
+      },
+      {
+        "path": "containers.erikube.csi_node_driver_registrar_powerflex"
+      },
+      {
+        "path": "containers.erikube.csi_snapshotter_powerflex"
+      },
+      {
+        "path": "containers.erikube.csi_livenessprobe_topolvm"
+      },
+      {
+        "path": "containers.erikube.csi_node_driver_registrar_topolvm"
+      },
+      {
+        "path": "containers.erikube.csi_node_driver_registrar_ceph"
+      },
+      {
+        "path": "containers.erikube.node_feature_discovery"
+      },
+      {
+        "path": "containers.erikube.node_problem_detector"
+      },
+      {
+        "path": "containers.erikube.ovs_cni_marker"
+      },
+      {
+        "path": "containers.erikube.ovs_cni_plugin"
+      },
+      {
+        "path": "containers.kubernetes.pause",
+        "strip_hash": true,
+        "ephemeral": true,
+        "strip_hash_in_file": true
+      },
+      {
+        "path": "containers.calico.pod2daemon",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.podmon_powerflex"
+      },
+      {
+        "path": "containers.erikube.power_node_agent",
+        "strip_hash": true,
+        "strip_hash_in_file": true
+      },
+      {
+        "path": "containers.erikube.power_operator"
+      },
+      {
+        "path": "containers.monitoring.power_metrics_exporter"
+      },
+      {
+        "path": "containers.monitoring.prometheus_webhook_isp_logger"
+      },
+      {
+        "path": "containers.monitoring.prometheus_webhook_snmp"
+      },
+      {
+        "path": "containers.monitoring.prometheus_webhook_snmp_sidecar"
+      },
+      {
+        "path": "containers.erikube.ptp_operator"
+      },
+      {
+        "path": "containers.erikube.qdrouterd"
+      },
+      {
+        "path": "containers.erikube.sriov_network_device_plugin"
+      },
+      {
+        "path": "containers.monitoring.sriov_network_metrics_exporter"
+      },
+      {
+        "path": "containers.monitoring.vmagent"
+      },
+      {
+        "path": "containers.monitoring.vmalert"
+      },
+      {
+        "path": "containers.monitoring.vmbackup"
+      },
+      {
+        "path": "containers.monitoring.vmctl"
+      },
+      {
+        "path": "containers.monitoring.vminsert"
+      },
+      {
+        "path": "containers.monitoring.vmrestore"
+      },
+      {
+        "path": "containers.monitoring.vmselect"
+      },
+      {
+        "path": "containers.monitoring.vmstorage"
+      },
+      {
+        "path": "containers.erikube.volume_group_provisioner_hpe"
+      },
+      {
+        "path": "containers.erikube.volume_group_snapshotter_hpe"
+      },
+      {
+        "path": "containers.erikube.volume_mutator_hpe"
+      },
+      {
+        "path": "containers.erikube.whereabouts"
+      },
+      {
+        "path": "containers.erikube.sip_tls",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.sip_tls_supervisor",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.sip_tls_hooklauncher",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.descheduler"
+      },
+      {
+        "path": "containers.erikube.kyverno",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.kyverno_pre",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.kyverno_background_controller",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.kyverno_cleanup_controller",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.kyverno_reports_controller",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.kubectl_client",
+        "ephemeral": true
+      }
+    ],
+    "singleserver": [
+      {
+        "path": "containers.monitoring.alertmanager"
+      },
+      {
+        "path": "containers.calico.ctl",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.calico.kube_controllers",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.monitoring.ccd_fm_monitor"
+      },
+      {
+        "path": "containers.erikube.fw_manager"
+      },
+      {
+        "path": "containers.erikube.license_consumer"
+      },
+      {
+        "path": "containers.erikube.ccd_task_execution_framework"
+      },
+      {
+        "path": "containers.erikube.ccd_task_execution_job"
+      },
+      {
+        "path": "containers.erikube.ccd_troubleshooting_tools"
+      },
+      {
+        "path": "containers.erikube.cert_manager_cainjector",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.cert_manager_controller",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.cert_manager_webhook",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.cloud_event_proxy"
+      },
+      {
+        "path": "containers.calico.cni",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.monitoring.configmap_reload"
+      },
+      {
+        "path": "containers.kubernetes.coredns",
+        "strip_hash": true,
+        "strip_hash_in_file": true,
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.managementCpuOverride",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.infra_controller"
+      },
+      {
+        "path": "containers.erikube.csi_provisioner_topolvm"
+      },
+      {
+        "path": "containers.erikube.csi_resizer_topolvm"
+      },
+      {
+        "path": "containers.erikube.csi_snapshotter_ceph"
+      },
+      {
+        "path": "containers.erikube.csi_snapshotter_topolvm"
+      },
+      {
+        "path": "containers.erikube.ingressdefaultbackend"
+      },
+      {
+        "path": "containers.erikube.dex"
+      },
+      {
+        "path": "containers.erikube.draino"
+      },
+      {
+        "path": "containers.monitoring.pmbr_config_manager"
+      },
+      {
+        "path": "containers.erikube.eric_cr_bragent"
+      },
+      {
+        "path": "containers.erikube.eric_cr_hooklauncher"
+      },
+      {
+        "path": "containers.erikube.eric_cr_init"
+      },
+      {
+        "path": "containers.erikube.eric_cr_migration"
+      },
+      {
+        "path": "containers.erikube.eric_cr_registry"
+      },
+      {
+        "path": "containers.erikube.eric_cr_sidecar"
+      },
+      {
+        "path": "containers.erikube.eric_data_document_database_kube_client"
+      },
+      {
+        "path": "containers.erikube.eric_data_document_database_pg13"
+      },
+      {
+        "path": "containers.erikube.eric_data_document_database_hook_launcher"
+      },
+      {
+        "path": "containers.erikube.adp_lm_db_migration"
+      },
+      {
+        "path": "containers.erikube.adp_lm_hook_launcher"
+      },
+      {
+        "path": "containers.erikube.adp_lm_consumer_handler"
+      },
+      {
+        "path": "containers.erikube.adp_lm_server_client"
+      },
+      {
+        "path": "containers.erikube.adp_lm_model_init"
+      },
+      {
+        "path": "containers.monitoring.eric_lcm_smart_helm_hooks_hooklauncher"
+      },
+      {
+        "path": "containers.monitoring.eric_pm_br_initcontainer"
+      },
+      {
+        "path": "containers.monitoring.eric_pm_bulk_reporter"
+      },
+      {
+        "path": "containers.monitoring.eric_pm_kube_state_metrics"
+      },
+      {
+        "path": "containers.monitoring.eric_pm_node_exporter"
+      },
+      {
+        "path": "containers.monitoring.eric_pm_server_utils"
+      },
+      {
+        "path": "containers.monitoring.eric_pm_sftp"
+      },
+      {
+        "path": "containers.monitoring.x509_certificate_exporter"
+      },
+      {
+        "path": "containers.erikube.eric_si_application_sys_info_handler"
+      },
+      {
+        "path": "containers.erikube.eric_si_application_sys_info_handler_hooklauncher"
+      },
+      {
+        "path": "containers.erikube.ecfe_controller"
+      },
+      {
+        "path": "containers.erikube.ecfe_speaker"
+      },
+      {
+        "path": "containers.erikube.etcd",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.logging.fluent_bit"
+      },
+      {
+        "path": "containers.logging.fluentd"
+      },
+      {
+        "path": "containers.erikube.httpd",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.ip_address_manager",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.keepalived",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.kubernetes.apiserver",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.kubernetes.controller_manager",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.kubernetes.dns_node_cache",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.kubernetes.proxy",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.kube_rbac_proxy",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.kubernetes.scheduler",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.kube_scheduler_tas"
+      },
+      {
+        "path": "containers.erikube.auth_client"
+      },
+      {
+        "path": "containers.erikube.linuxptp_daemon"
+      },
+      {
+        "path": "containers.erikube.mdm_config_powerflex"
+      },
+      {
+        "path": "containers.monitoring.metrics_server"
+      },
+      {
+        "path": "containers.erikube.multus"
+      },
+      {
+        "path": "containers.erikube.network_resources_injector"
+      },
+      {
+        "path": "containers.erikube.ingressctrl"
+      },
+      {
+        "path": "containers.erikube.nginx_tls_terminator"
+      },
+      {
+        "path": "containers.calico.node",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.monitoring.node_cert_exporter"
+      },
+      {
+        "path": "containers.erikube.csi_livenessprobe_topolvm"
+      },
+      {
+        "path": "containers.erikube.csi_node_driver_registrar_topolvm"
+      },
+      {
+        "path": "containers.erikube.node_feature_discovery"
+      },
+      {
+        "path": "containers.erikube.node_problem_detector"
+      },
+      {
+        "path": "containers.erikube.ovs_cni_marker"
+      },
+      {
+        "path": "containers.erikube.ovs_cni_plugin"
+      },
+      {
+        "path": "containers.kubernetes.pause",
+        "strip_hash": true,
+        "ephemeral": true,
+        "strip_hash_in_file": true
+      },
+      {
+        "path": "containers.calico.pod2daemon",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.podmon_powerflex"
+      },
+      {
+        "path": "containers.erikube.power_node_agent",
+        "strip_hash": true,
+        "strip_hash_in_file": true
+      },
+      {
+        "path": "containers.erikube.power_operator"
+      },
+      {
+        "path": "containers.monitoring.power_metrics_exporter"
+      },
+      {
+        "path": "containers.monitoring.prometheus_webhook_isp_logger"
+      },
+      {
+        "path": "containers.monitoring.prometheus_webhook_snmp"
+      },
+      {
+        "path": "containers.monitoring.prometheus_webhook_snmp_sidecar"
+      },
+      {
+        "path": "containers.erikube.ptp_operator"
+      },
+      {
+        "path": "containers.erikube.qdrouterd"
+      },
+      {
+        "path": "containers.erikube.sriov_network_device_plugin"
+      },
+      {
+        "path": "containers.monitoring.sriov_network_metrics_exporter"
+      },
+      {
+        "path": "containers.monitoring.vmagent"
+      },
+      {
+        "path": "containers.monitoring.vmalert"
+      },
+      {
+        "path": "containers.monitoring.vmbackup"
+      },
+      {
+        "path": "containers.monitoring.vmctl"
+      },
+      {
+        "path": "containers.monitoring.vminsert"
+      },
+      {
+        "path": "containers.monitoring.vmrestore"
+      },
+      {
+        "path": "containers.monitoring.vmselect"
+      },
+      {
+        "path": "containers.monitoring.vmstorage"
+      },
+      {
+        "path": "containers.erikube.volume_group_provisioner_hpe"
+      },
+      {
+        "path": "containers.erikube.volume_group_snapshotter_hpe"
+      },
+      {
+        "path": "containers.erikube.volume_mutator_hpe"
+      },
+      {
+        "path": "containers.erikube.whereabouts"
+      },
+      {
+        "path": "containers.erikube.sip_tls",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.sip_tls_supervisor",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.sip_tls_hooklauncher",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.kyverno",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.kyverno_pre",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.kyverno_background_controller",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.kyverno_cleanup_controller",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.kyverno_reports_controller",
+        "ephemeral": true
+      },
+      {
+        "path": "containers.erikube.kubectl_client",
+        "ephemeral": true
+      }
+    ]
+  },
+  "containers": {
+    "calico": {
+      "kube_controllers": "calico_kube-controllers:v3.27.3-1-2bdc4795",
+      "ctl": "calico_ctl:v3.27.3-1-6093b85b",
+      "node": "node:v3.27.3-1-7c80b99d",
+      "pod2daemon": "pod2daemon-flexvol:v3.27.3-1-6093b85b",
+      "cni": "cni:v3.27.3-1-6093b85b"
+    },
+    "erikube": {
+      "ingressdefaultbackend": "defaultbackend:1.5-2-018db7d3",
+      "ingressctrl": "nginx-ingress-controller:v1.10.1-018db7d3",
+      "dex": "dex:v2.39.1-018db7d3",
+      "eric_cr_registry": "eric-cr-registry:8.2.0-18-018db7d3",
+      "eric_cr_bragent": "eric-cr-bragent:8.2.0-18-018db7d3",
+      "eric_cr_init": "eric-cr-init:8.2.0-18-018db7d3",
+      "eric_cr_sidecar": "eric-cr-sidecar:8.2.0-18-018db7d3",
+      "eric_cr_migration": "eric-cr-migration:8.2.0-18-018db7d3",
+      "eric_cr_hooklauncher": "eric-lcm-smart-helm-hooks-hooklauncher:2.19.0-4-018db7d3",
+      "adp_lm_db_migration": "eric-lm-database-migration:9.16.0-22-018db7d3",
+      "adp_lm_consumer_handler": "eric-lm-license-consumer-handler:9.16.0-22-018db7d3",
+      "adp_lm_server_client": "eric-lm-license-server-client:9.16.0-22-018db7d3",
+      "adp_lm_hook_launcher": "eric-lcm-smart-helm-hooks-hooklauncher:2.16.0-20-018db7d3",
+      "adp_lm_model_init": "eric-lm-model-init:9.16.0-22-018db7d3",
+      "eric_data_document_database_pg13": "eric-data-document-database-pg13:8.21.0-24-018db7d3",
+      "eric_data_document_database_kube_client": "eric-data-document-database-kube-client:8.21.0-24-018db7d3",
+      "eric_data_document_database_hook_launcher": "eric-lcm-smart-helm-hooks-hooklauncher:2.13.0-12-018db7d3",
+      "rook_ceph_operator": "rook-ceph-operator:v1.12.11-2-b3fd34b-018db7d3",
+      "rook_ceph_cluster": "ceph-cluster:v18.2.2-1-b3fd34b-018db7d3",
+      "cephcsi": "cephcsi:v3.9.0-6-b3fd34b-018db7d3",
+      "rook_operator_sbd": "rook-operator-sbd:v1.12.11-2-b3fd34b-018db7d3",
+      "rook_ceph_sbd": "rook-ceph-sbd:v18.2.2-1-b3fd34b-018db7d3",
+      "hpe_storage": "hpe-storage:v2.4.2-1-018db7d3",
+      "hpe3parprimera_csp": "alletra-9000-primera-and-3par-csp:v2.4.2-1-018db7d3",
+      "csi_extensions_hpe": "csi-extensions:v1.2.6-1-018db7d3",
+      "volume_group_provisioner_hpe": "volume-group-provisioner:v1.0.5-1-018db7d3",
+      "volume_group_snapshotter_hpe": "volume-group-snapshotter:v1.0.5-1-018db7d3",
+      "volume_mutator_hpe": "volume-mutator:v1.3.5-1-018db7d3",
+      "powerflex_driver": "csi-vxflexos:v2.10.0-1-018db7d3",
+      "podmon_powerflex": "podmon:v1.9.0-4-018db7d3",
+      "eric_si_application_sys_info_handler": "eric-si-application-sys-info-handler:2.21.0-20-018db7d3",
+      "eric_si_application_sys_info_handler_hooklauncher": "eric-lcm-smart-helm-hooks-hooklauncher:2.15.0-8-018db7d3",
+      "sip_tls": "eric-sec-sip-tls-main:10.2.0-15-018db7d3",
+      "sip_tls_supervisor": "eric-sec-sip-tls-supervisor:10.2.0-15-018db7d3",
+      "sip_tls_hooklauncher": "eric-lcm-smart-helm-hooks-hooklauncher:2.14.0-6-018db7d3",
+      "test": "test:v0.2-9-c20fc99c",
+      "sriovtest": "dpdk-tools:v20.06-bbe19eb9",
+      "etcd": "etcd:v3.5.13-4-c20fc99c",
+      "nexentastor_block_csi_plugin": "nexentastor-csi-driver-block:v1.4.12-5-96b1cd73",
+      "nexentastor_csi_plugin": "nexentastor-csi-driver:v1.4.9-5-07024133",
+      "sriov_network_device_plugin": "sriov-network-device-plugin:v3.6.2-6-3ef3cd5d",
+      "csi_attacher_ceph": "csi-attacher:v4.3.0-77-b5681639",
+      "csi_node_driver_registrar_ceph": "csi-node-driver-registrar:v2.8.0-77-b5681639",
+      "csi_provisioner_ceph": "csi-provisioner:v3.5.0-77-b5681639",
+      "csi_resizer_ceph": "csi-resizer:v1.8.0-77-b5681639",
+      "csi_snapshotter_ceph": "csi-snapshotter:v6.2.2-77-b5681639",
+      "csi_attacher_cinder": "csi-attacher:v4.3.0-77-729f21f1",
+      "csi_livenessprobe_cinder": "livenessprobe:v2.10.0-77-729f21f1",
+      "csi_node_driver_registrar_cinder": "csi-node-driver-registrar:v2.8.0-77-729f21f1",
+      "csi_provisioner_cinder": "csi-provisioner:v3.5.0-77-729f21f1",
+      "csi_resizer_cinder": "csi-resizer:v1.8.0-77-729f21f1",
+      "csi_snapshotter_cinder": "csi-snapshotter:v6.2.2-77-729f21f1",
+      "csi_attacher_hpe": "csi-attacher:v4.5.0-77-b5681639",
+      "csi_node_driver_registrar_hpe": "csi-node-driver-registrar:v2.10.0-77-b5681639",
+      "csi_provisioner_hpe": "csi-provisioner:v4.0.0-77-b5681639",
+      "csi_resizer_hpe": "csi-resizer:v1.9.3-77-b5681639",
+      "csi_snapshotter_hpe": "csi-snapshotter:v6.3.3-77-b5681639",
+      "csi_node_driver_registrar_csi_driver_nfs_manila": "node-driver-registrar:v2.8.0-76-48f0fd1e",
+      "csi_node_driver_registrar_manila": "csi-node-driver-registrar:v2.8.0-76-48f0fd1e",
+      "csi_node_driver_registrar_nsf": "csi-node-driver-registrar:v2.4.0-76-48f0fd1e",
+      "csi_provisioner_manila": "csi-provisioner:v3.5.0-77-48f0fd1e",
+      "csi_resizer_manila": "csi-resizer:v1.8.0-77-48f0fd1e",
+      "csi_snapshotter_manila": "csi-snapshotter:v5.0.1-77-48f0fd1e",
+      "livenessprobe_csi_driver_nfs_manila": "livenessprobe:v2.10.0-77-48f0fd1e",
+      "nfsplugin_csi_driver_nfs_manila": "csi-driver-nfs:v4.6.0-77-48f0fd1e",
+      "csi_attacher_block_nexentastor": "csi-attacher:v4.3.0-77-b5681639",
+      "csi_node_driver_registrar_block_nexentastor": "csi-node-driver-registrar:v2.8.0-77-b5681639",
+      "csi_provisioner_block_nexentastor": "csi-provisioner:v3.5.0-77-b5681639",
+      "csi_resizer_block_nexentastor": "csi-resizer:v1.8.0-77-b5681639",
+      "csi_snapshotter_block_nexentastor": "csi-snapshotter:v6.2.2-77-b5681639",
+      "csi_node_driver_registrar_nexentastor": "csi-node-driver-registrar:v2.8.0-77-b5681639",
+      "csi_provisioner_nexentastor": "csi-provisioner:v3.5.0-77-b5681639",
+      "csi_resizer_nexentastor": "csi-resizer:v1.8.0-77-b5681639",
+      "csi_snapshotter_nexentastor": "csi-snapshotter:v6.2.2-77-b5681639",
+      "csi_attacher_powerflex": "csi-attacher:v4.5.0-77-b5681639",
+      "csi_node_driver_registrar_powerflex": "csi-node-driver-registrar:v2.10.0-77-b5681639",
+      "csi_provisioner_powerflex": "csi-provisioner:v4.0.0-77-b5681639",
+      "csi_resizer_powerflex": "csi-resizer:v1.10.0-77-b5681639",
+      "csi_snapshotter_powerflex": "csi-snapshotter:v7.0.1-77-b5681639",
+      "common_snapshotter_controller": "common-snapshotter-controller:v6.2.1-133-3ef3cd5d",
+      "common_snapshotter_validation_webhook": "common-snapshotter-validation-webhook:v6.2.1-133-3ef3cd5d",
+      "csi_livenessprobe_topolvm": "livenessprobe:v2.10.0-77-b5681639",
+      "csi_node_driver_registrar_topolvm": "csi-node-driver-registrar:v2.8.0-77-b5681639",
+      "csi_provisioner_topolvm": "csi-provisioner:v3.5.0-77-b5681639",
+      "csi_resizer_topolvm": "csi-resizer:v1.8.0-77-b5681639",
+      "csi_snapshotter_topolvm": "csi-snapshotter:v6.2.2-77-b5681639",
+      "subport_controller": "subport_controller:0.0.80-56cd9800",
+      "subport_manager": "subport_manager:0.0.89-56cd9800",
+      "volume_group_manager": "volume-group-manager:0.1.4-4-3ef3cd5d",
+      "whereabouts": "whereabouts:v0.6.3-5-3ef3cd5d",
+      "baremetal_operator": "baremetal-operator:v0.6.0-6-a0f4361a",
+      "keepalived": "keepalived:v0.6.0-6-a0f4361a",
+      "fw_manager": "ccd-fw-manager:0.1-beta0-62-3ef3cd5d",
+      "infra_controller": "ccd-infra-controller:0.4-alpha-60-39755090",
+      "license_consumer": "ccd-license-consumer:1.5-86-3ef3cd5d",
+      "ccd_task_execution_framework": "ccd-task-exec-fw:1.29-13-78c9bc80",
+      "ccd_task_execution_job": "ccd-task-exec-job:1.29-8-dba656b2",
+      "ccd_troubleshooting_tools": "ccd-troubleshooting-tools:0.0.1-31-481f6f09",
+      "cert_manager_controller": "cert-manager-controller:v1.14.4-3-141e0e6d",
+      "cert_manager_webhook": "cert-manager-webhook:v1.14.4-3-141e0e6d",
+      "cert_manager_cainjector": "cert-manager-cainjector:v1.14.4-3-141e0e6d",
+      "openstack_cloud_controller_manager": "openstack-cloud-controller-manager:v1.29.0-5-3ef3cd5d",
+      "cinder_csi_plugin": "cinder-csi-plugin:v1.29.0-5-3ef3cd5d",
+      "manila_csi_plugin": "manila-csi-plugin:v1.29.0-5-3ef3cd5d",
+      "cluster_api_controller": "cluster-api-controller:v1.7.1-5-a0f4361a",
+      "kubeadm_control_plane_controller": "kubeadm-control-plane-controller:v1.7.1-5-a0f4361a",
+      "kubeadm_bootstrap_controller": "kubeadm-bootstrap-controller:v1.7.1-5-a0f4361a",
+      "cluster_api_provider_metal3": "cluster-api-provider-metal3:v1.7.0-5-58402475",
+      "cluster_api_provider_openstack": "cluster-api-provider-openstack:v0.9.0-7-3ef3cd5d",
+      "crregistry_ha_manager": "crregistry-ha-manager:0.2-9-2425e6bd",
+      "descheduler": "descheduler:v0.29.0-10-3ef3cd5d",
+      "eric_tm_dns64": "eric-tm-dns64:v1.11.1-9-3ef3cd5d",
+      "draino": "draino:v1.0.1-13-3ef3cd5d",
+      "ecfe_controller": "eric-tm-external-connectivity-frontend-controller:2.9.13-13-3ef3cd5d",
+      "ecfe_speaker": "eric-tm-external-connectivity-frontend-speaker:2.13.1-11-3ef3cd5d",
+      "client": "client:0.6.106-23068bdc",
+      "falco": "falco:0.37.1-3-3ef3cd5d",
+      "haproxy": "haproxy:2.8.3-7-3ef3cd5d",
+      "httpd": "httpd:v2.4.51-56-3ef3cd5d",
+      "ip_address_manager": "ip-address-manager:v1.7.0-5-a0f4361a",
+      "ironic": "ironic:v24.1.1-11-454797e1",
+      "ironic_ipa_downloader": "ironic-ipa-downloader:capm3-v0.4.1-91-3ef3cd5d",
+      "power_operator": "power-operator:v2.4.0-6-c74979a7",
+      "power_node_agent": "power-node-agent:v2.4.0-6-c74979a7",
+      "kube_rbac_proxy": "kube-rbac-proxy:v0.17.0-5-3ef3cd5d",
+      "kube_scheduler_tas": "kube-scheduler-tas:v0.28.9-5-47d84415",
+      "auth_client": "kuberos:7bc1e72-10-3ef3cd5d",
+      "kyverno": "kyverno:v1.11.4-3-23068bdc",
+      "kyverno_pre": "kyverno-pre:v1.11.4-3-23068bdc",
+      "kyverno_background_controller": "kyverno-background-controller:v1.11.4-3-23068bdc",
+      "kyverno_reports_controller": "kyverno-reports-controller:v1.11.4-3-23068bdc",
+      "kyverno_cleanup_controller": "kyverno-cleanup-controller:v1.11.4-3-23068bdc",
+      "kubectl_client": "kubectl-client:v1.11.4-3-23068bdc",
+      "linuxptp_daemon": "linuxptp-daemon:v4.16-8-af8a419b",
+      "ingress": "erikubeingress:0.6.0-85-af8a419b",
+      "managementCpuOverride": "managementcpuoverride:1.0.0-24-af8a419b",
+      "mdm_config_powerflex": "mdm_config:v1.2.0-55-af8a419b",
+      "multus": "multus:v4.0.2-5-af8a419b",
+      "eric_tm_nat64": "eric-tm-nat64:1.2.1-75-af8a419b",
+      "network_resources_injector": "network-resources-injector:1.5.0-60-cc89cc5c",
+      "nginx_tls_terminator": "nginx-tls-terminator:1.0.3-52-af8a419b",
+      "node_feature_discovery": "node-feature-discovery:v0.11.1-56-af8a419b",
+      "node_problem_detector": "node-problem-detector:v0.8.18-4-af8a419b",
+      "ovs_cni_marker": "ovs-cni-marker:v0.32.0-6-af8a419b",
+      "ovs_cni_plugin": "ovs-cni-plugin:v0.32.0-6-af8a419b",
+      "ptp_operator": "ptp-operator:0.2-9-70e02a44",
+      "qdrouterd": "qdrouterd:v1.19.0-40-af8a419b",
+      "sftp": "sftp:8.4p1-11-af8a419b",
+      "topolvm": "topolvm:v0.26.0-5-af8a419b",
+      "cloud_event_proxy": "cloud-event-proxy:v4.16-10-af8a419b",
+      "installer": "installer:0.6.104-23068bdc"
+    },
+    "monitoring": {
+      "configmap_reload": "configmap-reload:v0.12.0-018db7d3",
+      "eric_pm_br_initcontainer": "eric-pm-br-initcontainer:9.21.0-21-018db7d3",
+      "eric_pm_bulk_reporter": "eric-pm-bulk-reporter:9.21.0-21-018db7d3",
+      "eric_pm_sftp": "eric-pm-sftp:9.21.0-21-018db7d3",
+      "eric_lcm_smart_helm_hooks_hooklauncher": "eric-lcm-smart-helm-hooks-hooklauncher:2.2.0-21-018db7d3",
+      "eric_pm_kube_state_metrics": "eric-pm-kube-state-metrics:2.13.0-26-018db7d3",
+      "eric_pm_node_exporter": "eric-pm-node-exporter:2.10.0-20-018db7d3",
+      "x509_certificate_exporter": "x509-certificate-exporter:3.14.0-018db7d3",
+      "vminsert": "vminsert:v1.87.13-5-3ef3cd5d",
+      "vmselect": "vmselect:v1.87.13-5-3ef3cd5d",
+      "vmstorage": "vmstorage:v1.87.13-5-3ef3cd5d",
+      "vmagent": "vmagent:v1.87.13-5-3ef3cd5d",
+      "vmalert": "vmalert:v1.87.13-5-3ef3cd5d",
+      "vmctl": "vmctl:v1.87.13-5-3ef3cd5d",
+      "vmbackup": "vmbackup:v1.87.13-5-3ef3cd5d",
+      "vmrestore": "vmrestore:v1.87.13-5-3ef3cd5d",
+      "alertmanager": "alertmanager:v0.26.0-15-3ef3cd5d",
+      "ccd_fm_monitor": "ccd-fm-monitor:0.1-23-3ef3cd5d",
+      "eric_pm_server_utils": "eric-pm-server-utils:1.3-10-3ef3cd5d",
+      "metrics_server": "metrics-server:v0.7.0-5-af8a419b",
+      "node_cert_exporter": "node-cert-exporter:v1.1.3-27-af8a419b",
+      "pmbr_config_manager": "pmbr-config-manager:v1.0.0-24-af8a419b",
+      "power_metrics_exporter": "power-metrics-exporter:1.0.0-26-af8a419b",
+      "prometheus_webhook_isp_logger": "prometheus-webhook-isp-logger:v2.26-83-af8a419b",
+      "prometheus_webhook_snmp": "prometheus-webhook-snmp:v1.4-65-af8a419b",
+      "prometheus_webhook_snmp_sidecar": "prometheus-webhook-snmp-sidecar:v0.2-76-af8a419b",
+      "sriov_network_metrics_exporter": "sriov-network-metrics-exporter:v1.0.0-23-af8a419b"
+    },
+    "kubernetes": {
+      "scheduler": "kube-scheduler:v1.30.1-2-23068bdc",
+      "controller_manager": "kube-controller-manager:v1.30.1-2-23068bdc",
+      "proxy": "kube-proxy:v1.30.1-2-23068bdc",
+      "apiserver": "kube-apiserver:v1.30.1-2-23068bdc",
+      "pause": "pause:3.9-6-23068bdc",
+      "coredns": "coredns:v1.11.1-8-3ef3cd5d",
+      "dns_node_cache": "kube-dns-node-cache:v1.23.0-5-3ef3cd5d"
+    },
+    "logging": {
+      "fluent_bit": "fluent-bit:3.0.4-1-85acb1ce",
+      "fluentd": "fluentd:1.15.4-34-1e49b2a3"
+    }
+  }
+}

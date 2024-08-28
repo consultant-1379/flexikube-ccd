@@ -1,0 +1,27 @@
+---
+# Ansible version check is done in HealthCheck also.
+#- import_playbook: playbooks/ansible-check.yml
+
+# Backup should be performed only for healthy clusters
+- name: Check cluster health
+  import_playbook: healthcheck.yml
+
+- name: Gather facts as non root
+  hosts: etcd, master, worker
+  gather_facts: yes
+  any_errors_fatal: true
+
+- name: Backup cluster data
+  hosts: etcd, master, worker, ingress_lb
+  become: yes
+  any_errors_fatal: true
+  vars:
+    - etcd_snapshot_host: "{{ groups['etcd'][0] }}"
+    - image_list_host: "{{ groups['master'][0] }}"
+    - etcd_hosts: "{{ groups['etcd'] }}"
+    - kube_hosts: "{{ groups['master'] + groups['worker'] }}"
+    - lb_host: "{{ groups['ingress_lb'] }}"
+  tasks:
+  - name: Run backup process
+    include_role:
+      name: roles/backup

@@ -1,0 +1,4 @@
+---
+
+- name: "{{ calicoctl_action | capitalize }} Calicoctl"
+  include_tasks: "{{ role_path }}/tasks/{{ calicoctl_action }}.yml"

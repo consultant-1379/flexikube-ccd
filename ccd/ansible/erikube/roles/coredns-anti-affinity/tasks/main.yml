@@ -1,0 +1,24 @@
+---
+  # AntiAffinity parameters and topology
+- name: Set CoreDNS scheduling to Anti Affinity
+  shell: >
+    {{ kubectl }} -n {{ namespace }} patch deployment coredns -p
+    '{"spec": {"template": {"spec": {"affinity": {"podAntiAffinity": {"requiredDuringSchedulingIgnoredDuringExecution": [{"labelSelector":
+    {"matchExpressions": [{"key": "k8s-app", "operator": "In", "values": ["kube-dns"]}]}, "topologyKey": "kubernetes.io/hostname"}]}}}}}}'
+  retries: 5
+  delay: 15
+  register: pod_rules
+  until: pod_rules.rc == 0
+
+  # NodeSelector to masters and tolerations
+- name: Set CoreDNS to run on masters only
+  shell: >
+    {{ kubectl }} -n {{ namespace }} patch deployment coredns -p
+    '{"spec": {"template":{"spec":{"nodeSelector": { "kubernetes.io/os": "linux","node-role.kubernetes.io/control-plane": "" }, "tolerations":
+    [{"effect": "NoSchedule","key":"node-role.kubernetes.io/control-plane","operator": "Exists"},
+    {"effect": "NoSchedule","key": "CriticalAddonsOnly","operator": "Exists"},
+    {"effect": "NoExecute","key": "node-role.kubernetes.io/control-plane","operator": "Exists"}]}}}}'
+  retries: 5
+  delay: 15
+  register: node_rules
+  until: node_rules.rc == 0

@@ -1,0 +1,12 @@
+---
+
+added_kubeadm_cfg:
+  apiServer:
+    extraArgs:
+      encryption-provider-config: "{{ kube_cryptprov_cfg_file }}"
+
+added_apisvr_params:
+  - "--encryption-provider-config={{ kube_cryptprov_cfg_file }}"
+
+apisvr_cfg_loc: "{{ kube_manifest_dir }}/kube-apiserver.yaml"
+

@@ -1,0 +1,65 @@
+---
+# TODO(uabhafe) etcdctl does not work !
+#- name: Verify cluster is healthy pre-upgrade
+#  command: "etcdctl2 cluster-health"
+
+- name: Get current image
+  #shell: "grep 'ExecStart=' {{ etcd_service_file }} | awk '{print $NF}'"
+  shell: "grep 'etcd:v' {{ etcd_service_file }} | awk '{print $NF}'"
+  register: current_image
+  changed_when: no
+
+- name: Log into local registry and force re-authorization
+  docker_login:
+    registry: "{{ kube_image_prefix }}"
+    username: "{{ local_registry_user }}"
+    password: "{{ local_registry_password }}"
+    reauthorize: yes
+  when: local_registry_user is defined and local_registry_user != ""
+
+- name: Pull image "{{ new_etcd_image }}"
+  command: "docker pull {{ new_etcd_image }}"
+  register: pull_result
+  changed_when: "'Downloaded newer image' in pull_result.stdout"
+
+- name: Extract ETCD_INITIAL_CLUSTER value
+  shell: "cat {{ etcd_conf_file }} | grep ETCD_INITIAL_CLUSTER= | awk -F: '{ st = index($0,\"=\");print substr($0,st+1)}'"
+  register: initial_etcd_cluster
+
+- name: Store ETCD_INITIAL_CLUSTER value
+  set_fact:
+    initial_etcd_cluster: "{{ initial_etcd_cluster.stdout }}"
+
+- name: Write etcd global config file
+  template:
+    src: etcd.conf.j2
+    dest: "{{ etcd_conf_file }}"
+    mode: 0600
+    backup: true
+
+- name: Update etcd conf file (remove quoting from ETCD_DEBUG variable)
+  lineinfile:
+    path: "{{ etcd_conf_file }}"
+    regexp: '(ETCD_DEBUG=)"(.{1,})"'
+    line: '\1\2'
+    backrefs: yes
+  become: true
+
+- name: Update the service file
+  replace:
+    dest: "{{ etcd_service_file }}"
+    regexp: "{{ current_image.stdout }}$"
+    replace: "{{ new_etcd_image }}"
+
+- name: Restart service "{{ etcd_service }}"
+  systemd:
+    name: "{{ etcd_service }}"
+    daemon_reload: yes
+    state: restarted
+
+#- name: Verify cluster is healthy
+#  command: "etcdctl2 cluster-health"
+#  register: etcdctl
+#  until: etcdctl.rc == 0
+#  retries: 3
+#  delay: 10

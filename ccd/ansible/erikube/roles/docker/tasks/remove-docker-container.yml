@@ -1,0 +1,25 @@
+---
+- name: Remove docker container
+  shell: "docker rm -f $(docker ps | grep {{ target_docker_container_id_name }} | awk '{print $1}')"
+  register: status_of_docker_container
+  ignore_errors: true
+
+- name: Check that new container is running after removal
+  block:
+  - name: get the id of the new container
+    shell: "docker ps | grep {{ target_docker_container_id_name }} | awk '{print $1}'"
+    register: restarted_docker_container_id
+    until: restarted_docker_container_id.stdout != ""
+    retries: 20
+    delay: 1
+  - name: Wait that new container is in running status after removal
+    shell: "docker container inspect {{ restarted_docker_container_id.stdout }} | grep Status | grep running | wc -l"
+    register: container_count
+    until: container_count.stdout.find("1") != -1
+    retries: 20
+    delay: 1
+  - name: Sleep for stabilizing container after container removal
+    pause:
+      seconds: "{{ docker_sleep_after_restart }}"
+  when: status_of_docker_container.rc != 1
+

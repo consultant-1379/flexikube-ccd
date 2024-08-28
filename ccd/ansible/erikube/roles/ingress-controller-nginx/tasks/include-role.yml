@@ -1,0 +1,9 @@
+---
+
+# This is a work-around for a bug in Ansible 2.4 and 2.5, which prevents
+# a role to be dynamically included in a play.
+# See the following link:
+#   https://www.reddit.com/r/ansible/comments/916o63/question_playbook_include_role_with_items/
+- name: deploy ingress-controller-nginx role
+  include_role:
+    name: ingress-controller-nginx

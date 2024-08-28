@@ -1,0 +1,18 @@
+---
+- name: Check master nodes VCPU requirement
+  assert:
+    that: "ansible_processor_vcpus | int >= master_min_vcpu | int"
+    msg: "Not enough VCPUs in '{{ ansible_hostname }}'. Require {{ master_min_vcpu }}, but only {{ ansible_processor_vcpus }} available"
+  when: ansible_hostname in master_hosts
+
+- name: Check worker nodes VCPU requirement
+  assert:
+    that: "ansible_processor_vcpus | int >= worker_min_vcpu | int"
+    msg: "Not enough VCPUs in '{{ ansible_hostname }}'. Require {{ worker_min_vcpu }}, but only {{ ansible_processor_vcpus }} available"
+  when: ansible_hostname in worker_hosts
+
+- name: Check etcd nodes VCPU requirement
+  assert:
+    that: "ansible_processor_vcpus | int >= etcd_min_vcpu | int"
+    msg: "Not enough VCPUs in '{{ ansible_hostname }}'. Require {{ etcd_min_vcpu }}, but only {{ ansible_processor_vcpus }} available"
+  when: ansible_hostname in etcd_hosts

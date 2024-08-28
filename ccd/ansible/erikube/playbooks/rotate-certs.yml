@@ -1,0 +1,1467 @@
+#
+# This is IBD only playbook and should be executed at director
+#
+# Usage:
+# cd /var/lib/eccd/container-images.d/erikube/ansible/erikube/playbooks/
+#
+# Without any extra vars the validity of certificates will be printed
+# (except if the feature is not enabled such as IDAM or secure log streaming)
+# sudo ansible-playbook --ssh-common-args='-o StrictHostKeyChecking=no' -i /mnt/config/inventory/ibd_inventory_file.ini rotate-certs.yml
+#
+# The certificates to rotate can be explicitly provided to the playbook with extra vars
+# 1) To rotate Ingress Controller Nginx certificate
+# sudo ansible-playbook --ssh-common-args='-o StrictHostKeyChecking=no' -i /mnt/config/inventory/ibd_inventory_file.ini rotate-certs.yml -e 'rotate_ingress_controller=""'
+# 2) To rotate Metrics Server certificates
+# sudo ansible-playbook --ssh-common-args='-o StrictHostKeyChecking=no' -i /mnt/config/inventory/ibd_inventory_file.ini rotate-certs.yml -e 'rotate_metrics_server=""'
+# 3) To rotate Internal Registry certificates
+# sudo ansible-playbook --ssh-common-args='-o StrictHostKeyChecking=no' -i /mnt/config/inventory/ibd_inventory_file.ini rotate-certs.yml -e 'rotate_internal_registry=""'
+# 4) To rotate Container Registry certificates
+# sudo ansible-playbook --ssh-common-args='-o StrictHostKeyChecking=no' -i /mnt/config/inventory/ibd_inventory_file.ini rotate-certs.yml -e 'rotate_container_registry=""'
+# 5) To rotate Openstack CA certificate
+# sudo ansible-playbook --ssh-common-args='-o StrictHostKeyChecking=no' -i /mnt/config/inventory/ibd_inventory_file.ini rotate-certs.yml -e 'rotate_os_cacert=""' \
+# -e "@/home/eccd/os_cacert.json"
+# The content of the json file should be provided as:
+# {"openstack_ca_cert": -----BEGIN CERTIFICATE-----
+# ...
+# FusiI9pqvz4nrhv6Ng6nPFg06pr02glSc39RWQCtXu6Y
+# -----END CERTIFICATE-----"}
+# 6) To rotate Kubernetes PKI certificates (excluding front-proxy-ca and ca certs)
+# sudo ansible-playbook --ssh-common-args='-o StrictHostKeyChecking=no' -i /mnt/config/inventory/ibd_inventory_file.ini rotate-certs.yml -e 'rotate_k8s_pki=""'
+# 7) To rotate kubelet client and server certificates
+# sudo ansible-playbook --ssh-common-args='-o StrictHostKeyChecking=no' -i /mnt/config/inventory/ibd_inventory_file.ini rotate-certs.yml -e 'rotate_kubelet=""'
+# 8) To rotate worker certificates
+# sudo ansible-playbook --ssh-common-args='-o StrictHostKeyChecking=no' -i /mnt/config/inventory/ibd_inventory_file.ini rotate-certs.yml -e 'rotate_worker_certs=""'
+# 9) To rotate IDAM certificates (the feature must have been enabled with auth_client_enabled and dex_enabled in env file)
+# sudo ansible-playbook --ssh-common-args='-o StrictHostKeyChecking=no' -i /mnt/config/inventory/ibd_inventory_file.ini rotate-certs.yml -e 'rotate_auth_client=""' -e 'rotate_dex=""'
+# -e "@/home/eccd/idam_certs.json"
+# For dex the content of the json file should be provided as:
+# {"dex_cert_content": "-----BEGIN CERTIFICATE-----
+# ...
+# S7sMkVvKeYHM5Xi2pA8QYYt06SzG3P4Y0ddz5g==
+# -----END CERTIFICATE-----,
+#  "dex_key_content": "-----BEGIN PRIVATE KEY-----
+# ...
+# CppeBFxrNoYxApPKSPPCCZ4rG3ELAuOqY1ZwNdHDmiHpq5A3dgrE3ZrAoFl6wgB1\nHKcbnEScyQ7qe1W2QnI6eIFdMU1rfA==
+# -----END PRIVATE KEY-----"}
+
+# For auth-client the content of the json file should be provided as:
+# {"auth_client_cert_content": "-----BEGIN CERTIFICATE-----
+# ...
+# S7sMkVvKeYHM5Xi2pA8QYYt06SzG3P4Y0ddz5g==
+# -----END CERTIFICATE-----,
+#  "auth_client_key_content": "-----BEGIN PRIVATE KEY-----
+# ...
+# CppeBFxrNoYxApPKSPPCCZ4rG3ELAuOqY1ZwNdHDmiHpq5A3dgrE3ZrAoFl6wgB1\nHKcbnEScyQ7qe1W2QnI6eIFdMU1rfA==
+# -----END PRIVATE KEY-----"}
+#
+# 10) To rotate log streaming certificates (the feature must have been enabled with logger_external_server_enabled in env file)
+# sudo ansible-playbook --ssh-common-args='-o StrictHostKeyChecking=no' -i /mnt/config/inventory/ibd_inventory_file.ini rotate-certs.yml -e 'rotate_logger=""' \
+# -e "@/home/eccd/logger_certs.json"
+# The content of the json file should be provided as:
+# {"logger_ca_crt": LS0tLS1CRUdJ...",
+#  "logger_tls_crt": "LS0tLS1CRUdJ...",
+#  "logger_tls_key="LS0tLS1CRUdJ..."}
+#
+# 11) To rotate Openstack Cloud Controller Manager certificate
+# sudo ansible-playbook --ssh-common-args='-o StrictHostKeyChecking=no' -i /mnt/config/inventory/ibd_inventory_file.ini rotate-certs.yml -e 'rotate_os_ccm_cert=""'
+# 12) To rotate kube-apiserver sni certificates
+# sudo ansible-playbook --ssh-common-args='-o StrictHostKeyChecking=no' -i /mnt/config/inventory/ibd_inventory_file.ini rotate-certs.yml -e 'rotate_api_sni=""'
+# -e "@/home/eccd/kube_api_cert.json"
+# the contents of json file should be provided as
+# {"kube_api_cert": "-----BEGIN CERTIFICATE-----
+# ...
+# S7sMkVvKeYHM5Xi2pA8QYYt06SzG3P4Y0ddz5g==
+# -----END CERTIFICATE-----",
+# "kube_api_key": "-----BEGIN PRIVATE KEY-----
+# ...
+# CppeBFxrNoYxApPKSPPCCZ4rG3ELAuOqY1ZwNdHDmiHpq5A3dgrE3ZrAoFl6wgB1\nHKcbnEScyQ7qe1W2QnI6eIFdMU1rfA==
+# -----END PRIVATE KEY-----"}
+#
+# 13) To rotate Network Resources Injector certificates
+# sudo ansible-playbook --ssh-common-args='-o StrictHostKeyChecking=no' -i /mnt/config/inventory/ibd_inventory_file.ini rotate-certs.yml -e 'rotate_nri=""'
+# To rotate all certificates at once you can provide the 'rotate_all_certs' extra var as
+# sudo ansible-playbook --ssh-common-args='-o StrictHostKeyChecking=no' -i /mnt/config/inventory/ibd_inventory_file.ini rotate-certs.yml -e 'rotate_all_certs=""'
+#
+# 14) To rotate Ldap certificate
+# sudo ansible-playbook --ssh-common-args='-o StrictHostKeyChecking=no' -i /mnt/config/inventory/ibd_inventory_file.ini rotate-certs.yml -e 'rotate_ssh_ldap_cert=""'
+# -e "@/home/eccd/ssh_ldap_cert.json"
+# the contents of json file should be provided as
+# {"ssh_ldap_tls_ca": "-----BEGIN CERTIFICATE-----
+# ...
+# S7sMkVvKeYHM5Xi2pA8QYYt06SzG3P4Y0ddz5g==
+# -----END CERTIFICATE-----",
+# "ssh_ldap_tls_cert": "-----BEGIN CERTIFICATE-----
+# ...
+# S7sMkVvKeYHM5Xi2pA8QYYt06SzG3P4Y0ddz5g==
+# -----END CERTIFICATE-----",
+# "ssh_ldap_tls_key": "-----BEGIN PRIVATE KEY-----
+# ...
+# CppeBFxrNoYxApPKSPPCCZ4rG3ELAuOqY1ZwNdHDmiHpq5A3dgrE3ZrAoFl6wgB1\nHKcbnEScyQ7qe1W2QnI6eIFdMU1rfA==
+# -----END PRIVATE KEY-----"}
+---
+- name: Rotate Nginx Ingress Controller Certificate
+  hosts: master[0]
+  become: yes
+  roles:
+  - erikube-defaults
+  vars:
+  - controller_namespace: "{{ ingressctrl_namespace | default('ingress-nginx') }}"
+  tasks:
+  - name: Save validity of current certificate before
+    command: "{{ kubectl }} exec deploy/nginx-ingress-controller -n {{ controller_namespace }} -- sh -c 'cat /etc/ingress-controller/ssl/default-fake-certificate.pem | openssl x509 -noout -enddate'"
+    register: ingress_controller_validity_before
+    ignore_errors: yes
+  - block:
+    - name: Create temp workspace directory
+      command: mktemp -d /tmp/k8s-nginx-ingress-XXXXXX
+      register: mktemp
+      changed_when: False
+    - name: Rotate Nginx Ingress Controller Certificate
+      include_tasks: "roles/ingress-controller-nginx/tasks/update-certificate.yml"
+    - name: Save validity of current certificate after
+      command: "{{ kubectl }} exec deploy/nginx-ingress-controller -n {{ controller_namespace }} -- sh -c 'cat /etc/ingress-controller/ssl/default-fake-certificate.pem | openssl x509 -noout -enddate'"
+      register: ingress_controller_validity_after
+      ignore_errors: yes
+    - name: Delete temp directory
+      file:
+        name: "{{ mktemp.stdout }}"
+        state: absent
+      changed_when: False
+    when:
+    - rotate_ingress_controller is defined or rotate_all_certs is defined
+    - ingress_ctrl_cert_file is undefined and ingress_ctrl_cert is undefined
+    rescue:
+      - set_fact:
+          cert_failed_component: "Nginx Ingress Controller Certificate"
+      - debug:
+          msg: "{{ lookup('template', 'cert-rotation-failure-msg.yml.j2').split('\n')|select()|list }}"
+
+- name: Rotate Metrics Server Certificate
+  hosts: master[0]
+  become: yes
+  roles:
+  - erikube-defaults
+  tasks:
+  - name: Save validity of current certificate before
+    shell: "{{ kubectl }} exec deploy/metrics-server -n kube-system -- openssl s_client  -showcerts -connect localhost:10250 2>/dev/null | openssl x509 -noout -enddate"
+    register: metrics_server_validity_before
+    ignore_errors: yes
+
+  - block:
+    - name: Create temp workspace directory
+      command: mktemp -d /tmp/k8s-metrics-server-XXXXXX
+      register: mktemp
+      changed_when: False
+
+    - name: Rotate Metrics Server Certificate
+      include_tasks: "roles/metrics-server/tasks/update-certificate.yml"
+
+    - name: Save validity of current certificate after
+      shell: "{{ kubectl }} exec deploy/metrics-server -n kube-system -- openssl s_client  -showcerts -connect localhost:10250 2>/dev/null | openssl x509 -noout -enddate"
+      register: metrics_server_validity_after
+      ignore_errors: yes
+
+    - name: Delete temp directory
+      file:
+        name: "{{ mktemp.stdout }}"
+        state: absent
+      changed_when: False
+    when: rotate_metrics_server is defined or rotate_all_certs is defined
+    rescue:
+      - set_fact:
+          cert_failed_component: "Metrics Server Certificate"
+      - debug:
+          msg: "{{ lookup('template', 'cert-rotation-failure-msg.yml.j2').split('\n')|select()|list }}"
+
+- name: Rotate Internal Registry certificates
+  hosts: director
+  become: yes
+  roles:
+  - erikube-defaults
+  tasks:
+  - name: Save validity of current certificate before
+    command: openssl x509 -in /etc/docker-distribution/registry/registry.crt -enddate -noout
+    register: internal_reg_validity_before
+    ignore_errors: yes
+
+  - block:
+    - name: Rotate internal registry certificate
+      include_tasks: "roles/int-registry-cert-update/tasks/main.yml"
+
+    - name: Save validity of current certificate after
+      command: openssl x509 -in /etc/docker-distribution/registry/registry.crt -enddate -noout
+      register: internal_reg_validity_after
+      until: internal_reg_validity_after.rc == 0
+      retries: 20
+      delay: 1
+      ignore_errors: yes
+    when: rotate_internal_registry is defined or rotate_all_certs is defined
+    rescue:
+      - set_fact:
+          cert_failed_component: "Internal Registry Certificate"
+      - debug:
+          msg: "{{ lookup('template', 'cert-rotation-failure-msg.yml.j2').split('\n')|select()|list }}"
+
+- name: Rotate container registry certificate
+  hosts: master[0]
+  become: yes
+  vars:
+    - cr_hostname: "{{ container_registry_hostname | default('k8s-registry.eccd.local') }}"
+    - cr_cert_tls_secret_name: "{{ container_registry_registry_secret_name | default('cr-registry-tls') }}"
+  roles:
+    - erikube-defaults
+  tasks:
+  - name: Save validity of current certificate before
+    shell: "{{ kubectl }} get secret cr-registry-tls -n kube-system -o \"jsonpath={.data['tls\\.crt']}\" | base64 -d | openssl x509 -enddate -noout"
+    register: container_reg_validity_before
+    ignore_errors: yes
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: (container_reg_validity_before.rc == 0 or "not found" in container_reg_validity_before.stderr)
+  - block:
+    - block:
+      - name: Rotate Container Registry certificate
+        import_role:
+          name: cr-registry
+          tasks_from: tls.yml
+        vars:
+          - tls_secret_namespace: kube-system
+          - tls_secret: "{{ cr_cert_tls_secret_name }}"
+      rescue:
+        - set_fact:
+            cert_failed_component: "Container Registry Certificate"
+        - debug:
+            msg: "{{ lookup('template', 'cert-rotation-failure-msg.yml.j2').split('\n')|select()|list }}"
+
+    - name: Save validity of current certificate after
+      shell: "{{ kubectl }} get secret cr-registry-tls -n kube-system -o \"jsonpath={.data['tls\\.crt']}\" | base64 -d | openssl x509 -enddate -noout"
+      register: container_reg_validity_after
+      until: container_reg_validity_after.rc == 0
+      retries: 20
+      delay: 1
+      ignore_errors: yes
+    when:
+      - container_registry_enabled | default(true) | bool
+      - ca_key is defined
+      - ca_cert is defined
+      - container_registry_ssl_cert is not defined or container_registry_ssl_key_file is not defined
+      - rotate_container_registry is defined or rotate_all_certs is defined
+
+- name: Rotate openstack ca cert
+  hosts: master[0]
+  become: yes
+  roles:
+  - erikube-defaults
+  tasks:
+  - set_fact:
+      os_cacert_tmp_dir: "/tmp/os_cacert"
+
+  - name: Save validity of current certificate before
+    shell: "{{ kubectl }} get secret openstack-ca-cert -n kube-system -o \"jsonpath={.data['os_cacert']}\" | base64 -d | openssl x509 -enddate -noout"
+    register: os_cacert_validity_before
+    ignore_errors: yes
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: (os_cacert_validity_before.rc == 0 or "not found" in os_cacert_validity_before.stderr)
+    when:
+      - openstack_ca_cert is defined
+      - openstack_ca_cert != ""
+
+  - block:
+    - name: Rotate Openstack CA Certificate
+      include_tasks: "roles/openstack-cloud-provider-update/tasks/main.yml"
+
+    - name: Save validity of current certificate after
+      shell: "{{ kubectl }} get secret openstack-ca-cert -n kube-system -o \"jsonpath={.data['os_cacert']}\" | base64 -d | openssl x509 -enddate -noout"
+      register: os_cacert_validity_after
+      until: os_cacert_validity_after.rc == 0
+      retries: 20
+      delay: 1
+      ignore_errors: yes
+    when:
+      - openstack_ca_cert is defined
+      - openstack_ca_cert != ""
+      - rotate_os_cacert is defined or rotate_all_certs is defined
+    rescue:
+      - set_fact:
+          cert_failed_component: "Openstack CA Certificate"
+      - debug:
+          msg: "{{ lookup('template', 'cert-rotation-failure-msg.yml.j2').split('\n')|select()|list }}"
+
+- name: Rotate Openstack Cloud Controller Manager CA-Signed Certificate
+  hosts: master[0]
+  become: yes
+  roles:
+  - erikube-defaults
+  tasks:
+  - name: Save validity of current certificate before rotation
+    shell: "{{ kubectl }} get secret openstack-cloud-controller-manager-tls -n kube-system -o \"jsonpath={.data['tls\\.crt']}\" | base64 -d | openssl x509 -enddate -noout"
+    register: os_cm_cert_validity_before
+    ignore_errors: yes
+    when: rotate_os_ccm_cert is defined or rotate_all_certs is defined
+
+  - block:
+    - name: Rotate Openstack Cloud Clontroller Manager Certificate
+      import_role:
+        name: openstack-cloud-provider
+        tasks_from: openstack-cloud-controller-manager-certificate.yml
+
+    - name: Save validity of current certificate after rotation
+      shell: "{{ kubectl }} get secret openstack-cloud-controller-manager-tls -n kube-system -o \"jsonpath={.data['tls\\.crt']}\" | base64 -d | openssl x509 -enddate -noout"
+      register: os_cm_cert_validity_after
+      until: os_cm_cert_validity_after.rc == 0
+      retries: 20
+      delay: 1
+      ignore_errors: yes
+    when: rotate_os_ccm_cert is defined or rotate_all_certs is defined
+    rescue:
+      - set_fact:
+          cert_failed_component: "Openstack Cloud Controller Manager CA Certificate"
+      - debug:
+          msg: "{{ lookup('template', 'cert-rotation-failure-msg.yml.j2').split('\n')|select()|list }}"
+
+- name: Rotate Kubernetes PKI certs
+  hosts: master
+  become: yes
+  serial: 1
+  tasks:
+  - import_role:
+      name: erikube-defaults
+
+  - name: Save validity of current certificate before
+    command: "/usr/local/bin/kubeadm certs check-expiration"
+    register: pki_cert_validity_before
+    ignore_errors: yes
+
+  - block:
+    - block:
+      - name: Rotate Kubernetes PKI Certificates
+        include_tasks: "roles/kube-pki-cert-update/tasks/main.yml"
+      rescue:
+        - set_fact:
+            cert_failed_component: "Kubernetes PKI Certificates"
+        - debug:
+            msg: "{{ lookup('template', 'cert-rotation-failure-msg.yml.j2').split('\n')|select()|list }}"
+
+    - name: Save validity of current certificate after
+      command: "/usr/local/bin/kubeadm certs check-expiration"
+      register: pki_cert_validity_after
+      until: pki_cert_validity_after.rc == 0
+      retries: 20
+      delay: 1
+    when: rotate_k8s_pki is defined or rotate_all_certs is defined
+
+- name: Post Kubernetes PKI certs actions
+  hosts: director
+  become: yes
+  vars:
+    - kubectl: "/usr/local/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf"
+  tasks:
+  - block:
+    - name: Copy kube config from local host to both directors
+      copy:
+        src: "/home/{{ ansible_user }}/.kube/config"
+        dest: "/home/{{ ansible_user }}/.kube/config"
+    - name: Copy kube config to admin conf directory
+      copy:
+        src: "/home/{{ ansible_user }}/.kube/config"
+        dest: "/etc/kubernetes/admin.conf"
+        remote_src: yes
+    when: rotate_k8s_pki is defined or rotate_all_certs is defined
+    rescue:
+      - set_fact:
+          cert_failed_component: "Kubernetes PKI Certificates"
+      - debug:
+          msg: "{{ lookup('template', 'cert-rotation-failure-msg.yml.j2').split('\n')|select()|list }}"
+
+- name: Rotate Network Resource Injector Certificates
+  hosts: master[0]
+  become: yes
+  roles:
+  - erikube-defaults
+  tasks:
+  - name: Save validity of current certificate before rotation
+    shell: "{{ kubectl }} get secret network-resources-injector -n kube-system -o \"jsonpath={.data['tls\\.crt']}\" | base64 -d | openssl x509 -enddate -noout"
+    register: nri_validity_before
+    ignore_errors: yes
+    when: network_resources_injector_enabled | default(false) | bool
+
+  - block:
+    - block:
+      - name: Rotate NRI
+        include_tasks: "roles/network-resources-injector/tasks/rotate-tls-certs.yml"
+      rescue:
+      - set_fact:
+          cert_failed_component: "Network Resources Injector Certificates"
+      - debug:
+          msg: "{{ lookup('template', 'cert-rotation-failure-msg.yml.j2').split('\n')|select()|list }}"
+
+    - name: Save validity of current certificate after rotation
+      shell: "{{ kubectl }} get secret network-resources-injector -n kube-system -o \"jsonpath={.data['tls\\.crt']}\" | base64 -d | openssl x509 -enddate -noout"
+      register: nri_validity_after
+      ignore_errors: yes
+    when:
+      - network_resources_injector_enabled | default(false) | bool
+      - rotate_nri is defined or rotate_all_certs is defined
+
+- name: Prepare Ansible inventory with IBD
+  hosts: localhost
+  become: yes
+  tasks:
+    - name: Worker inventory creation
+      include_role:
+        name: roles/erikube-defaults
+        tasks_from: create_worker_inventory
+      when: image_based_deployment | default(false) | bool
+
+- name: Rotate kubelet client and server certificates
+  hosts: master, worker
+  become: yes
+  serial: 1
+  gather_facts: yes
+  roles:
+  - erikube-defaults
+  vars:
+    - first_master: "{{ groups['master'] | first }}"
+    - kubectl: "/usr/local/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf"
+    - node_csr: "{{ ansible_hostname }}"
+  tasks:
+    - name: Save validity of current client certificate before
+      shell: "openssl x509 -in /var/lib/kubelet/pki/kubelet-client-current.pem -enddate -noout"
+      register: kubelet_client_validity_before
+      ignore_errors: yes
+
+    - name: Save validity of current server certificate before
+      shell: "openssl x509 -in /var/lib/kubelet/pki/kubelet-server-current.pem -enddate -noout"
+      register: kubelet_server_validity_before
+      ignore_errors: yes
+
+    - block:
+      - block:
+        - name: Cordon node before rotating certificates
+          shell: "{{ kubectl }} cordon {{ ansible_hostname }}"
+          delegate_to: "{{ first_master }}"
+          register: cordon_node
+          retries: "{{ kubectl_retry_count }}"
+          delay: "{{ kubectl_retry_delay }}"
+          until: cordon_node.rc == 0
+          when:
+            - kubelet_cert_rotation_node_drain | default(false) | bool
+
+        - name: Drain node before rotating certificates
+          shell: "{{ kubectl }} drain --delete-local-data --force --ignore-daemonsets --timeout=300s {{ ansible_hostname }}"
+          delegate_to: "{{ first_master }}"
+          register: drain_logs
+          retries: "{{ kubectl_retry_count }}"
+          delay: "{{ kubectl_retry_delay }}"
+          until: (drain_logs.rc == 0 or "unable to drain node" in drain_logs.stderr or "Error from server" in drain_logs.stderr)
+          when:
+            - kubelet_cert_rotation_node_drain | default(false) | bool
+
+        - debug:
+            msg:
+              - "{{ drain_logs.stdout_lines }}"
+          when:
+            - kubelet_cert_rotation_node_drain | default(false) | bool
+
+        - name: Rotate kubelet certificates
+          include_tasks: "../roles/kubelet-cert-update/tasks/main.yml"
+
+        # TODO: Optimise the check only for latest changes
+        - name: Check and wait for nodes become available after kubelet restart
+          delegate_to: "{{ first_master }}"
+          command: "{{ kubectl }} get event --field-selector involvedObject.name={{ ansible_hostname }}"
+          register: result
+          until: result.stdout.find("NodeNotReady") != -1 and result.stdout.find("NodeReady") != -1
+          retries: 60
+          delay: 1
+          ignore_errors: yes
+
+        - name: Trigger Kubelet Server Signing
+          include_role:
+            name: kubelet-server-cert
+
+        - name: Uncordon node after rotating certificates
+          shell: " {{ kubectl }} uncordon {{ ansible_hostname }}"
+          delegate_to: "{{ first_master }}"
+          retries: "{{ kubectl_retry_count }}"
+          delay: "{{ kubectl_retry_delay }}"
+          until: uncordon_node.rc == 0
+          when:
+            - kubelet_cert_rotation_node_drain | default(false) | bool
+
+        rescue:
+          - set_fact:
+              cert_failed_component: "Kubelet Client and Server Certificates"
+          - debug:
+      - name: Save validity of current client certificate after
+        shell: "openssl x509 -in /var/lib/kubelet/pki/kubelet-client-current.pem -enddate -noout"
+        register: kubelet_client_validity_after
+        until: kubelet_client_validity_after.rc == 0
+        retries: 20
+        delay: 1
+        ignore_errors: yes
+
+      - name: Save validity of current server certificate after
+        shell: "openssl x509 -in /var/lib/kubelet/pki/kubelet-server-current.pem -enddate -noout"
+        register: kubelet_server_validity_after
+        until: kubelet_server_validity_after.rc == 0
+        retries: 20
+        delay: 1
+        ignore_errors: yes
+      when: rotate_kubelet is defined or rotate_all_certs is defined
+
+
+- name: Save validity of current certificate before
+  hosts: worker
+  become: yes
+  tasks:
+    - name: Validity of certificate before
+      shell: "grep client-certificate-data /etc/kubernetes/admin.conf | awk '{print $2}' | base64 -d | openssl x509 -enddate -noout"
+      register: worker_validity_before
+      ignore_errors: yes
+
+- name: Gather facts as non root
+  hosts: worker
+  gather_facts: yes
+
+- name:  Rotate worker authentication certificate
+  hosts: worker
+  become: yes
+  roles:
+  - erikube-defaults
+  tasks:
+    - block:
+      - name: Rotate worker authentication certificate
+        include_role:
+          name: worker-node-rotation
+      when: rotate_worker_certs is defined or rotate_all_certs is defined
+      rescue:
+        - set_fact:
+            cert_failed_component: "Worker Authentication Certificate"
+        - debug:
+            msg: "{{ lookup('template', 'cert-rotation-failure-msg.yml.j2').split('\n')|select()|list }}"
+
+- name: Save validity of current certificate after
+  hosts: worker
+  become: yes
+  tasks:
+    - name: Validity of certificate after
+      shell: "grep client-certificate-data /etc/kubernetes/admin.conf | awk '{print $2}' | base64 -d | openssl x509 -enddate -noout"
+      register: worker_validity_after
+      until: worker_validity_after.rc == 0
+      retries: 20
+      delay: 1
+      ignore_errors: yes
+
+- name: Rotate Dex certificates
+  hosts: master
+  become: yes
+  roles:
+  - erikube-defaults
+  tasks:
+  - set_fact:
+      kube_config_dir: /etc/kubernetes
+
+  - set_fact:
+      kube_cert_dir: "{{ kube_config_dir }}/pki"
+
+  - name: Save validity of dex certificate before
+    shell: "{{ kubectl }} get secret dex-tls -n kube-system -o \"jsonpath={.data['tls\\.crt']}\" | base64 -d | openssl x509 -enddate -noout"
+    register: dex_validity_before
+    ignore_errors: yes
+    when:
+      - dex_enabled is defined and dex_enabled
+
+  - block:
+    - name: Update Dex certificates
+      include_tasks: "roles/idam_certificate/tasks/update.yml"
+    rescue:
+      - set_fact:
+          cert_failed_component: "Dex certificates"
+      - debug:
+          msg: "{{ lookup('template', 'cert-rotation-failure-msg.yml.j2').split('\n')|select()|list }}"
+
+- name: Rotate Dex certificates
+  hosts: master[0]
+  become: yes
+  roles:
+  - erikube-defaults
+  pre_tasks:
+  - include_vars: "roles/dex/defaults/main.yml"
+  tasks:
+
+  - set_fact:
+      kube_config_dir: /etc/kubernetes
+
+  - set_fact:
+      kube_cert_dir: "{{ kube_config_dir }}/pki"
+
+  - set_fact:
+      kube_image_prefix: "{{ docker_registry_host | default(default_registry) }}/"
+
+  - set_fact:
+      image: "{{ kube_image_prefix }}{{ containers.erikube.dex }}"
+
+  - set_fact:
+      dex_image: "{{ dex_ext_image | default(image) }}"
+
+  - block:
+    - name: Check cert and key files are available
+      assert:
+        that: dex_cert_file is defined and dex_key_file is defined
+        msg: dex_cert_file and dex_key_file -variables must be defined
+
+    - name: Update secret with Dex TLS assets
+      shell:
+        executable: /bin/bash
+        cmd: "{{ kubectl }} -n {{ dex_namespace }} create secret tls dex-tls --cert={{ dex_cert_file }} --key={{ dex_key_file }} \
+            --dry-run=client -o yaml | {{ kubectl }} apply -f -"
+      become: yes
+
+    rescue:
+      - set_fact:
+          cert_failed_component: "Dex certificates"
+      - debug:
+          msg: "{{ lookup('template', 'cert-rotation-failure-msg.yml.j2').split('\n')|select()|list }}"
+
+- name: Save Dex certificate validity
+  hosts: master
+  become: yes
+  tasks:
+  - name: Save validity of dex certificate after
+    shell: "{{ kubectl }} get secret dex-tls -n kube-system -o \"jsonpath={.data['tls\\.crt']}\" | base64 -d | openssl x509 -enddate -noout"
+    register: dex_validity_after
+    until: dex_validity_after.rc == 0
+    retries: 20
+    delay: 1
+    ignore_errors: yes
+    when:
+      - dex_enabled is defined and dex_enabled
+      - rotate_dex is defined or rotate_all_certs is defined
+
+- name: Rotate auth-client certificates
+  hosts: master[0]
+  become: yes
+  roles:
+  - erikube-defaults
+  tasks:
+  - set_fact:
+      dex_ingress_host: auth.eccd.local
+    when: dex_ingress_host is undefined
+
+  - set_fact:
+      dex_issuer_url: "https://{{ dex_ingress_host }}"
+    when: dex_issuer_url is undefined
+
+  - set_fact:
+      auth_client_ingress_host: authclient.eccd.local
+    when: auth_client_ingress_host is undefined
+
+  - set_fact:
+      oidc_client_id: "{{ auth_client_ingress_host }}"
+    when: oidc_client_id is undefined
+
+  - set_fact:
+      auth_client_redirect_path: /ui
+    when: auth_client_redirect_path is undefined
+
+  - name: Save validity of auth-client certificate before
+    shell: "{{ kubectl }} get secret auth-client-tls -n kube-system -o \"jsonpath={.data['tls\\.crt']}\" | base64 -d | openssl x509 -enddate -noout"
+    register: auth_client_validity_before
+    ignore_errors: yes
+    when:
+      - dex_enabled is defined and dex_enabled
+      - auth_client_enabled is defined and auth_client_enabled
+
+  - block:
+    - block:
+      - name: Rotate auth-client certificate if enabled
+        include_tasks: "roles/auth-client/tasks/cert_update.yml"
+      rescue:
+        - set_fact:
+            cert_failed_component: "auth-client certificate"
+        - debug:
+            msg: "{{ lookup('template', 'cert-rotation-failure-msg.yml.j2').split('\n')|select()|list }}"
+
+    - name: Save validity of auth-client certificate after
+      shell: "{{ kubectl }} get secret auth-client-tls -n kube-system -o \"jsonpath={.data['tls\\.crt']}\" | base64 -d | openssl x509 -enddate -noout"
+      register: auth_client_validity_after
+      until: auth_client_validity_after.rc == 0
+      retries: 20
+      delay: 1
+      ignore_errors: yes
+    when:
+      - dex_enabled is defined and dex_enabled
+      - auth_client_enabled is defined and auth_client_enabled
+      - rotate_auth_client is defined or rotate_all_certs is defined
+
+- name: Restart dex
+  hosts: worker
+  become: yes
+  serial: 1
+  vars:
+    target_container_id_name: "dex"
+  tasks:
+  - block:
+    - include_role:
+        name: crictl
+        tasks_from: restart-cri-container
+    when:
+      - dex_enabled is defined and dex_enabled
+      - rotate_dex is defined or rotate_all_certs is defined
+    rescue:
+      - set_fact:
+          cert_failed_component: "auth-client certificate"
+      - debug:
+          msg: "{{ lookup('template', 'cert-rotation-failure-msg.yml.j2').split('\n')|select()|list }}"
+
+- name: Restart auth-client
+  hosts: worker
+  become: yes
+  serial: 1
+  vars:
+    target_container_id_name: "auth-client"
+  tasks:
+  - block:
+    - include_role:
+        name: crictl
+        tasks_from: restart-cri-container
+    when:
+      - dex_enabled is defined and dex_enabled
+      - auth_client_enabled is defined and auth_client_enabled
+      - rotate_auth_client is defined or rotate_all_certs is defined
+    rescue:
+      - set_fact:
+          cert_failed_component: "auth-client certificate"
+      - debug:
+          msg: "{{ lookup('template', 'cert-rotation-failure-msg.yml.j2').split('\n')|select()|list }}"
+
+- name: Restart API Server
+  hosts: master
+  become: yes
+  serial: 1
+  vars:
+    target_container_id_name: "kube-apiserver"
+  tasks:
+  - block:
+    - include_role:
+        name: crictl
+        tasks_from: restart-cri-container
+    when:
+      - dex_enabled is defined and dex_enabled
+      - rotate_dex is defined or rotate_all_certs is defined
+      - auth_client_enabled is defined and auth_client_enabled
+      - rotate_auth_client is defined or rotate_all_certs is defined
+    rescue:
+      - set_fact:
+          cert_failed_component: "auth-client certificate"
+      - debug:
+          msg: "{{ lookup('template', 'cert-rotation-failure-msg.yml.j2').split('\n')|select()|list }}"
+
+- name: Get rsyslog certificates before
+  hosts: director
+  become: yes
+  tasks:
+    - block:
+      - name: Save validity of rsyslog ca certificate before
+        command: "openssl x509 -in /etc/rsyslog/ssl/certs/rsyslog_ca.crt.pem -enddate -noout"
+        register: rsyslog_ca_validity_before
+        ignore_errors: yes
+
+      - name: Save validity of rsyslog client certificate before
+        command: "openssl x509 -in /etc/rsyslog/ssl/certs/rsyslog_client.crt.pem -enddate -noout"
+        register: rsyslog_client_validity_before
+        ignore_errors: yes
+      when:
+      - logger_external_server_enabled | default(false) | bool
+
+- name: Get validity of log streaming certificates before
+  hosts: director
+  become: yes
+  roles:
+  - erikube-defaults
+  tasks:
+  - block:
+    - name: Save validity of fluent-bit ca certificate before
+      shell: "{{ kubectl }} get secret -n ccd-logging fluentbit-tls -o \"jsonpath={.data['ca\\.crt\\.pem']}\" | base64 -d | openssl x509 -enddate -noout"
+      register: fluentbit_ca_validity_before
+      ignore_errors: yes
+
+    - name: Save validity of fluent-bit client certificate before
+      shell: "{{ kubectl }} get secret -n ccd-logging fluentbit-tls -o \"jsonpath={.data['client\\.crt\\.pem']}\" | base64 -d | openssl x509 -enddate -noout"
+      register: fluentbit_client_validity_before
+      ignore_errors: yes
+
+    - name: Save validity of fluentd server certificate before
+      shell: "{{ kubectl }} get secret -n ccd-logging fluentd-tls -o \"jsonpath={.data['server\\.crt\\.pem']}\" | base64 -d | openssl x509 -enddate -noout"
+      register: fluentd_server_validity_before
+      ignore_errors: yes
+
+    - name: Save validity of logging server ca certificate before
+      shell: "{{ kubectl }} get secret -n ccd-logging fluentd-out-tls -o \"jsonpath={.data['ca\\.crt']}\" | base64 -d | openssl x509 -enddate -noout"
+      register: logging_server_ca_validity_before
+      ignore_errors: yes
+
+    - name: Save validity of logging server certificate before
+      shell: "{{ kubectl }} get secret -n ccd-logging fluentd-out-tls -o \"jsonpath={.data['tls\\.crt']}\" | base64 -d | openssl x509 -enddate -noout"
+      register: logging_server_validity_before
+      ignore_errors: yes
+    when:
+      - logger_external_server_enabled | default(false) | bool
+
+- name: Rotate log streaming certificates
+  hosts: master[0]
+  become: yes
+  vars:
+    dir: /tmp/erikube-fluent-ca
+    dir2: /tmp/erikube-fluent-rsyslog
+    directors: "{{ ['director-0','director-1'] if groups['director'] | length | int > 1 else 'director-0' }}"
+  roles:
+    - erikube-defaults
+  tasks:
+    - block:
+      - include_role:
+          name: fluent-bit-cert-update
+      - include_role:
+          name: fluentd-cert-update
+      when:
+        - logger_external_server_enabled | default(false) | bool
+        - rotate_logger is defined or rotate_all_certs is defined
+      rescue:
+        - set_fact:
+            cert_failed_component: "Log Streaming Certificates"
+        - debug:
+            msg: "{{ lookup('template', 'cert-rotation-failure-msg.yml.j2').split('\n')|select()|list }}"
+
+- name: Get validity of log streaming certificates after
+  hosts: director
+  become: yes
+  roles:
+  - erikube-defaults
+  tasks:
+  - block:
+    - name: Save validity of fluent-bit ca certificate after
+      shell: "{{ kubectl }} get secret -n ccd-logging fluentbit-tls -o \"jsonpath={.data['ca\\.crt\\.pem']}\" | base64 -d | openssl x509 -enddate -noout"
+      register: fluentbit_ca_validity_after
+      until: fluentbit_ca_validity_after.rc == 0
+      retries: 20
+      delay: 1
+      ignore_errors: yes
+
+    - name: Save validity of fluent-bit client certificate after
+      shell: "{{ kubectl }} get secret -n ccd-logging fluentbit-tls -o \"jsonpath={.data['client\\.crt\\.pem']}\" | base64 -d | openssl x509 -enddate -noout"
+      register: fluentbit_client_validity_after
+      until: fluentbit_client_validity_after.rc == 0
+      retries: 20
+      delay: 1
+      ignore_errors: yes
+
+    - name: Save validity of fluentd server certificate after
+      shell: "{{ kubectl }} get secret -n ccd-logging fluentd-tls -o \"jsonpath={.data['server\\.crt\\.pem']}\" | base64 -d | openssl x509 -enddate -noout"
+      register: fluentd_server_validity_after
+      until: fluentd_server_validity_after.rc == 0
+      retries: 20
+      delay: 1
+      ignore_errors: yes
+
+
+    - name: Save validity of logging server ca certificate after
+      shell: "{{ kubectl }} get secret -n ccd-logging fluentd-out-tls -o \"jsonpath={.data['ca\\.crt']}\" | base64 -d | openssl x509 -enddate -noout"
+      register: logging_server_ca_validity_after
+      until: logging_server_ca_validity_after.rc == 0
+      retries: 20
+      delay: 1
+      ignore_errors: yes
+
+    - name: Save validity of logging server certificate after
+      shell: "{{ kubectl }} get secret -n ccd-logging fluentd-out-tls -o \"jsonpath={.data['tls\\.crt']}\" | base64 -d | openssl x509 -enddate -noout"
+      register: logging_server_validity_after
+      until: logging_server_validity_after.rc == 0
+      retries: 20
+      delay: 1
+      ignore_errors: yes
+    when:
+      - logger_external_server_enabled | default(false) | bool
+      - rotate_logger is defined or rotate_all_certs is defined
+
+- name: Copy rsyslog ca cert to directors
+  hosts: master[0]
+  become: yes
+  vars:
+    dir: /tmp/erikube-fluent-ca
+    dir2: /tmp/erikube-fluent-rsyslog
+    directors: "{{ ['director-0','director-1'] if groups['director'] | length | int > 1 else 'director-0' }}"
+  tasks:
+  - block:
+    - name: Copy rsyslog ca cert to director
+      synchronize:
+        src: "{{ item.0 }}"
+        dest: "{{ item.1 }}"
+        mode: pull
+      delegate_to: "{{ item.2 }}"
+      with_nested:
+        - ["{{ dir2 }}/certs/ca.crt.pem"]
+        - ["/etc/rsyslog/ssl/certs/rsyslog_ca.crt.pem"]
+        - "{{ directors }}"
+
+    - name: Copy rsyslog client cert to director
+      synchronize:
+        src: "{{ item.0 }}"
+        dest: "{{ item.1 }}"
+        mode: pull
+      delegate_to: "{{ item.2 }}"
+      with_nested:
+        - ["{{ dir2 }}/certs/client.crt.pem"]
+        - ["/etc/rsyslog/ssl/certs/rsyslog_client.crt.pem"]
+        - "{{ directors }}"
+
+    - name: Copy rsyslog client key to director
+      synchronize:
+        src: "{{ item.0 }}"
+        dest: "{{ item.1 }}"
+        mode: pull
+      delegate_to: "{{ item.2 }}"
+      with_nested:
+        - ["{{ dir2 }}/private/client.key.pem"]
+        - ["/etc/rsyslog/ssl/certs/rsyslog_client.key.pem"]
+        - "{{ directors }}"
+
+    - name: Delete CA main directory
+      file:
+        name: "{{ item }}"
+        state: absent
+      with_items:
+        - "{{ dir }}"
+        - "{{ dir2 }}"
+    when:
+      - logger_external_server_enabled | default(false) | bool
+      - rotate_logger is defined or rotate_all_certs is defined
+    rescue:
+      - set_fact:
+          cert_failed_component: "Log Streaming Certificates"
+      - debug:
+          msg: "{{ lookup('template', 'cert-rotation-failure-msg.yml.j2').split('\n')|select()|list }}"
+
+- name: Restart rsyslog to take new certs into use
+  hosts: director
+  become: yes
+  tasks:
+  - block:
+    - name: Restart rsyslog
+      systemd:
+        name: rsyslog
+        state: restarted
+    when:
+      - logger_external_server_enabled | default(false) | bool
+      - rotate_logger is defined or rotate_all_certs is defined
+    rescue:
+      - set_fact:
+          cert_failed_component: "Log Streaming Certificates"
+      - debug:
+          msg: "{{ lookup('template', 'cert-rotation-failure-msg.yml.j2').split('\n')|select()|list }}"
+
+- name: Save validity of rsyslog certs after
+  hosts: director
+  become: yes
+  vars:
+    dir: /tmp/erikube-fluent-ca
+    dir2: /tmp/erikube-fluent-rsyslog
+  tasks:
+  - block:
+    - name: Save validity of rsyslog ca certificate after
+      command: "openssl x509 -in /etc/rsyslog/ssl/certs/rsyslog_ca.crt.pem -enddate -noout"
+      register: rsyslog_ca_validity_after
+      until: rsyslog_ca_validity_after.rc == 0
+      retries: 20
+      delay: 1
+      ignore_errors: yes
+
+    - name: Save validity of rsyslog client certificate after
+      command: "openssl x509 -in /etc/rsyslog/ssl/certs/rsyslog_client.crt.pem -enddate -noout"
+      register: rsyslog_client_validity_after
+      until: rsyslog_client_validity_after.rc == 0
+      retries: 20
+      delay: 1
+      ignore_errors: yes
+    when:
+      - logger_external_server_enabled | default(false) | bool
+      - rotate_logger is defined or rotate_all_certs is defined
+
+- name: Rotate kube-apiserver SNI certs
+  hosts: master
+  become: yes
+  tasks:
+  - block:
+    - name: Copy kube-apiserver SNI cert to masters
+      copy:
+        content: "{{ kube_api_cert }}"
+        dest: "/etc/kubernetes/pki/kube_api.crt"
+
+    - name: Copy kube-apiserver SNI cert key to masters
+      copy:
+        content: "{{ kube_api_key }}"
+        dest: "/etc/kubernetes/pki/kube_api.key"
+
+    - name: Remove previous kube-apiserver sni parameter
+      command: "sed -i '/tls-sni-cert-key/d' /etc/kubernetes/manifests/kube-apiserver.yaml"
+
+    - name: Append new kube-apiserver sni parameter
+      command: "sed -i '/-\\ kube-apiserver/a \\ \\ \\ \\ -\\ --tls-sni-cert-key=/etc/kubernetes/pki/kube_api.crt,/etc/kubernetes/pki/kube_api.key' /etc/kubernetes/manifests/kube-apiserver.yaml"
+    when:
+      - rotate_api_sni is defined or rotate_all_certs is defined
+      - kube_api_cert is defined and kube_api_key is defined
+
+- name: Summary of certificate validations
+  hosts: director
+  tasks:
+  - debug:
+      msg:
+        - SUMMARY OF REGISTRY VALIDITIES BEFORE AND AFTER ROTATION
+
+- name: Certificate validation for ingress controller
+  hosts: master[0]
+  tasks:
+  - debug:
+      msg:
+        - Ingress Controller validity before: "{{ ingress_controller_validity_before.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - rotate_ingress_controller is defined or rotate_all_certs is defined
+
+- name: Certificate validation for ingress controller
+  hosts: master[0]
+  tasks:
+  - debug:
+      msg:
+        - Ingress Controller validity after: "{{ ingress_controller_validity_after.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - rotate_ingress_controller is defined or rotate_all_certs is defined
+      - ingress_ctrl_cert_file is undefined and ingress_ctrl_cert is undefined
+
+- name: Certificate validation for metrics server
+  hosts: master[0]
+  tasks:
+  - debug:
+      msg:
+        - Metrics Server validity before: "{{ metrics_server_validity_before.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - rotate_metrics_server is defined or rotate_all_certs is defined
+
+- name: Certificate validation for metrics server
+  hosts: master[0]
+  tasks:
+  - debug:
+      msg:
+        - Metrics Server validity after: "{{ metrics_server_validity_after.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - rotate_metrics_server is defined or rotate_all_certs is defined
+
+- name: Certificate validation for internal registry
+  hosts: director
+  tasks:
+  - debug:
+      msg:
+        - Internal registry validity before: "{{ internal_reg_validity_before.stdout_lines }}"
+    ignore_errors: yes
+
+- name: Certificate validation for internal registry
+  hosts: director
+  tasks:
+  - debug:
+      msg:
+        - Internal registry validity after rotation: "{{ internal_reg_validity_after.stdout_lines }}"
+    ignore_errors: yes
+    when: rotate_internal_registry is defined or rotate_all_certs is defined
+
+- name: Certificate validation for container registry
+  hosts:  master[0]
+  tasks:
+  - debug:
+      msg:
+        - Container registry validity before: "{{ container_reg_validity_before.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - container_registry_enabled | default(true) | bool
+      - ca_key is defined
+      - ca_cert is defined
+      - container_registry_ssl_cert is not defined or container_registry_ssl_key_file is not defined
+      - container_reg_validity_before.stdout_lines is defined
+
+- name: Certificate validation for container registry
+  hosts:  master[0]
+  tasks:
+  - debug:
+      msg:
+        - Container registry validity after rotation: "{{ container_reg_validity_after.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - container_registry_enabled | default(true) | bool
+      - ca_key is defined
+      - ca_cert is defined
+      - container_registry_ssl_cert is not defined or container_registry_ssl_key_file is not defined
+      - rotate_container_registry is defined or rotate_all_certs is defined
+
+- name: Certificate validation for Openstack CA cert
+  hosts:  master[0]
+  tasks:
+  - debug:
+      msg:
+        - Openstack CA cert validity before: "{{ os_cacert_validity_before.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - openstack_ca_cert is defined
+      - openstack_ca_cert != ""
+
+- name: Certificate validation for Openstack CA cert
+  hosts:  master[0]
+  tasks:
+  - debug:
+      msg:
+        - Openstack CA cert validity after rotation: "{{ os_cacert_validity_after.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - openstack_ca_cert is defined
+      - openstack_ca_cert != ""
+      - rotate_os_cacert is defined or rotate_all_certs is defined
+
+- name: Certificate validation for Openstack Cloud Controller Manager Certificate
+  hosts:  master[0]
+  tasks:
+  - debug:
+      msg:
+        - Openstack Cloud Controller Manager Certificate validity before rotation: "{{ os_cm_cert_validity_before.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - rotate_os_ccm_cert is defined or rotate_all_certs is defined
+
+- name: Certificate validation for Openstack Cloud Controller Manager Certificate
+  hosts:  master[0]
+  tasks:
+  - debug:
+      msg:
+        - Openstack Cloud Controller Manager Certificate validity after rotation: "{{ os_cm_cert_validity_after.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - rotate_os_ccm_cert is defined or rotate_all_certs is defined
+
+- name: Certificate validation for Kubernetes PKI
+  hosts: master
+  tasks:
+  - debug:
+      msg:
+        - K8s PKI validity before: "{{ pki_cert_validity_before.stdout_lines }}"
+    ignore_errors: yes
+
+- name: Certificate validation for Kubernetes PKI
+  hosts: master
+  tasks:
+  - debug:
+      msg:
+        - K8s PKI validity after rotation: "{{ pki_cert_validity_after.stdout_lines }}"
+    ignore_errors: yes
+    when: rotate_k8s_pki is defined or rotate_all_certs is defined
+
+- name: Certificate validation for worker certs
+  hosts:  worker[0]
+  tasks:
+  - debug:
+      msg:
+        - Worker cert validity before: "{{ worker_validity_before.stdout_lines }}"
+    ignore_errors: yes
+
+- name: Certificate validation for worker certs
+  hosts:  worker[0]
+  tasks:
+  - debug:
+      msg:
+        - Worker CA cert validity after rotation: "{{ worker_validity_after.stdout_lines }}"
+    ignore_errors: yes
+    when: rotate_worker_certs is defined or rotate_all_certs is defined
+
+- name: Certificate validation for kubelet certs
+  hosts:  master,worker
+  tasks:
+  - debug:
+      msg:
+        - Kubelet client cert validity before: "{{ kubelet_client_validity_before.stdout_lines }}"
+        - Kubelet server cert validity before: "{{ kubelet_server_validity_before.stdout_lines }}"
+    ignore_errors: yes
+
+- name: Certificate validation for kubelet certs
+  hosts:  master,worker
+  tasks:
+  - debug:
+      msg:
+        - Kubelet client cert validity after rotation: "{{ kubelet_client_validity_after.stdout_lines }}"
+        - Kubelet server cert validity after rotation: "{{ kubelet_server_validity_after.stdout_lines }}"
+    ignore_errors: yes
+    when: rotate_kubelet is defined or rotate_all_certs is defined
+
+- name: Certificate validation for auth-client certs
+  hosts:  master[0]
+  tasks:
+  - debug:
+      msg:
+        - Auth-client cert validity before: "{{ auth_client_validity_before.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - dex_enabled is defined and dex_enabled
+      - auth_client_enabled is defined and auth_client_enabled
+
+- name: Certificate validation for auth-client certs
+  hosts:  master[0]
+  tasks:
+  - debug:
+      msg:
+        - Auth-client cert validity after rotation: "{{ auth_client_validity_after.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - dex_enabled is defined and dex_enabled
+      - auth_client_enabled is defined and auth_client_enabled
+      - rotate_auth_client is defined or rotate_all_certs is defined
+
+- name: Certificate validation for dex certs
+  hosts:  master
+  tasks:
+  - debug:
+      msg:
+        - Dex cert validity before: "{{ dex_validity_before.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - dex_enabled is defined and dex_enabled
+
+- name: Certificate validation for dex certs
+  hosts:  master
+  tasks:
+  - debug:
+      msg:
+        - Dex cert validity after rotation: "{{ dex_validity_after.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - dex_enabled is defined and dex_enabled
+      - rotate_dex is defined or rotate_all_certs is defined
+
+- name: Certificate validation for log streaming
+  hosts: director
+  tasks:
+  - debug:
+      msg:
+        - Fluent-bit/fluentd ca cert validity before: "{{ fluentbit_ca_validity_before.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - logger_external_server_enabled | default(false) | bool
+
+- name: Certificate validation for log streaming
+  hosts: director
+  tasks:
+  - debug:
+      msg:
+        - Fluent-bit/fluentd ca cert validity after rotation: "{{ fluentbit_ca_validity_after.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - logger_external_server_enabled | default(false) | bool
+      - rotate_logger is defined or rotate_all_certs is defined
+
+- name: Certificate validation for log streaming
+  hosts: director
+  tasks:
+  - debug:
+      msg:
+        - Fluent-bit client cert validity before: "{{ fluentbit_client_validity_before.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - logger_external_server_enabled | default(false) | bool
+
+- name: Certificate validation for log streaming
+  hosts: director
+  tasks:
+  - debug:
+      msg:
+        - Fluent-bit client cert validity after rotation: "{{ fluentbit_client_validity_after.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - logger_external_server_enabled | default(false) | bool
+      - rotate_logger is defined or rotate_all_certs is defined
+
+- name: Certificate validation for log streaming
+  hosts: director
+  tasks:
+  - debug:
+      msg:
+        - Fluentd server cert validity before: "{{ fluentd_server_validity_before.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - logger_external_server_enabled | default(false) | bool
+
+- name: Certificate validation for log streaming
+  hosts: director
+  tasks:
+  - debug:
+      msg:
+        - Fluentd server cert validity after rotation: "{{ fluentd_server_validity_after.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - logger_external_server_enabled | default(false) | bool
+      - rotate_logger is defined or rotate_all_certs is defined
+
+- name: Certificate validation for log streaming
+  hosts: director
+  tasks:
+  - debug:
+      msg:
+        - Rsyslog ca cert validity before: "{{ rsyslog_ca_validity_before.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - logger_external_server_enabled | default(false) | bool
+
+- name: Certificate validation for log streaming
+  hosts: director
+  tasks:
+  - debug:
+      msg:
+        - Rsyslog ca cert validity after rotation: "{{ rsyslog_ca_validity_after.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - logger_external_server_enabled | default(false) | bool
+      - rotate_logger is defined or rotate_all_certs is defined
+
+- name: Certificate validation for log streaming
+  hosts: director
+  tasks:
+  - debug:
+      msg:
+        - Rsyslog client cert validity before: "{{ rsyslog_client_validity_before.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - logger_external_server_enabled | default(false) | bool
+
+- name: Certificate validation for log streaming
+  hosts: director
+  tasks:
+  - debug:
+      msg:
+        - Rsyslog client cert validity after rotation: "{{ rsyslog_client_validity_after.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - logger_external_server_enabled | default(false) | bool
+      - rotate_logger is defined or rotate_all_certs is defined
+
+- name: Certificate validation for log streaming
+  hosts: director
+  tasks:
+  - debug:
+      msg:
+        - External logging server ca cert validity before: "{{ logging_server_ca_validity_before.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - logger_external_server_enabled | default(false) | bool
+
+- name: Certificate validation for log streaming
+  hosts: director
+  tasks:
+  - debug:
+      msg:
+        - External logging server ca cert validity after rotation: "{{ logging_server_ca_validity_after.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - logger_external_server_enabled | default(false) | bool
+      - rotate_logger is defined or rotate_all_certs is defined
+
+- name: Certificate validation for log streaming
+  hosts: director
+  tasks:
+  - debug:
+      msg:
+        - External logging server cert validity before: "{{ logging_server_validity_before.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - logger_external_server_enabled | default(false) | bool
+
+- name: Certificate validation for log streaming
+  hosts: director
+  tasks:
+  - debug:
+      msg:
+        - External logging server cert validity after rotation: "{{ logging_server_validity_after.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - logger_external_server_enabled | default(false) | bool
+      - rotate_logger is defined or rotate_all_certs is defined
+
+- name: Certificate validation for network-resources-injector
+  hosts: master[0]
+  tasks:
+  - debug:
+      msg:
+        - Network Resources Injector cert validity before: "{{ nri_validity_before.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - network_resources_injector_enabled | default(false) | bool
+
+- name: Certificate validation for network-resources-injector
+  hosts: master[0]
+  tasks:
+  - debug:
+      msg:
+        - Network Resources Injector cert validity after rotation: "{{ nri_validity_after.stdout_lines }}"
+    ignore_errors: yes
+    when:
+      - network_resources_injector_enabled | default(false) | bool
+      - rotate_nri is defined or rotate_all_certs is defined
+
+- name: Rotate ssh ldap client certificate
+  hosts: director, master, worker
+  become: yes
+  serial: 1
+  gather_facts: yes
+  tasks:
+    - block:
+      - name: Save validity of current client certificate before
+        shell: "openssl x509 -in /var/lib/ldap_cert/client.crt.pem -enddate -noout"
+        register: ldap_cert_validity_before
+        ignore_errors: yes
+
+      - name: Copy ssh ldap ca cert
+        copy:
+          content: "{{ ssh_ldap_tls_ca }}"
+          dest: "/var/lib/ldap_cert/ca.crt.pem"
+
+      - name: Copy ssh ldap client cert
+        copy:
+          content: "{{ ssh_ldap_tls_cert }}"
+          dest: "/var/lib/ldap_cert/client.crt.pem"
+
+      - name: Copy ssh ldap client cert key
+        copy:
+          content: "{{ ssh_ldap_tls_key }}"
+          dest: "/var/lib/ldap_cert/client.key.pem"
+
+      - name: Restart sssd service
+        systemd:
+          name: sssd
+          state: restarted
+          daemon_reload: yes
+        become: yes
+
+      - name: Save validity of current client certificate after
+        shell: "openssl x509 -in /var/lib/ldap_cert/client.crt.pem -enddate -noout"
+        register: ldap_cert_validity_after
+        ignore_errors: yes
+
+      rescue:
+        - set_fact:
+            cert_failed_component: "ldap certificate"
+
+      always:
+        - debug:
+            msg:
+              - Ldap certificate validity before: "{{ ldap_cert_validity_before.stdout_lines }}"
+              - Ldap certificate validity after: "{{ ldap_cert_validity_after.stdout_lines }}"
+
+      when:
+        - rotate_ssh_ldap_cert is defined
+        - ssh_ldap_tls_ca is defined and ssh_ldap_tls_cert is defined and ssh_ldap_tls_key is defined

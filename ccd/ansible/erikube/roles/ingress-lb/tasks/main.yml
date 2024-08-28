@@ -1,0 +1,4 @@
+---
+- block:
+    - include_tasks: "{{ ingress_action }}.yml"
+  become: true

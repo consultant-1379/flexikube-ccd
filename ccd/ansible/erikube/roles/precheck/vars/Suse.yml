@@ -1,0 +1,21 @@
+---
+required_packages:
+  - conntrack-tools
+  - ebtables
+  - ethtool
+  - nfs-utils
+  - openssl
+  - socat
+  - e2fsprogs
+  - xfsprogs
+  - kernel-default
+  - rsyslog
+  - ceph-common
+  - unzip
+  - supportutils
+  - bash-completion
+  - htop
+  - systemd-coredump
+  - irqbalance
+  - apache2-utils
+  - rsyslog-module-gtls

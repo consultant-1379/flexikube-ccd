@@ -1,0 +1,8 @@
+- name: Make crictl symlink
+  file: src=/usr/local/bin/crictl dest=/usr/bin/crictl state=link
+
+- name: Configure /etc/crictl.yaml
+  template:
+    src: crictl.j2
+    dest: /etc/crictl.yaml
+  become: true

@@ -1,0 +1,120 @@
+- assert:
+    that:
+      - backup_dir is defined
+      - kubectl is defined
+      - registry_username is defined
+      - registry_password is defined
+      - registry_address is defined
+
+- name: Check needed binaries are found from host
+  block:
+    - name: Check kubectl exists
+      shell: "{{ kubectl }} >/dev/null 2>&1"
+
+    - name: Check skopeo exists
+      shell: skopeo --version >/dev/null 2>&1
+
+    - name: Check curl exists
+      shell: curl --help >/dev/null 2>&1
+
+- name: Get registry pod's name
+  shell: "{{ kubectl }} -n kube-system get pod -l app=eric-lcm-container-registry -n kube-system -o jsonpath='{.items[0].metadata.name}'"
+  register: registry_pod_name
+
+- name: Check required disk space
+  block:
+    - name: Get used space from registry
+      shell: "{{ kubectl }} -n kube-system exec -it {{ registry_pod_name.stdout }} -- df /var/lib/registry"
+      register: registry_used_space
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: registry_used_space.rc == 0
+
+    - name: Parse registry used space output
+      shell: "echo {{ registry_used_space.stdout }}  | tail -1 | awk '{print $3}'"
+      register: registry_used_space_kb
+
+    - name: Get free space on target directory
+      shell: "df {{ backup_dir }} | tail -1 |awk '{print $4}'"
+      register: target_dir_space_kb
+
+    - name: Fail in not enought space on target directory
+      fail:
+        msg: |
+          There ins't enought space for storing images.
+           needs: {{ (registry_used_space_kb.stdout | int) * 2 }}
+           free: {{ target_dir_space_kb.stdout | int }}
+      when: ( (registry_used_space_kb.stdout | int) * 2 ) > ( target_dir_space_kb.stdout | int )
+  when: check_free_space | bool
+
+- name: Backup all images from registry
+  run_once: true
+  block:
+    - name: Set Curl command base
+      set_fact:
+        backup_curl_command_base: >
+          curl --user '{{ registry_username }}:{{ registry_password }}'
+          {{'-k' if insecure_registry_access else ''}} --silent
+          https://{{registry_address}}
+      no_log: yes
+
+    - name: Clean command
+      set_fact:
+        backup_curl_command_base: "{{ backup_curl_command_base | replace('\n', '') }}"
+      no_log: yes
+
+    - name: Test connection to registry
+      shell: "{{ backup_curl_command_base }}/v2/_catalog"
+      no_log: yes
+
+    - name: Create temp directory
+      command: mktemp -d {{ backup_dir }}/container-images-XXXXXX
+      register: tmpcontainerdir
+
+    - name: Create skopeo command base
+      set_fact:
+        skopeo_command_base: >
+          skopeo copy
+          --src-creds='{{ registry_username }}:{{ registry_password }}'
+          {{'--src-tls-verify=false' if insecure_registry_access else '' }}
+      no_log: yes
+
+    - name: Clean command
+      set_fact:
+        skopeo_command_base: "{{ skopeo_command_base | replace('\n', '') }}"
+      no_log: yes
+
+    - name: Save images from registry locally
+      shell: |
+          for image in $({{ backup_curl_command_base }}/v2/_catalog | jq '.repositories | .[]' -r | sort); do
+            for tag in $({{ backup_curl_command_base }}/v2/${image}/tags/list | jq '.tags| .[]' -r); do
+              mkdir -p {{ tmpcontainerdir.stdout }}/${image}
+              {{ skopeo_command_base }} \
+                docker://{{ registry_address }}/${image}:${tag} \
+                docker-archive:{{ tmpcontainerdir.stdout }}/${image}_${tag}.tar
+            done
+            rm -rf {{ tmpcontainerdir.stdout }}/${image}
+          done
+      no_log: yes
+      ignore_errors: true
+      register: output
+
+    - name: Show last command error
+      debug:
+        msg: "{{ output.stderr }}"
+      when: output.stderr != ""
+
+    - name: Fail if there is an error during images backup
+      fail:
+        msg: "Save images from registry failed with : {{ output.stderr }}"
+      when: output.stderr != ""
+
+    - name: Create archive of all containers
+      archive:
+        path: "{{ tmpcontainerdir.stdout }}/*"
+        dest: "{{ backup_dir }}/containers.tar"
+
+    - name: Delete temp directory
+      file:
+        name: "{{ tmpcontainerdir.stdout }}"
+        state: absent

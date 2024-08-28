@@ -1,0 +1,7 @@
+---
+
+- import_tasks: create_namespace.yml
+
+- import_tasks: secret.yml
+
+- import_tasks: default_ctrl_namespace_service.yml

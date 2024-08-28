@@ -1,0 +1,14 @@
+---
+- name: Gather facts as non root
+  hosts: master[0]
+  gather_facts: yes
+
+- name: Remove Manila
+  hosts: master[0]
+  become: yes
+  roles:
+  - erikube-defaults
+  tasks:
+  - include_role:
+      name: manila
+      tasks_from: purge

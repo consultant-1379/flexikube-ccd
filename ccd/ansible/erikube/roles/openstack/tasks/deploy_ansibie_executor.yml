@@ -1,0 +1,106 @@
+---
+
+- block:
+  - name: Delete existing ansible executor instance
+    os_server:
+      state: absent
+      auth:
+        auth_url: "{{ os_auth_url }}"
+        username: "{{ os_username }}"
+        password: "{{ os_password }}"
+        project_name: "{{ os_project_name }}"
+        user_domain_name: "{{ os_user_domain_name }}"
+        project_domain_name: "{{ os_user_domain_name }}"
+      name: "{{ item.name }}"
+      delete_fip: yes
+      terminate_volume: yes
+    with_items: "{{ ansibie_executor }}"
+    retries: 10
+    delay: 5
+    when: keep_ansible is not defined or not keep_ansible
+
+  - name: Create instances for Ansible playbook executor with floating IP
+    os_server:
+       state: present
+       auth:
+         auth_url: "{{ os_auth_url }}"
+         username: "{{ os_username }}"
+         password: "{{ os_password }}"
+         project_name: "{{ os_project_name }}"
+         user_domain_name: "{{ os_user_domain_name }}"
+         project_domain_name: "{{ os_user_domain_name }}"
+       name: "{{ item.name }}"
+       image: "{{ os_vm_image }}"
+       key_name: "{{ os_ssh_key_name }}"
+       flavor: "{{ os_flavor }}"
+       network: "{{ os_internal_network_name }}"
+       floating_ip_pools: "{{ os_floating_ip_pool_name }}"
+       security_groups: "{{ os_security_groups }}"
+       wait: yes
+       meta:
+         hostname: "{{ item.name }}"
+         groups: "{{ item.groups }}"
+    with_items: "{{ ansibie_executor }}"
+    retries: 10
+    delay: 5
+
+  rescue:
+    - name: Remove the new created instance when failed
+      os_server:
+        state: absent
+        auth:
+          auth_url: "{{ os_auth_url }}"
+          username: "{{ os_username }}"
+          password: "{{ os_password }}"
+          project_name: "{{ os_project_name }}"
+          user_domain_name: "{{ os_user_domain_name }}"
+          project_domain_name: "{{ os_user_domain_name }}"
+        name: "{{ item.name }}"
+        delete_fip: yes
+        terminate_volume: yes
+      with_items: "{{ ansibie_executor }}"
+
+
+- name: Gathering the ansible executor instance"s facts
+  os_server_facts:
+    auth:
+      auth_url: "{{ os_auth_url }}"
+      username: "{{ os_username }}"
+      password: "{{ os_password }}"
+      project_name: "{{ os_project_name }}"
+      user_domain_name: "{{ os_user_domain_name }}"
+      project_domain_name: "{{ os_user_domain_name }}"
+    server: "{{ item.name }}"
+  with_items: "{{ ansibie_executor }}"
+
+
+- name: Waiting for the ansible executor instance up and run
+  wait_for:
+    host: "{{ item["public_v4"] }}"
+    port: 22
+    search_regex: OpenSSH
+    sleep: 10
+    timeout: 3000
+  with_items: "{{ openstack_servers }}"
+
+- name: Add the ansible executor instances into inventory data
+  add_host:
+    name: "{{ item["name"] }}"
+    ansible_host: "{{ item["public_v4"] }}"
+    groups: "{{ item["metadata"]["groups"] }}"
+  with_items: "{{ openstack_servers }}"
+
+
+- name: Build hosts file
+  become: true
+  lineinfile:
+    dest: /etc/hosts
+    regexp: ".*{{ item["name"] }}$"
+    line: "{{ item["public_v4"] }} {{item["name"]}}"
+    state: present
+  with_items: "{{ openstack_servers }}"
+
+- name: Remove known_host file
+  file:
+    path: "{{ ssh_known_hosts_file }}"
+    state: absent

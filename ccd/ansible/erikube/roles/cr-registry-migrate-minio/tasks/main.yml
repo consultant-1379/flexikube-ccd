@@ -1,0 +1,31 @@
+- name: Get migration pod name
+  shell: >-
+    {{ kubectl }} get pod -n kube-system | grep "eric-lcm-container-registry-migration" | awk -F ' ' '{print $1}'
+  register: get_migration_pod_result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (get_migration_pod_result.rc == 0 or "not found" in get_migration_pod_result.stderr)
+
+- name: Wait till migration is done
+  shell: >-
+    {{ kubectl }} get pod -n kube-system --no-headers {{ get_migration_pod_result.stdout }}
+  register: result
+  until: result.stdout.find("Completed") != -1
+  retries: 100
+  delay: 10
+
+- name: Delete migration pod
+  shell: >-
+    {{ kubectl }} delete pod -n kube-system {{ get_migration_pod_result.stdout }}
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (result.rc == 0 or "not found" in result.stderr)
+
+- name: Delete old pvc
+  shell: "{{ kubectl }} -n kube-system delete pvc {{ cr_pvc_name }}"
+  ignore_errors: yes
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (result.rc == 0 or "not found" in result.stderr)

@@ -1,0 +1,18 @@
+---
+- name: Delete all Pods
+  command: "{{ kubectl }} delete po --all"
+  become: yes
+  ignore_errors: True
+  register: output
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: output.rc == 0
+
+- name: Delete all Cinder PVCs
+  command: "{{ kubectl }} delete pvc --all"
+  become: yes
+  ignore_errors: True
+  register: output
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: output.rc == 0

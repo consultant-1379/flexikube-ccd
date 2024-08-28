@@ -1,0 +1,9 @@
+---
+- name: Configure keepalive to use unicast for vrrp in directors
+  hosts: director
+  become: yes
+  roles:
+    - role: erikube-defaults
+      when: groups['director'] | length | int > 1
+    - role: director-vrrp-unicast
+      when: groups['director'] | length | int > 1

@@ -1,0 +1,23 @@
+---
+- name: Include etcd common variables
+  include_vars: roles/etcd/defaults/main.yml
+
+- name: Check etcd backup paths exist
+  stat:
+    path: "{{ item }}"
+  with_items: "{{ etcd_backup_paths }}"
+  register: backup_dirs_st
+
+- fail:
+    msg: "{{ item.item }} does not exist"
+  with_items: "{{ backup_dirs_st.results }}"
+  when: not item.stat.exists
+
+- set_fact:
+    backup_files: "{{ backup_files }} + {{ etcd_backup_paths }}"
+
+- name: Snapshot etcd database to /tmp/{{ etcd_snapshot_name }}
+  shell: source /etc/profile.d/etcdctl.sh && etcdctl3 snapshot save /tmp/{{ etcd_snapshot_name }}
+  args:
+    executable: /bin/bash
+  when: inventory_hostname == etcd_snapshot_host

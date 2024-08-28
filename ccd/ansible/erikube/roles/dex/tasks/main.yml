@@ -1,0 +1,45 @@
+---
+
+- set_fact:
+    dex_cert_file: "{{ dex_cert_dir }}/dex.crt"
+  when: dex_cert_file is undefined and image_based_deployment | default(false) | bool
+
+- set_fact:
+    dex_key_file: "{{ dex_cert_dir }}/dex.key"
+  when: dex_key_file is undefined and image_based_deployment | default(false) | bool
+
+- set_fact:
+    dex_ldap_ca: "{{ dex_ldap_ca }}"
+  when: dex_ldap_ca is defined and dex_ldap_ca_data is not defined
+
+- set_fact:
+    dex_ldap_ca_data: "{{ dex_ldap_ca_data }}"
+  when: dex_ldap_ca_data is defined and dex_ldap_ca is not defined
+
+- block:
+  - name: Create temp file for oid client secret
+    file:
+      path: "/tmp/oidc-secret"
+      state: directory
+      mode: '0755'
+    become: yes
+
+  - name: Create a pseudo-random oidc client secret
+    shell: "openssl rand -hex 32 > /tmp/oidc-secret/oidc-secret.yaml"
+    no_log: true
+    become: yes
+
+  - name: get the oidc-secret
+    shell: "cat /tmp/oidc-secret/oidc-secret.yaml"
+    register: dashboard_oidc_client_secret_output
+    no_log: true
+    become: yes
+
+  - set_fact:
+      dashboard_oidc_client_secret: "{{ dashboard_oidc_client_secret_output.stdout }}"
+  when: dashboard_oidc_client_secret is undefined
+
+- include_tasks: "{{ dex_action }}.yml"
+
+- include_tasks: "hosts.yml"
+- include_tasks: "ca_config.yml"

@@ -1,0 +1,135 @@
+- name: Create temporary directory
+  tempfile:
+    state: directory
+    suffix: eccd-openstack-controller-manager
+  register: os_cm_tmp
+
+- name: Set variables for Openstack Cloud Controller Manager Certificate Creation
+  set_fact:
+    os_cm_new_cert_name: "openstack-cloud-controller-manager"
+    os_cm_tls_secret_name: "openstack-cloud-controller-manager-tls"
+    os_cm_new_cert_subject: "/CN=localhost"
+    os_cm_new_cert_serial_number: 1
+
+- name: Set variables for Openstack Cloud Controller Manager Certificate Creation
+  set_fact:
+    os_cm_new_cert_validity_days: "{{ ((openstack_cm_cert_validity_years|float) * 365) | int }}"
+    os_cm_tls_secret_backup: "{{ os_cm_tmp.path }}/{{ os_cm_tls_secret_name }}-backup.yml"
+    os_cm_new_cert_csr: "{{ os_cm_tmp.path }}/{{ os_cm_new_cert_name }}.csr"
+    os_cm_new_cert_key: "{{ os_cm_tmp.path }}/{{ os_cm_new_cert_name }}.key"
+    os_cm_new_cert_out: "{{ os_cm_tmp.path }}/{{ os_cm_new_cert_name }}.crt"
+    os_cm_new_cert_sign_conf: "{{ os_cm_tmp.path }}/{{ os_cm_new_cert_name }}-sign.conf"
+    os_ca_tmp_cert: "{{ os_cm_tmp.path }}/ca.crt"
+    os_ca_tmp_key: "{{ os_cm_tmp.path }}/ca.key"
+
+- name: Check if TLS secret exists
+  command: "{{ kubectl }} -n kube-system get secret {{ os_cm_tls_secret_name }} -o yaml"
+  register: os_cm_secret
+  ignore_errors: true
+  changed_when: false
+
+- name: Backup TLS Secret if it exists
+  copy:
+    content: "{{ os_cm_secret.stdout }}"
+    dest: "{{ os_cm_tls_secret_backup }}"
+  when: os_cm_secret.rc == 0
+
+- name: Get current certificate serial number
+  shell: "{{ kubectl }} get secret {{ os_cm_tls_secret_name }} -n kube-system -o \"jsonpath={.data['tls\\.crt']}\" | base64 -d | openssl x509 -serial -noout | cut -d'=' -f 2"
+  register: os_cm_secret_serial
+  ignore_errors: true
+  changed_when: false
+  when: os_cm_secret.rc == 0
+
+- name: Set new certificate serial number
+  set_fact:
+    os_cm_new_cert_serial_number: "{{ (os_cm_secret_serial.stdout | int) + 1 | int }}"
+  when:
+    - os_cm_secret.rc == 0
+    - os_cm_secret_serial is defined
+    - os_cm_secret_serial.rc == 0
+
+- name: Copy CA Certificate and Key for signing the CSR
+  copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dst }}"
+    mode: preserve
+    remote_src: yes
+  become: yes
+  with_items:
+    - { src: /etc/kubernetes/pki/ca.crt, dst: "{{ os_ca_tmp_cert }}" }
+    - { src: /etc/kubernetes/pki/ca.key, dst: "{{ os_ca_tmp_key }}" }
+
+- name: Create Certificate signing config file
+  template:
+    src: "../templates/openstack-cloud-controller-manager-sign-conf.yml.j2"
+    dest: "{{ os_cm_new_cert_sign_conf }}"
+
+- name: Generate a CSR and Key for Openstack Cloud Controller Manager Certificate
+  command:
+    argv:
+      - openssl
+      - req
+      - -nodes
+      - -newkey
+      - rsa:2048
+      - -keyout
+      - "{{ os_cm_new_cert_key }}"
+      - -out
+      - "{{ os_cm_new_cert_csr }}"
+      - -subj
+      - "{{ os_cm_new_cert_subject }}"
+
+- name: Create the new Openstack Cloud Controller Manager Certificate
+  command:
+    argv:
+      - openssl
+      - x509
+      - -req
+      - -CAcreateserial
+      - -sha256
+      - -extensions
+      - v3_req
+      - -set_serial
+      - "{{ os_cm_new_cert_serial_number }}"
+      - -CA
+      - "{{ os_ca_tmp_cert }}"
+      - -CAkey
+      - "{{ os_ca_tmp_key }}"
+      - -extfile
+      - "{{ os_cm_new_cert_sign_conf }}"
+      - -in
+      - "{{ os_cm_new_cert_csr }}"
+      - -out
+      - "{{ os_cm_new_cert_out }}"
+      - -days
+      - "{{ os_cm_new_cert_validity_days }}"
+
+- name: Append CA cert to the final Certificate Bundle
+  shell: "cat {{ os_ca_tmp_cert }} >> {{ os_cm_new_cert_out }}"
+
+- name: Verify the new Certificate
+  shell: " openssl crl2pkcs7 -nocrl -certfile  {{ os_cm_new_cert_out }} | openssl pkcs7 -print_certs -text -noout"
+
+- name: Remove Openstack Cloud Controller Manager TLS Secret if it exists
+  command: "{{ kubectl }} delete secret {{ os_cm_tls_secret_name }} -n kube-system"
+  when: os_cm_secret.rc == 0
+
+- name: Create Openstack Cloud Controller Manager TLS secret
+  command: "{{ kubectl }} create secret tls {{ os_cm_tls_secret_name }} --cert {{ os_cm_new_cert_out }} --key {{ os_cm_new_cert_key }} -n kube-system"
+
+- name: Check if Openstack Cloud Controller Manager Daemonset exists
+  command: "{{ kubectl }} get ds openstack-cloud-controller-manager -n kube-system -o yaml"
+  register: os_cm_ds
+  ignore_errors: true
+  changed_when: false
+
+- name: Restart Openstack Cloud Controller Manager if it exists
+  command: "{{ kubectl }} rollout restart ds openstack-cloud-controller-manager -n kube-system"
+  when: os_cm_ds.rc == 0
+
+- name: Delete temporary directory
+  file:
+    path: "{{ os_cm_tmp.path }}"
+    state: absent
+  when: os_cm_tmp.path is defined

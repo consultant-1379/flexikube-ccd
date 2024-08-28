@@ -1,0 +1,23 @@
+---
+# common defaults file for kubernetes
+
+# kubernetes version used to configure kubeadm (kubeadm-cfg.yml)
+#   affects image version used for kubeadm spawned containers
+# We need to have the exact image version so we will use
+#   the one from the apiserver. All image version need to be the same
+k8s_version: "v{{ opt_kubernetes_version }}"
+
+# Kubernetes commands
+kubectl_path: /usr/local/bin/kubectl
+kubeadm_cmd: /usr/local/bin/kubeadm
+
+kube_config_dir: /etc/kubernetes
+kube_manifest_dir: "{{ kube_config_dir }}/manifests"
+kube_cert_dir: "{{ kube_config_dir }}/pki"
+erikube_config_dir: "{{ kube_config_dir }}/erikube"
+
+# Secret encryption configuratoin
+kube_cryptprov_cfg_file: "{{ erikube_config_dir }}/cryptprov-config.yaml"
+
+# kubeadm variables
+kubeadm_repo: "{{ kube_image_prefix[:-1] }}"

@@ -1,0 +1,14 @@
+---
+- name: Deploy cloud cluster autoscaler
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+  - include_vars: ../../common/container-list.json
+  vars:
+    cluster_autoscaler_image: "{{ kube_image_prefix }}{{ containers.erikube.cluster_autoscaler }}"
+
+  roles:
+    - role: cluster-autoscaler
+      when: (azure_enable_cloud_provider | default('false') | bool) or
+            (cloud_provider | default('') == "aws")
+

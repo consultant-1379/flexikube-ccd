@@ -1,0 +1,14 @@
+---
+required_packages:
+  - conntrack-tools
+  - ebtables
+  - ethtool
+  - nfs-utils
+  - openssl
+  - socat
+  - e2fsprogs
+  - xfsprogs
+  - irqbalance
+  - httpd-tools
+  - jq
+  - ceph-common

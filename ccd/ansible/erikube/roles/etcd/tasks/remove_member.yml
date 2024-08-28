@@ -1,0 +1,33 @@
+---
+- name: Get etcd member id
+  shell: source /etc/profile.d/etcdctl.sh && etcdctl3 member list | grep {{ etcd_hostname }} | awk -F ',' '{print $1}'
+  args:
+    executable: /bin/bash
+  register: member_id
+  failed_when: member_id.rc != 0
+  changed_when: false
+
+- name: Store member id
+  set_fact:
+    memberid: "{{ member_id.stdout }}"
+  when: member_id.stdout != ''
+
+- name: Get etcd member id
+  shell: source /etc/profile.d/etcdctl.sh && etcdctl3 member list | grep unstarted | awk -F ',' '{print $1}'
+  args:
+    executable: /bin/bash
+  register: member_id
+  failed_when: member_id.rc != 0 or member_id.stdout == ''
+  changed_when: false
+  when: member_id.stdout == ''
+
+- name: Store member id
+  set_fact:
+    memberid: "{{ member_id.stdout }}"
+  when: member_id.stdout is defined and member_id.stdout != ''
+
+- name: Remove etcd member
+  shell: source /etc/profile.d/etcdctl.sh && etcdctl3 member remove {{ memberid }}
+  args:
+    executable: /bin/bash
+  when: memberid != ''

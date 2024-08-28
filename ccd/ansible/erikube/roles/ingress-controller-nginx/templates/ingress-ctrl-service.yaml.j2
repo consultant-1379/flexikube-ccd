@@ -1,0 +1,50 @@
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ ingressctrl_servicename }}
+  namespace: {{ ingressctrl_namespace }}
+  annotations:
+{% if ingressctrl_service_type == "LoadBalancer" %}
+{% if ingressctrl_loadbalancer_ip is defined %}
+    metallb.universe.tf/loadBalancerIPs: {{ ingressctrl_loadbalancer_ip }}
+{% endif %}
+{% endif %}
+    {{ ingressctrl_service_annotations | indent() }}
+spec:
+  type: {{ ingressctrl_service_type }}
+{% if ingressctrl_service_type == "LoadBalancer" %}
+  allocateLoadBalancerNodePorts: {{ ingressctrl_allocate_node_port }}
+{% endif %}
+{% if ingressctrl_cluster_ip_defined %}
+{% if ipv6_default  %}
+  clusterIP: {{ ingressctrl_cluster_ipv6 }}
+{% else %}
+  clusterIP: {{ ingressctrl_cluster_ipv4 }}
+{% endif %}
+{% if k8s_ip_version == "dualstack" %}
+  clusterIPs:
+{% if ipv6_default  %}
+  - {{ ingressctrl_cluster_ipv6 }}
+  - {{ ingressctrl_cluster_ipv4 }}
+{% else %}
+  - {{ ingressctrl_cluster_ipv4 }}
+  - {{ ingressctrl_cluster_ipv6 }}
+{% endif %}
+{% endif %}
+{% endif %}
+{% if k8s_ip_version == "dualstack" %}
+  ipFamilyPolicy: PreferDualStack
+{% endif %}
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+    protocol: TCP
+  - name: https
+    port: 443
+    targetPort: {{ ingressctrl_service_https_target }}
+    protocol: TCP
+  selector:
+    app: ingress-nginx

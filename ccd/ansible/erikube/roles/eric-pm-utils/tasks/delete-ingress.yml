@@ -1,0 +1,8 @@
+---
+- name: Delete {{ ingress_name }} ingress resources if exists
+  shell: "{{ kubectl }} delete ingress {{ ingress_name }} -n monitoring --ignore-not-found"
+  ignore_errors: yes
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (result.rc == 0 or "not found" in result.stderr)

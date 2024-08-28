@@ -1,0 +1,53 @@
+---
+# prevent multiple password lookups
+- set_fact:
+    pg_conf: "{{ pg_config }}"
+
+- name: Check for existing secret
+  command: "{{ kubectl }} -n {{ pg_namespace }} get secret {{ pg_secret }}"
+  register: get_secret
+  failed_when: false
+  changed_when: false
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (get_secret.rc == 0 or "not found" in get_secret.stderr)
+
+- block:
+  - name: Create temporary config directory
+    tempfile:
+      state: directory
+      suffix: postgres
+    register: tempdir_postgres
+
+  - name: Store postgres config to temporary file
+    copy:
+      content: "{{ item.value }}"
+      dest: "{{ tempdir_postgres.path }}/{{ item.key }}"
+    with_dict: "{{ pg_conf }}"
+    no_log: true
+
+  - name: Set no files
+    set_fact:
+      filelist: ""
+
+  - name: Create config content string
+    set_fact:
+      filelist: "{{ filelist }} --from-file={{ tempdir_postgres.path }}/{{ item.key }}"
+    with_dict: "{{ pg_conf }}"
+    no_log: true
+
+  - name: Create Postgres secret in k8s cluster
+    shell: >-
+      {{ kubectl }} create secret generic {{ pg_secret }} --namespace {{ pg_namespace }} {{ filelist }}
+    register: create_secret
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: create_secret.rc == 0
+
+  - name: Delete temporary file
+    file:
+      path: "{{ tempdir_postgres.path }}"
+      state: absent
+    when: tempdir_postgres.path is defined
+
+  when: (get_secret.rc != 0 and "not found" in get_secret.stderr)

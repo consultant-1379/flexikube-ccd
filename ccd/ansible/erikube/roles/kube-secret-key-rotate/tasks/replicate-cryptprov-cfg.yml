@@ -1,0 +1,20 @@
+# replicate config from primary to secondary masters
+
+- name: Slurp crypto cfg from first master
+  slurp:
+    src: "{{ kube_cryptprov_cfg_file }}"
+  register: cryptprov_conf
+  delegate_to: "{{ first_master }}"
+  become: yes
+
+- name: Write out crypto cfg
+  copy:
+    dest: "{{ kube_cryptprov_cfg_file }}"
+    content: "{{ cryptprov_conf['content'] | b64decode }}"
+    owner: root
+    group: root
+    mode: 0600
+  no_log: true
+  when:
+    - inventory_hostname != first_master
+  become: yes

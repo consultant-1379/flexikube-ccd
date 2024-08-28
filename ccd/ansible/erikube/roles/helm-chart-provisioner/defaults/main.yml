@@ -1,0 +1,8 @@
+---
+
+erikube_client_context: "{{ docker_cmd }} run --rm --net=host -v /etc/kubernetes:/kubecluster -v {{ k8s_helm_file_loc }}:/charts"
+helm_binary: "helm"
+helm: "{{ erikube_client_context }} {{ erikube_client_image }} {{ helm_binary }}"
+helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '300s' }}"
+retries_10_sec: 60
+chart_retrieval_timeout: 90

@@ -1,0 +1,15 @@
+# See https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux_atomic_host/7/html/managing_containers/managing_storage_with_docker_formatted_containers
+- fail:
+    msg: "When docker_storage_driver is devicemapper, docker_dev_mapper_device cannot be empty."
+  when:
+    - docker_storage_setup
+    - docker_storage_driver == "devicemapper"
+    - docker_dev_mapper_device == ""
+
+- name: docker-storage-setup
+  template: >
+    src='docker-storage-setup.j2'
+    dest='/etc/sysconfig/docker-storage-setup'
+    owner="{{ file_default_owner }}"
+    group="{{ file_default_group }}"
+    mode="{{ file_default_mode }}"

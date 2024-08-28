@@ -1,0 +1,5 @@
+---
+# tasks file for calicoctl-network-policy
+
+- name: "{{ calicoctl_policy_action | capitalize }} Calicoctl"
+  include_tasks: "{{ role_path }}/tasks/{{ calicoctl_policy_action }}.yml"

@@ -1,0 +1,27 @@
+---
+
+- name: "Generate inventory file based on data retrieved from OpenStack into {{ os_inventory_path }}/{{ os_inventory_filename }}"
+  become: no
+  template:
+    src: os_inventory.j2
+    dest: "{{ os_inventory_path }}/{{ os_inventory_filename }}"
+    mode: 0775
+
+- name: "Create {{ os_inventory_path }}/group_vars folder"
+  become: no
+  file:
+    path: "{{ os_inventory_path }}/group_vars"
+    state: directory
+    mode: 0775
+
+- name: "Load {{ ansible_extra_vars_file_path }} in variable"
+  include_vars:
+    file: "{{ ansible_extra_vars_file_path }}"
+    name: extra_vars
+
+- name: "Generate {{ os_inventory_path }}/group_vars/all file"
+  become: no
+  template:
+    src: all.j2
+    dest: "{{ os_inventory_path }}/group_vars/all"
+    mode: 0775

@@ -1,0 +1,102 @@
+---
+- import_playbook: playbooks/ansible-check.yml
+
+- name: Gather facts as non root
+  hosts: all
+  gather_facts: yes
+
+# Get container list
+- import_playbook: playbooks/get-container-list.yml
+
+- name: Create directory for storing eccd logs
+  hosts: all
+  become: yes
+  tasks:
+    - name: Create eccd folder under /var/log/ where the deployment logs could be collected
+      file:
+        path: "/var/log/eccd"
+        state: directory
+        mode: "0755"
+
+- import_playbook: playbooks/conf-gates.yml
+- import_playbook: playbooks/network-upgrade.yml
+
+# Runs host prepare when given appropriate flag
+# [WARNING]: This playbook requires connection to internet
+- import_playbook: playbooks/host-prepare.yml
+  when: prepare_host | default(false) | bool
+  vars:
+    upgrading: true
+
+- import_playbook: playbooks/cinder.yml
+- import_playbook: playbooks/manila.yml
+- import_playbook: playbooks/ingressctrl-upgrade.yml
+- import_playbook: playbooks/cr-registry-upgrade.yml
+
+- import_playbook: playbooks/kube-api-vip-upgrade.yml
+# Upgrade before kube-upgrade as PodSecurityPolicies are not supported.
+- import_playbook: playbooks/victoria-metrics-pm-upgrade.yml
+# Create PSS rule directory and files
+- import_playbook: playbooks/kube-pss-upgrade.yml
+
+- import_playbook: playbooks/kube-upgrade.yml
+- import_playbook: playbooks/configure-containerd-svc.yml
+- import_playbook: playbooks/secret-key-rotate.yml
+
+# Master node restart issue fix CCD-9103
+- import_playbook: playbooks/configure-docker-svc.yml
+
+- import_playbook: playbooks/isp-upgrade-start.yml
+
+# Those playbooks perform an upgrade of an erikube release to another
+- import_playbook: playbooks/etcd-upgrade.yml
+- import_playbook: playbooks/kubelet-server-cert.yml
+## CCD-10355 Fix Kubernetes Version Disclosure KHV002
+- import_playbook: playbooks/fix-k8-version-disclosure.yml
+#- import_playbook: playbooks/network-upgrade.yml
+- import_playbook: playbooks/calico_restart.yml
+- import_playbook: playbooks/nat64-upgrade.yml
+- import_playbook: playbooks/ingress-lb-upgrade.yml
+  when: deploy_ingressctrl | default(true) | bool
+
+- import_playbook: playbooks/dex-upgrade.yml
+- import_playbook: playbooks/authclient-upgrade.yml
+  when: dex_enabled is defined and dex_enabled and auth_client_enabled is defined and auth_client_enabled
+
+- import_playbook: playbooks/node-feature-discovery-upgrade.yml
+
+- import_playbook: playbooks/whereabouts-ipam.yml
+
+- import_playbook: playbooks/ecfe-upgrade.yml
+- import_playbook: playbooks/object-storage-mn-upgrade.yml
+
+- import_playbook: playbooks/prometheus-webhook-snmp-upgrade.yml
+- import_playbook: playbooks/eric-pm-3pp-upgrade.yml
+
+- import_playbook: playbooks/eric-pmbr-upgrade.yml
+- import_playbook: playbooks/set-audit-log-level.yml
+
+- import_playbook: playbooks/label.yml
+- import_playbook: playbooks/label-node-id.yml
+
+- import_playbook: playbooks/license-management-upgrade.yml
+  when: ccd_licensing_enabled | default(true) | bool
+
+# for 2.4 to 2.5:
+- import_playbook: playbooks/csi-rbd-provisioner-upgrade.yml
+
+# Prometheus is not needed to upgrade: only Etcd cert (in secret) is deployed
+
+- import_playbook: playbooks/sriov-network-device-plugin-upgrade.yml
+- import_playbook: playbooks/metrics-server-upgrade.yml
+
+- import_playbook: playbooks/isp-logger-deploy.yml
+
+- import_playbook: playbooks/calicoctl-upgrade.yml
+
+- import_playbook: playbooks/isp-upgrade-end.yml
+- import_playbook: playbooks/helm2-purge.yml
+- import_playbook: playbooks/multus-log-rotate.yml
+
+- import_playbook: playbooks/node-problem-detector-upgrade.yml
+  when: node_problem_detector_enabled | default(false) | bool

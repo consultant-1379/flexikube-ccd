@@ -1,0 +1,71 @@
+---
+- name: Prepare certificate for metrics-server
+  hosts: master[0]
+  become: yes
+  roles:
+   - erikube-defaults
+  tasks:
+  - name: Create temp workspace directory
+    command: mktemp -d /tmp/metrics-server-XXXXXX
+    register: mktemp
+    changed_when: False
+  - name: Prepare metrics server certificate
+    include_tasks: "roles/metrics-server/tasks/update-certificate.yml"
+  - name: Delete temp directory
+    file:
+      name: "{{ mktemp.stdout }}"
+      state: absent
+    changed_when: False
+
+- name: Deploy metrics-server
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+  vars:
+    - tarball_name: "{{ helm_charts.metrics_server.name + '-' + helm_charts.metrics_server.version + '.tgz' }}"
+  roles:
+   - erikube-defaults
+   - role: helm-chart-provisioner
+     when: metrics_server_enabled | default(true) | bool
+     vars:
+       - chart_name: metrics-server
+       - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '1200s' }}"
+       - kube_namespace: kube-system
+       - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+       - state: installed
+       - values:
+           imagePullSecrets:
+             - name: local-registry-secret
+           args:
+             - --tls-cert-file=/etc/tls-cert/tls.crt
+             - --tls-private-key-file=/etc/tls-cert/tls.key
+           extraVolumes:
+             - name: metrics-server-tls
+               secret:
+                 defaultMode: 420
+                 secretName: metrics-server-tls
+           extraVolumeMounts:
+             - name: metrics-server-tls
+               mountPath: /etc/tls-cert
+               readOnly: true
+           rbac:
+             create: true
+           metrics:
+             enabled: true
+           serviceAccount:
+             create: true
+             name: "metrics-server"
+           apiService:
+             create: true
+           image:
+             repository: "{{ metrics_server_image | default(kube_image_prefix ~ containers.monitoring.metrics_server) | regex_replace('server:.*', 'server') }}"
+             tag: "{{ metrics_server_image | default(containers.monitoring.metrics_server) | regex_replace('.*server:') }}"
+           replicas: "{{ metrics_server_replica_count }}"
+   - role: helm-chart-provisioner
+     when: not metrics_server_enabled | default(true) | bool
+     vars:
+       - chart_name: metrics-server
+       - kube_namespace: kube-system
+       - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+       - state: purged

@@ -1,0 +1,19 @@
+- name: Add workers to Ansible inventory if not exist
+  block:
+    - name: Get the worker IP addresses
+      shell: "{{ kubectl }} get nodes -l node-role.kubernetes.io/control-plane!='' -o wide | awk 'NR>1 {print $6}'"
+      register: get_worker_ips
+      delegate_to: "{{ groups.reachable_master[0] | d(groups.master[0]) }}"
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: get_worker_ips.rc == 0
+
+    - set_fact:
+       worker_ips: "{{ get_worker_ips.stdout_lines }}"
+
+    - name: add workers to worker group
+      add_host:
+        hostname: "{{ item }}"
+        groups: worker
+      with_items: "{{ worker_ips }}"
+  when: "'worker' not in groups"

@@ -1,0 +1,119 @@
+---
+- name: Deploy ADP DNS64
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+  vars:
+    - kube_image_prefix: "{{ docker_registry_host | default(default_registry) }}/"
+    - tarball_name: "{{ helm_charts.eric_tm_dns64.name + '-' + helm_charts.eric_tm_dns64.version + '.tgz' }}"
+  roles:
+    - erikube-defaults
+    - role: helm-chart-provisioner
+      when: dns64_enabled | default(false) | bool
+      vars:
+        - chart_name: eric-tm-dns64
+        - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '600s' }}"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - state: installed
+        - kube_namespace: kube-system
+        - values:
+            global:
+              registry:
+                # Remove the / from the registry url
+                url: "{{ kube_image_prefix | regex_replace('\\/$', '') }}"
+            imageCredentials:
+              repoPath: ""
+              pullSecret: "local-registry-secret"
+            rbac:
+              create: true
+            images:
+              dns64:
+                name: "{{ containers.erikube.eric_tm_dns64.split(':')[0] }}"
+                tag: "{{ containers.erikube.eric_tm_dns64.split(':')[1] }}"
+            clusterName: "{{ dns64.clusterName }}"
+            prefix: "{{ dns64.prefix }}"
+            lookupIP: "{{ dns64.lookupIP }}"
+            proxy: "{{ dns64.proxy }}"
+            clusterIP: "{{ dns64.clusterIP }}"
+
+- name: Configure DNS64
+  hosts: master[0]
+  become: yes
+  roles:
+  - erikube-defaults
+  tasks:
+  - name: Set CoreDNS to forward to DNS64
+    block:
+    - name: Create temp workspace directory
+      command: mktemp -d /tmp/coredns-XXXXXX
+      register: corednstmp
+      changed_when: False
+
+    - name: Get coreDNS configMap
+      register: corefileoutput
+      shell: >
+        /usr/local/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf
+        get cm -n kube-system coredns -o yaml > {{ corednstmp.stdout }}/coredns_configmap.yaml
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: (corefileoutput.rc == 0 or "not found" in corefileoutput.stderr)
+      become: yes
+      changed_when: false
+
+    - name: Set forwarding to DNS64 cluster IP in coreDNS configmap
+      replace:
+        path: "{{ corednstmp.stdout }}/coredns_configmap.yaml"
+        regexp: '^(\s+)forward[^\n{]+(.*)$'
+        replace: '\1forward . {{ dns64.clusterIP }} \2'
+
+    - name: Remove creationTimestamp at coreDNS configmap
+      lineinfile:
+        path: "{{ corednstmp.stdout }}/coredns_configmap.yaml"
+        regexp: '(\s+)creationTimestamp: .*'
+        state: absent
+
+    - name: Apply coreDNS configmap
+      shell: >
+        /usr/local/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf
+        apply -f {{ corednstmp.stdout }}/coredns_configmap.yaml
+
+    - name: Delete temp directory
+      file:
+        name: "{{ corednstmp.stdout }}"
+        state: absent
+      changed_when: False
+
+    - name: Get CoreDNS pods
+      register: coredns_pods
+      shell: >
+        /usr/local/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf
+        get pods -n kube-system -l k8s-app=kube-dns -o name
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: coredns_pods.rc == 0
+      become: yes
+
+    - name: Increase memory limit for CoreDNS pods
+      shell: >
+        /usr/local/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf
+        set resources deployment coredns -c=coredns --limits=memory=340Mi -n kube-system
+      register: set_resources
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: set_resources.rc == 0
+      become: yes
+
+    - name: Restart CoreDNS pods
+      shell: >
+        /usr/local/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf
+        delete -n kube-system {{ item }}
+      with_items: "{{ coredns_pods.stdout_lines }}"
+      register: restart_coredns_pods
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: restart_coredns_pods.rc == 0
+      become: yes
+      ignore_errors: yes
+    when:
+    - dns64_default is defined and dns64_default

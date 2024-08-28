@@ -1,0 +1,156 @@
+---
+# Scale-in of master nodes should only be done in odd numbers to maintain quorum and reliability of the cluster.
+# Valid :-  Scale-in from 3 to 1 nodes, 5 to 3 nodes etc
+# Invalid :- Scale-in from 3 to 2 nodes, 4 to 3 nodes etc
+
+- import_playbook: playbooks/ansible-check.yml
+
+- name: Gather facts
+  hosts: master, etcd
+  gather_facts: yes
+
+- name: Scale in kubernetes worker nodes
+  hosts: remove_worker
+  become: yes
+  serial: 1
+  any_errors_fatal: true
+  vars:
+    - master_node: "{{ groups.master.0 }}"
+  roles:
+    - erikube-defaults
+  tasks:
+    - name: Check if worker node exists in a cluster
+      delegate_to: "{{ master_node }}"
+      shell: "{{ kubectl }} get node --no-headers {{ ansible_nodename }} | awk '{print $3}' | grep -v control-plane"
+      register: kubectl_out
+      changed_when: False
+      failed_when: kubectl_out.rc != 0 or kubectl_out.stdout == ''
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: (kubectl_out.rc == 0 or "not found" in kubectl_out.stderr)
+
+    - name: Check if more than 1 healthy worker node available
+      delegate_to: "{{ master_node }}"
+      shell: >
+        {{ kubectl }} get nodes --no-headers |
+        grep -v {{ ansible_nodename }} |
+        awk '{print $2 " " $3}' |
+        grep -c -v
+        {{ '' if use_master_for_workloads | default(false) else '-e control-plane' }}
+        -e NotReady -e SchedulingDisabled -e MemoryPressure -e DiskPressure
+      register: kubectl_out
+      changed_when: False
+      failed_when: kubectl_out.rc != 0 or kubectl_out.stdout == "0"
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: (kubectl_out.rc == 0 or "not found" in kubectl_out.stderr)
+
+    - name: Drain the worker node
+      include_role:
+        name: kube-common
+        tasks_from: drain
+
+    - name: Clean up the worker node
+      include_role:
+        name: kube-purge
+
+
+- name: Scale in kubernetes master nodes
+  hosts: remove_master
+  become: yes
+  serial: 1
+  any_errors_fatal: true
+  roles:
+    - erikube-defaults
+  tasks:
+    # Maintain the group for keeping track of removed master nodes.
+    # Used for updating HA LB's  of other master nodes one by one.
+    - name: Add master node to 'removed_masters' group
+      add_host:
+        name: "{{ inventory_hostname }}"
+        groups: removed_master
+
+    - set_fact:
+        master_nodes: "{{ master_nodes | default(groups.master) | difference(groups.removed_master) }}"
+
+    - name: Check if master node exists in a cluster
+      delegate_to: "{{ master_nodes.0 }}"
+      shell: "{{ kubectl }} get node --no-headers {{ ansible_nodename }} | awk '{print $3}' | grep control-plane"
+      register: kubectl_out
+      changed_when: False
+      failed_when: kubectl_out.rc != 0 or kubectl_out.stdout == ''
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: (kubectl_out.rc == 0 or "not found" in kubectl_out.stderr)
+
+    - name: Check if more than 1 healthy master node available
+      delegate_to: "{{ master_nodes.0 }}"
+      shell: >
+        {{ kubectl }} get nodes --no-headers |
+        grep -v {{ ansible_nodename }} |
+        awk '{print $2 " " $3}' |
+        grep control-plane |
+        grep -c -v -e NotReady -e SchedulingDisabled -e MemoryPressure -e DiskPressure
+      register: kubectl_out
+      changed_when: False
+      failed_when: kubectl_out.rc != 0 or kubectl_out.stdout == "0"
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: (kubectl_out.rc == 0 or "not found" in kubectl_out.stderr)
+
+    - name: Remove master node from kube LB upstream servers
+      include_role:
+        name: kube-lb
+        apply:
+           delegate_to: "{{ item }}"
+      vars:
+        kube_lb_upstream_servers: "{{ master_nodes }}"
+      with_items: "{{ master_nodes }}"
+
+    - name: Drain the master node
+      vars:
+        - master_node: "{{ master_nodes.0 }}"
+      include_role:
+        name: kube-common
+        tasks_from: drain
+
+    - name: Remove VIP and kube API loadbalancer
+      include_role:
+        name: kube-api-vip
+        tasks_from: purge
+
+    - name: Clean up the master node
+      include_role:
+        name: kube-purge
+
+
+- name: Scale in etcd members
+  hosts: remove_etcd
+  become: yes
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Remove the etcd member
+      include_role:
+        name: etcd
+        tasks_from: remove_member
+
+    - name: Clean up the etcd node
+      include_role:
+        name: etcd
+        tasks_from: purge
+
+- name: Update calico ETCD endpoint configuration.
+  hosts: master:!remove_master
+  roles:
+    - erikube-defaults
+  pre_tasks:
+    - include_vars: roles/etcd/defaults/main.yml
+  tasks:
+    - include_role:
+        name: network_plugin
+      vars:
+        etcd_peers: "{{ groups.etcd | difference(groups.remove_etcd) }}"
+        plugin_action: "update-config"
+      when: groups.remove_etcd | default([]) | length > 0
+      run_once: True

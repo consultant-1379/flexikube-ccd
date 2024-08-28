@@ -1,0 +1,12 @@
+---
+- name: Gather facts as non root
+  hosts: master[0]
+  gather_facts: yes
+
+- name: Create Cinder Storage Class
+  hosts: master[0]
+  become: yes
+  tasks:
+    - include_role:
+        name: cinder
+        tasks_from: purge

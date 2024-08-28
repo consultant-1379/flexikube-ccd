@@ -1,0 +1,57 @@
+---
+- include_vars: "{{ item }}"
+  with_first_found:
+    - files:
+      - "../vars/{{ ansible_distribution }}.yml"
+      - "../vars/{{ ansible_os_family }}.yml"
+      skip: True
+
+- block:
+  - name: set docker storage setup fact
+    set_fact:
+      docker_storage_setup: "{{ docker_storage_setup }}"
+
+  - include: docker-registry-setup.yml
+    when:
+      - docker_registry_trust_setup | default(true)
+      - docker_registry_ip is defined
+      - docker_registry_cn is defined
+
+  - name: setup docker storage
+    include: docker-storage-setup.yml
+    when: docker_storage_setup and ansible_os_family == 'RedHat'
+
+    # The recommended way to set docker settings is to use /etc/docker/daemon.json .
+    # Docker is incapable of merging runtime flags and daemon.json settings,
+    # so we need to clear /etc/sysconfig/docker of any configuration on RedHat/CentOS .
+    # https://docs.docker.com/config/daemon/#troubleshoot-conflicts-between-the-daemonjson-and-startup-scripts
+  - name: clear old style docker config
+    copy:
+      src: etc/sysconfig/docker
+      dest: /etc/sysconfig/docker
+    when: ansible_os_family == 'RedHat'
+
+  - file:
+      path: /etc/docker
+      state: directory
+      mode: 0755
+
+    # https://docs.docker.com/v1.13/engine/reference/commandline/dockerd/#/linux-configuration-file
+  - name: generate docker config
+    template:
+      src: etc/docker/daemon.json.j2
+      dest: /etc/docker/daemon.json
+
+  - name: Start the Docker service
+    service:
+      name: docker
+      enabled: yes
+      state: restarted
+      daemon_reload: yes
+
+  - name: Login to ACR
+    command: >
+      docker login {{ docker_registry_host }} -u {{ docker_registry_user }} -p {{ docker_registry_pwd }}
+    when: docker_registry_user is defined
+
+  when: not is_atomic

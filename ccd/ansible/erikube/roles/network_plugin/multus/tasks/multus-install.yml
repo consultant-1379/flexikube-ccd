@@ -1,0 +1,51 @@
+---
+
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/erikube-k8s-XXXXXX
+  register: mktemp
+  changed_when: False
+
+- set_fact:
+    k8s_file_loc: "{{ mktemp.stdout }}"
+
+- name: Prepare multus manifest
+  template:
+    src: "multus.yml.j2"
+    dest: "{{ k8s_file_loc }}/multus.yml"
+
+# Note: deleting the replication controller is only necessary when you upgrade
+# from version <= 1.0.0. Going forward upgrading from 1.1.0 the delete will
+# fail because that replication controller will no longer exist. However,
+# Ansible will keep executing because of failed_when: False, so this should not
+# cause any issues even when upgrading from 1.1.0 to 1.2.0. However, at some
+# point in the future, i.e., when upgrades from <= 1.0.0 are no longer
+# supported, we should remove this task.
+- name: Delete old replication controller
+  command: "{{ kubectl }} delete rc multus-controller -n kube-system"
+  become: yes
+  failed_when: False
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (result.rc == 0 or "not found" in result.stderr)
+
+- name: Deploy multus cni
+  command: "{{ kubectl }} apply -f {{ k8s_file_loc }}/multus.yml"
+  become: yes
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+
+- name: Delete temp directory
+  file:
+    name: "{{ mktemp.stdout }}"
+    state: absent
+  changed_when: False
+
+- include_role:
+    name: version_check
+  vars:
+    namespace: kube-system
+    pod_images_dict:
+      kube-multus-ds-amd64: "{{ multus_cni_image }}"

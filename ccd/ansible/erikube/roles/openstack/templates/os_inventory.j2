@@ -1,0 +1,19 @@
+# Invenotry file generated based on gathed facts from OpenStack
+
+{% for host in hostvars %}
+{{ host }}  ansible_host={{ hostvars[host]['ansible_host'] }}
+{% endfor %}
+
+{% if private_cicd_registry is defined %}
+registry ansible_host={{ private_cicd_registry }}
+[registry]
+registry
+{% endif %}
+
+{% for group in groups %}
+[{{ group }}]
+{%  for host in groups[group] %}
+{{ host }}
+{%  endfor %}
+
+{% endfor %}

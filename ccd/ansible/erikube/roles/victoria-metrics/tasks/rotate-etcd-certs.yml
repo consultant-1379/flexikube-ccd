@@ -1,0 +1,80 @@
+---
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/erikube-k8s-XXXXXX
+  register: mktemp
+  changed_when: False
+
+- set_fact:
+    etcd_cert_config_dir: "{{ mktemp.stdout }}/certs"
+
+- name: Create new client etcd certificates (victoria_metrics)
+  vars:
+    etcd_cert_prefix: "etcd-"
+    etcd_cert_subdir: "victoria_metrics"
+    etcd_client_cert_cn: "victoria_metrics"
+  import_role:
+    name: etcd
+    tasks_from: get-client-cert
+
+- name: Copy new etcd key file
+  become: yes
+  copy:
+    src: "{{ etcd_cert_config_dir }}/etcd-client.key"
+    dest: "{{ etcd_cert_config_dir }}/etcd-key"
+    remote_src: true
+    mode: 0600
+
+- name: Copy new etcd cert file
+  become: yes
+  copy:
+    src: "{{ etcd_cert_config_dir }}/etcd-client.crt"
+    dest: "{{ etcd_cert_config_dir }}/etcd-cert"
+    remote_src: true
+    mode: 0644
+
+- name: Copy etcd ca file
+  become: yes
+  copy:
+    src: "{{ etcd_cert_config_dir }}/etcd-ca.crt"
+    dest: "{{ etcd_cert_config_dir }}/etcd-ca"
+    remote_src: true
+    mode: 0644
+
+- name: Delete unused files
+  become: yes
+  file:
+    path: "{{ etcd_cert_config_dir }}/{{ item }}"
+    state: absent
+  with_items:
+    - etcd-client.key
+    - etcd-client.crt
+    - etcd-ca.crt
+    - etcd-client.csr
+
+- name: Update secret with the renewed certificates
+  shell:
+    executable: /bin/bash
+    cmd: "{{ kubectl }} --namespace {{ victoria_metrics_namespace }} create secret \
+          generic {{ victoria_metrics_secret_name }} \
+          --from-file={{ etcd_cert_config_dir }} \
+          --dry-run=client -o yaml | {{ kubectl }} apply -f -"
+  become: yes
+
+- name: Delete temp directory
+  file:
+    name: "{{ mktemp.stdout }}"
+    state: absent
+  become: yes
+  changed_when: False
+
+- name: Get timestamp to use as restart annotation
+  command: date +%Y%m%d%H%M%S
+  register: timestamp
+
+- name: Rolling upgrade of eric-victoria-metrics-agent pods
+  become: yes
+  vars:
+    deployment: "eric-victoria-metrics-agent"
+  shell:
+    executable: /bin/bash
+    cmd: "{{ kubectl }} patch deploy -n {{ victoria_metrics_namespace }} {{ deployment }} -p '{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"certs-restart\": \"{{ timestamp.stdout }}\"}}}}}';"

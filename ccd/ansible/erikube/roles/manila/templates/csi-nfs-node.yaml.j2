@@ -1,0 +1,134 @@
+---
+# This YAML file contains driver-registrar & csi driver nodeplugin API objects
+# that are necessary to run CSI nodeplugin for nfs
+kind: DaemonSet
+apiVersion: apps/v1
+metadata:
+  name: csi-nfs-node
+  namespace: {{ manila_namespace }}
+spec:
+  updateStrategy:
+    rollingUpdate:
+      maxUnavailable: 1
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: csi-nfs-node
+  template:
+    metadata:
+      labels:
+        app: csi-nfs-node
+    spec:
+      hostNetwork: true  # original nfs connection would be broken without hostNetwork setting
+      dnsPolicy: ClusterFirstWithHostNet
+      nodeSelector:
+        kubernetes.io/os: linux
+      tolerations:
+        - operator: "Exists"
+      imagePullSecrets:
+        - name: local-registry-secret
+      containers:
+        - name: liveness-probe
+          image: {{ csi_nfs_livenessprobe_image }}
+          args:
+            - --v={{ manila_csi_loglevel }}
+            - --csi-address={{ csi_nfs_csi_address }}
+            - --probe-timeout=3s
+            - --health-port=29653
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+          resources:
+            limits:
+              memory: 100Mi
+            requests:
+              cpu: 10m
+              memory: 20Mi
+        - name: node-driver-registrar
+          image: {{ csi_nsf_node_driver_registrar_image }}
+          args:
+            - --v={{ manila_csi_loglevel }}
+            - --csi-address={{ csi_nfs_csi_address }}
+            - --kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)
+          livenessProbe:
+            exec:
+              command:
+                - /csi-node-driver-registrar
+                - --kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)
+                - --mode=kubelet-registration-probe
+            initialDelaySeconds: 30
+            timeoutSeconds: 15
+          env:
+            - name: DRIVER_REG_SOCK_PATH
+              value: {{ csi_nfs_driver_reg_sock_path }}
+            - name: KUBE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+            - name: registration-dir
+              mountPath: /registration
+          resources:
+            limits:
+              memory: 100Mi
+            requests:
+              cpu: 10m
+              memory: 20Mi
+        - name: nfs
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["SYS_ADMIN"]
+            allowPrivilegeEscalation: true
+          image: {{ csi_nfs_image }}
+          args:
+            - "-v=5"
+            - "--nodeid=$(NODE_ID)"
+            - "--endpoint=$(CSI_ENDPOINT)"
+          env:
+            - name: NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: CSI_ENDPOINT
+              value: {{ csi_nfs_csi_endpoint }}
+          ports:
+            - containerPort: 29653
+              name: healthz
+              protocol: TCP
+          livenessProbe:
+            failureThreshold: 5
+            httpGet:
+              path: /healthz
+              port: healthz
+            initialDelaySeconds: 30
+            timeoutSeconds: 10
+            periodSeconds: 30
+          imagePullPolicy: "IfNotPresent"
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+            - name: pods-mount-dir
+              mountPath: {{ csi_nfs_pods_mount_dir }}
+              mountPropagation: "Bidirectional"
+          resources:
+            limits:
+              memory: 300Mi
+            requests:
+              cpu: 10m
+              memory: 20Mi
+      volumes:
+        - name: socket-dir
+          hostPath:
+            path: {{ manila_fwd_node_plugin_endpoint }}
+            type: DirectoryOrCreate
+        - name: pods-mount-dir
+          hostPath:
+            path: {{ csi_nfs_pods_mount_dir }}
+            type: Directory
+        - name: registration-dir
+          hostPath:
+            path: {{ manila_csi_registration_dir }}
+            type: Directory

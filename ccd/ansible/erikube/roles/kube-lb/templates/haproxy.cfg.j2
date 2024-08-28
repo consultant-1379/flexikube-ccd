@@ -1,0 +1,42 @@
+global
+    maxconn 1024
+    daemon
+    log 127.0.0.1 local0
+    ssl-server-verify none
+    tune.ssl.default-dh-param 2048
+
+defaults
+    log     global
+
+    option redispatch
+    option dontlognull
+    option http-server-close
+    option http-keep-alive
+    timeout http-request    5s
+    timeout connect         5s
+    timeout client          50s
+    timeout client-fin      50s
+    timeout queue           50s
+    timeout server          50s
+    timeout server-fin      50s
+    timeout tunnel          1h
+    timeout http-keep-alive 1m
+
+
+frontend haproxy_server
+    bind {{ kube_apiserver_ip | ipwrap}}:{{ kube_apiserver_port | default(8443) }} transparent
+    mode tcp
+    option tcplog
+    tcp-request inspect-delay 5s
+    tcp-request content accept if { req.ssl_hello_type 1 }
+
+    default_backend kube_apiserver
+
+backend kube_apiserver
+    mode tcp
+    balance roundrobin
+    option tcplog
+    option tcp-check
+    {% for host in kube_lb_upstream_servers -%}
+    server {{ host }}_api_server {{ hostvars[host].k8s_ip_address | default(hostvars[host].ansible_default_ipv4.address) | ipwrap }}:{{ kube_apiserver_port }} check check-ssl verify none
+    {% endfor %}

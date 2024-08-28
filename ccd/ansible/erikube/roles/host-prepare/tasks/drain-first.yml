@@ -1,0 +1,151 @@
+---
+# these tasks are included serialized from host-prepare playbook.
+
+# run without drain if host isn't a k8s node
+- block:
+    - block:
+        - include_tasks: main.yml
+        - include_tasks: docker.yml
+      when: not manual_prepare_host
+    - block:
+      - pause:
+          prompt: "INFO: host {{ inventory_hostname }} (ip {{ ansible_host }}) is not a kubernetes node.\n
+                   Use a new window to manually perform host upgrades to {{ inventory_hostname }} at this time.\n\n
+                   When done, press <Enter> to continue to next host, or\n
+                   press 'q' or press ctrl+c and then 'a' to stop this upgrade run"
+        register: answer
+      - fail:
+          msg: "user requested abort!"
+        when:
+          - (answer.user_input | default("c") == "q") or
+            (answer.user_input | default("c") == "Q")
+
+      when: manual_prepare_host
+  when:
+    - nodeName | length == 0
+    - not ansible_host in hostvars['localhost']['prepare_completed']
+
+# run with drain if host is a k8s node
+- block:
+  - debug: msg="Host with IP {{ ansible_host }} has ansible name={{ inventory_hostname }} and is registered as node={{ nodeName }}"
+
+  - block:
+    - name: Drain node {{ nodeName }} {{ kubectl_drain_timeout_args }}
+      command: "{{ kubectl }} drain  {{ kubectl_drain_select_args }} {{ nodeName }} {{ kubectl_drain_force_args }} {{ kubectl_drain_timeout_args }}"
+      changed_when: false
+      register: drainresult
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: (drainresult.rc == 0 or "unable to drain node" in drainresult.stderr or "Error from server" in drainresult.stderr)
+    rescue:
+      - name: List pod states and locations
+        command: "{{ kubectl }} get pods -o wide --all-namespaces"
+        changed_when: false
+        register: podstatus
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: podstatus.rc == 0
+      - debug:
+          msg: "stdout: {{ podstatus.stdout_lines }} stderr: {{ podstatus.stderr_lines }}"
+      - fail:
+          msg: "Drain {{ nodeName }} failed. stdout={{ drainresult.stdout_lines }} stderr: {{ drainresult.stderr_lines }}"
+    delegate_to: "{{ first_master }}"
+
+  - block:
+    - name: Run host-prepare standard steps for {{ ansible_hostname }}
+      import_tasks: main.yml
+
+    - name: Prepare docker for  {{ ansible_hostname }}
+      import_tasks: docker.yml
+    when: not manual_prepare_host
+
+  - block:
+    - pause:
+        prompt: "INFO: host {{ inventory_hostname }} (node {{ nodeName }}) (ip {{ ansible_host }}) has been drained of activity.\n
+                 Use a new window to manually perform host upgrades to {{ inventory_hostname }} at this time.\n\n
+                 When done, press <Enter> to continue to next host, or\n
+                 press 'q' to uncordon the node then stop this upgrade run, or\n
+                 press ctrl+c and then 'a' to stop this upgrade run and leave host cordoned"
+      register: answer
+    when: manual_prepare_host
+
+  - name: Deploy erikube installer
+    include_tasks: "{{ role_path}}/../kube-common/tasks/deploy-erikube-installer.yml"
+    when: not image_based_deployment | default(false) | bool
+
+  - name: "Prepare containerd for  {{ ansible_hostname }}"
+    include_role:
+      name: containerd
+
+  - name: "Prepare crictl for  {{ ansible_hostname }}"
+    include_role:
+      name: crictl
+
+  - name: Start kubelet to have containerd as runtime
+    systemd:
+      daemon_reload: yes
+      state: restarted
+      name: kubelet
+    become: true
+
+  - name: Stop all k8s docker containers
+    become: true
+    shell: "docker stop $(docker ps -a | grep k8s_ | awk '{print $1}')"
+    ignore_errors: true
+
+  - name: Remove all k8s docker containers
+    become: true
+    shell: "docker rm -f $(docker ps -a | grep k8s_ | awk '{print $1}')"
+    ignore_errors: true
+
+  - name: Uncordon node {{ nodeName }}
+    command: "{{ kubectl }} uncordon {{ nodeName }}"
+    delegate_to: "{{ first_master }}"
+    changed_when: false
+    register: result
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: result.rc == 0
+    when: first_master != inventory_hostname
+
+  - name: Uncordon node {{ nodeName }}
+    command: "{{ kubectl }} uncordon {{ nodeName }}"
+    delegate_to: "{{ last_master }}"
+    changed_when: false
+    register: result
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: result.rc == 0
+    when: first_master == inventory_hostname
+
+  - name: pause for 2 mins after master uncordon
+    pause:
+      minutes: 2
+    when: inventory_hostname in groups['master']
+
+  - fail:
+      msg: "user requested abort!"
+    when:
+      - (answer.user_input | default("c") == "q") or
+        (answer.user_input | default("c") == "Q")
+
+  when:
+    - nodeName | length > 0
+    - not ansible_host in hostvars['localhost']['prepare_completed']
+
+- block:
+  - debug:
+      msg: "msg=Host with IP {{ ansible_host }} and ansible name={{ inventory_hostname }} has already been prepared under another name"
+  when: ansible_host in hostvars['localhost']['prepare_completed']
+
+- name: Mark {{ ansible_host }} as done
+  set_fact:
+      prepare_completed: "{{ hostvars['localhost']['prepare_completed'] | default([]) + [ ansible_host ] }}"
+  delegate_to: "{{ item }}"
+  delegate_facts: True
+  with_items:
+    - localhost
+  when: not ansible_host in hostvars['localhost']['prepare_completed']
+
+- debug:
+    msg: "Completed hosts: {{ hostvars['localhost']['prepare_completed'] }}"

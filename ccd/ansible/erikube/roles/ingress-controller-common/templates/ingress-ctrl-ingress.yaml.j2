@@ -1,0 +1,16 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ingress-{{ ingress_class }}-ingress
+  namespace: {{ kube_namespace }}
+  annotations:
+    protocol: TCP
+    namespace: {{ kube_namespace }}
+    kubernetes.io/ingress.class: none
+spec:
+  defaultBackend:
+    service:
+      name: {{ ingress_service }}
+      port:
+         number: 443

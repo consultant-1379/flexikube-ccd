@@ -1,0 +1,6 @@
+---
+- name: Check prerequisites for the host
+  block:
+    - include_tasks: validate-prerequisites.yml
+  become: yes
+  any_errors_fatal: true

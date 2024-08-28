@@ -1,0 +1,24 @@
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/erikube-k8s-XXXXXX
+  register: kubecontrollertemp
+  changed_when: False
+
+- name: Create files for kube controller manager
+  template:
+    src: "{{item}}.j2"
+    dest: "{{ kubecontrollertemp.stdout }}/{{item}}"
+  with_items:
+    - kube-controller-manager-clusterrole.yml
+
+- name: Apply modified kube controller manager clusterrole
+  shell: "{{ kubectl }} apply -f {{ kubecontrollertemp.stdout }}/kube-controller-manager-clusterrole.yml"
+  register: clusterrole
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: clusterrole.rc == 0
+
+- name: Delete temp directory
+  file:
+    name: "{{ kubecontrollertemp.stdout }}"
+    state: absent
+  changed_when: False

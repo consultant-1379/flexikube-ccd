@@ -1,0 +1,51 @@
+- name: Check if nodelocal DNS is already deployed
+  shell: >-
+    {{ kubectl }} get ds -n kube-system | grep node-local-dns | wc -l
+  become: yes
+  register: nodelocal_dns_deployed
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (nodelocal_dns_deployed.rc == 0 or "not found" in nodelocal_dns_deployed.stderr)
+
+- name: Deploy nodelocal DNS
+  when:
+    - nodelocal_dns_deployed | int == 0
+    - inventory_hostname == first_master
+  block:
+    - name: Set NodeLocal DNS IP address (IPv4)
+      set_fact:
+        kube_nodelocal_bind_addresses: "{{ nodelocalDNS_ipv4 }}"
+      when: k8s_ip_version == "ipv4" or (k8s_ip_version == "dualstack" and default_dualstack_ip_family == "ipv4")
+
+    - name: Set NodeLocal DNS IP address (IPv6)
+      set_fact:
+        kube_nodelocal_bind_addresses: "{{ nodelocalDNS_ipv6 }}"
+      when: k8s_ip_version == "ipv6" or (k8s_ip_version == "dualstack" and default_dualstack_ip_family == "ipv6")
+
+    - name: Set kube dns IP (Kube-proxy IP TABLES)
+      set_fact:
+        kube_dns_clusterip: "{{ kubelet_DNS }}"
+      when: kube_proxy_mode is not defined or kube_proxy_mode != 'ipvs'
+
+    - name: Create NodeLocalDNS config (Kube-proxy IP TABLES)
+      template:
+        src: "nodelocaldns.yaml.j2"
+        dest: "/tmp/nodelocaldns.yaml"
+      become: yes
+      when: kube_proxy_mode is not defined or kube_proxy_mode != 'ipvs'
+
+    - name: Create NodeLocalDNS config (kube-proxy IPVS)
+      template:
+        src: "nodelocaldns-ipvs.yaml.j2"
+        dest: "/tmp/nodelocaldns.yaml"
+      become: yes
+      when: kube_proxy_mode is defined and kube_proxy_mode == 'ipvs'
+
+    - name: Apply NodeLocalDNS config
+      shell: >-
+        {{ kubectl }} apply -f /tmp/nodelocaldns.yaml
+      become: yes
+      register: output
+      until: output.rc == 0
+      retries: 30
+      delay: 5

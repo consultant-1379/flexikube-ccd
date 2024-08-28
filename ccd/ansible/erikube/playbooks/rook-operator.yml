@@ -1,0 +1,60 @@
+---
+- name: Deploy Rook Operator
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+    - name: Create namespace rook-ceph
+      command: "{{ kubectl }} create namespace rook-ceph"
+      register: ns_create
+      failed_when: ns_create.rc != 0 and not ns_create.stderr.find("AlreadyExists") != -1
+      changed_when: ns_create.rc == 0
+      become: true
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: ns_create.rc == 0 or ns_create.stderr.find("AlreadyExists") != -1
+      when: rook.enabled | default (false)
+    - name: Create rook-ceph secret for accessing local registry
+      shell: |
+        {{ kubectl }} create secret docker-registry local-registry-secret \
+        --docker-server={{ 'registry.eccd.local:5000' if local_registry_user is defined and local_registry_user != "" else 'null.eccd.local' }} \
+        --docker-username={{ local_registry_user if local_registry_user is defined and local_registry_user != "" else 'null' }} \
+        --docker-password={{ local_registry_password if local_registry_password is defined and local_registry_password != "" else 'nopassword' }} -n rook-ceph \
+        --dry-run=client -o yaml | {{ kubectl }} apply -f -
+      register: result
+      become: true
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: result.rc == 0
+      when: rook.enabled | default (false)
+  vars:
+    - kube_image_prefix: "{{ docker_registry_host | default(default_registry) }}/"
+    - tarball_name: "{{ helm_charts.rook_operator.name + '-' + helm_charts.rook_operator.version + '.tgz' }}"
+  roles:
+    - erikube-defaults
+    - role: helm-chart-provisioner
+      when: rook.enabled | default (false)
+      vars:
+        - kube_namespace: "rook-ceph"
+        - chart_name: "rook-operator"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - state: installed
+        - values:
+            imagePullSecrets:
+              - name: local-registry-secret
+            image:
+              prefix: rook
+              repository: "{{ kube_image_prefix }}{{ containers.erikube.rook_operator_sbd.split(':')[0] }}"
+              tag: "{{ containers.erikube.rook_operator_sbd.split(':')[1] }}"
+            csi:
+              cephcsi:
+                image: "{{ kube_image_prefix }}{{ containers.erikube.cephcsi }}"
+              registrar:
+                image: "{{ kube_image_prefix }}{{ containers.erikube.csi_node_driver_registrar_ceph }}"
+              provisioner:
+                image: "{{ kube_image_prefix }}{{ containers.erikube.csi_provisioner_ceph }}"
+              attacher:
+                image: "{{ kube_image_prefix }}{{ containers.erikube.csi_attacher_ceph }}"
+              resizer:
+                image: "{{ kube_image_prefix }}{{ containers.erikube.csi_resizer_ceph }}"
+              allowUnsupportedVersion: true

@@ -1,0 +1,11 @@
+---
+# this task isolated so play can serialize it
+- name: Install and setup containerd
+  become: yes
+  any_errors_fatal: true
+  block:
+    - include_role:
+        name: containerd
+        tasks_from: install
+    - include_role:
+        name: containerd

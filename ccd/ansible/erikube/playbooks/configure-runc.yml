@@ -1,0 +1,26 @@
+---
+- name: Gather facts as non root
+  hosts: all
+  gather_facts: yes
+
+- name: Configure runc
+  hosts: master, worker
+  roles:
+    - erikube-defaults
+  become: yes
+  tasks:
+    - name: Remove built runc binaries in {{ ansible_distribution }} so it can use default binary
+      file:
+        path: "/usr/sbin/runc"
+        state: absent
+      when: ansible_distribution == "SLES"
+
+    - name: Remove built runc binaries in {{ ansible_distribution }} so it can use default binary
+      file:
+        path: "/usr/bin/runc"
+        state: absent
+      when: ansible_distribution == "Ubuntu" or ansible_distribution == "CentOS"
+
+    - name: Configure runc
+      include_role:
+        name: runc

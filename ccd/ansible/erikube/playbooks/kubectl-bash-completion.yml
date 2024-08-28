@@ -1,0 +1,30 @@
+- name: Gather facts as non root
+  hosts: "{{ target_hosts }}"
+  become: no
+  gather_facts: yes
+
+- name: Enabling shell autocompletion
+  hosts: "{{ target_hosts }}"
+  become: yes
+  tasks:
+    - name: "source bash_completion for user {{ ansible_user }}"
+      become: no
+      copy:
+        dest: "/home/{{ ansible_user }}/.bashrc"
+        content: "source /usr/share/bash-completion/bash_completion"
+
+    - name: "source bash_completion for root"
+      become: yes
+      copy:
+        dest: "{{ ansible_user_dir }}/.bashrc"
+        content: "source /usr/share/bash-completion/bash_completion"
+
+    - name: Include eccd default variables
+      include_vars: roles/erikube-defaults/defaults/main.yml
+
+    - name: Enable kubectl autocompletion
+      shell: "{{ kubectl }} completion bash >/etc/bash_completion.d/kubectl"
+      register: completion_bash
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: completion_bash.rc == 0

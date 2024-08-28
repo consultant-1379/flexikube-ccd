@@ -1,0 +1,5 @@
+---
+
+# In case the images for installer is in another registry
+docker_storage_setup: false
+kube_repo_prefix: ''

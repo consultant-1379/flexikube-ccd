@@ -1,0 +1,39 @@
+---
+- name: "Set initial values"
+  set_fact:
+    alert_dict: {}
+    final_alert_list: []
+    retrieve_alerts: 0
+    retry_count: "{{ retry_count | int + 1 }}"
+
+- name: "Query Alert Manager for alerts"
+  uri:
+    url: http://[{{ am_address }}]:9093/api/v1/alerts
+    body_format: json
+    return_content: yes
+  register: alerts_data
+  failed_when: "'success' not in alerts_data.content"
+  when: am_address is defined
+
+- name: "Checking for active alerts"
+  set_fact:
+    alert_dict: "{{ alert_dict | combine({item.annotations.summary: item.labels.alertname}) }}"
+    retrieve_alerts: 1
+  with_items: "{{ alerts_data.json['data'] }}"
+  no_log: True
+  when: alerts_data.json['data'][0] is defined
+
+- name: "Log ignore_alerts"
+  set_fact:
+    ignore_alert_list_log: "{{ ignore_alert_list }}"
+
+- name: "Filter out ignored alerts"
+  set_fact:
+    final_alert_list: "{{ final_alert_list + [item.key] }}"
+  loop: "{{ alert_dict | dict2items }}"
+  when: item.value not in ignore_alert_list
+
+- name: "Pause if alerts are present"
+  pause:
+    seconds: "{{ retry_delay | default(30) }}"
+  when: final_alert_list[0] is defined and (retry_count | int != num_retries | int)

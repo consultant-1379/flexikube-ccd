@@ -1,0 +1,47 @@
+---
+- name: Deploy Vagrant controller
+  become: yes
+  hosts:
+    - vagrant_controller
+  gather_facts: False
+  pre_tasks:
+    # Vagrant is slow to boot up some times, so wait for connection.
+    - name: Wait up to 300 seconds for port 22 to become open and contain "OpenSSH"
+      wait_for:
+        port: 22
+        host: '{{ (ansible_ssh_host|default(ansible_host))|default(inventory_hostname) }}'
+        search_regex: OpenSSH
+      vars:
+        ansible_connection: local
+      become: no
+    - name: Ensure python2 is installed
+      raw: (test -e /usr/bin/python) || (apt-get update -y && apt-get install -y python-minimal python-simplejson)
+      register: output
+      changed_when: output.stdout
+    - name: Gather facts after python2 install
+      setup:
+  roles:
+    - vagrant/vagrant_controller
+
+- name: Vagrant Instances
+  become: yes
+  hosts: vagrant_instances
+  gather_facts: False
+  pre_tasks:
+    # Vagrant is slow to boot up some times, so wait for connection.
+    - name: Wait up to 300 seconds for port 22 to become open and contain "OpenSSH"
+      wait_for:
+        port: 22
+        host: '{{ (ansible_ssh_host|default(ansible_host))|default(inventory_hostname) }}'
+        search_regex: OpenSSH
+      vars:
+        ansible_connection: local
+      become: no
+    - name: Ensure python2 is installed
+      raw: (test -e /usr/bin/python) || (apt-get update -y && apt-get install -y python-minimal python-simplejson)
+      register: output
+      changed_when: output.stdout
+    - name: Gather facts after python2 install
+      setup:
+  roles:
+    - vagrant/vagrant_node

@@ -1,0 +1,39 @@
+{% for sc in openstack_manila_storage_classes | default([]) %}
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ sc.name }}
+{% if ( sc.default | default(false) | bool ) %}
+    annotations:
+        storageclass.kubernetes.io/is-default-class: "true"
+{% endif %}
+provisioner: {{ manila_csi_drivername }}
+{% if ( sc.allow_expansion | default(false) | bool ) %}
+allowVolumeExpansion: {{ manila_csi_allow_expansion }}
+{% endif %}
+parameters:
+{% if (sc.type | default("")) != "" %}
+    type: {{ sc.type }}
+{% endif %}
+{% if (sc.availability_zone | default("")) != "" %}
+    availability: {{ sc.availability_zone }}
+{% endif %}
+    csi.storage.k8s.io/provisioner-secret-name: {{ manila_secret_name }}
+    csi.storage.k8s.io/provisioner-secret-namespace: {{ manila_namespace }}
+    csi.storage.k8s.io/controller-expand-secret-name: {{ manila_secret_name }}
+    csi.storage.k8s.io/controller-expand-secret-namespace: {{ manila_namespace }}
+    csi.storage.k8s.io/node-stage-secret-name: {{ manila_secret_name }}
+    csi.storage.k8s.io/node-stage-secret-namespace: {{ manila_namespace }}
+    csi.storage.k8s.io/node-publish-secret-name: {{ manila_secret_name }}
+    csi.storage.k8s.io/node-publish-secret-namespace: {{ manila_namespace }}
+{% if (sc.allowedTopologies_key | default("")) != "" %}
+allowedTopologies:
+  - matchLabelExpressions:
+    - key: {{ sc.allowedTopologies_key }}
+      values:
+{% for value in sc.allowedTopologies_values %}
+        - {{ value }}
+{% endfor %}
+{% endif %}
+---
+{% endfor %}

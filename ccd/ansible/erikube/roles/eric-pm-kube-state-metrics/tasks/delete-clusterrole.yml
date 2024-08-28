@@ -1,0 +1,17 @@
+- name: Delete clusterrole resources if exists
+  shell: "{{ kubectl }} delete clusterrole {{ kube_state_metrics_name }} --ignore-not-found"
+  become: yes
+  ignore_errors: yes
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (result.rc == 0 or "not found" in result.stderr)
+
+- name: Delete clusterrolebinding resources if exists
+  shell: "{{ kubectl }} delete clusterrolebinding {{ kube_state_metrics_name }} --ignore-not-found"
+  become: yes
+  ignore_errors: yes
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (result.rc == 0 or "not found" in result.stderr)

@@ -1,0 +1,74 @@
+---
+- name: Host Key Checking
+  hosts: localhost
+  vars:
+    kubectl: "/usr/local/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf"
+  tasks:
+  - name: Retrieve the IP address of all master and worker nodes
+    shell: >-
+      {{ kubectl }} get nodes -o wide | grep Ready | awk '{print $6}'
+    register: master_worker_ip_address
+
+  - name: Update Missing Master And Worker Host Key
+    connection: local
+    become: yes
+    shell: ssh-keygen -F "{{ item }}" || ssh-keyscan -H "{{ item }}" >> ~/.ssh/known_hosts
+    with_items: "{{ master_worker_ip_address.stdout.split('\n') }}"
+    ignore_errors: yes
+
+- name: Prepare Ansible inventory with IBD
+  hosts: localhost
+  become: yes
+  tasks:
+   - name: Worker inventory creation
+     include_role:
+       name: roles/erikube-defaults
+       tasks_from: create_worker_inventory
+     when: image_based_deployment | default(false) | bool
+
+- import_playbook: playbooks/ansible-check.yml
+
+#in 'aide --check' and 'aide --update' return codes 0-7 are fine according to aide's docs.
+- name: update Aide database
+  hosts: master, worker, director
+  become: yes
+  tasks:
+  - block:
+      - name: Aide update
+        shell: >-
+          aide --update
+        register: aideupdate
+        failed_when: aideupdate.rc > 7
+      - name: make new DB in use
+        shell: >-
+          mv /var/lib/aide/aide.db.new /var/lib/aide/aide.db
+    when: update_aide is defined
+
+- name: Aide check on all nodes
+  hosts: master, worker, director
+  become: yes
+  tasks:
+  - name: Aide check
+    shell: >-
+      aide --check
+    register: aidecheck
+    failed_when: aidecheck.rc > 7
+    when: check_aide is defined
+
+- name: fetch Aide report from all nodes
+  hosts: master, worker, director
+  become: yes
+  vars:
+    remote_report_path: "/var/log/aide_report.log"
+    local_report_path: "/var/log/aide_reports"
+  tasks:
+  - block:
+    - name: fetch report
+      fetch:
+        src: "{{ remote_report_path }}"
+        dest: "{{ local_report_path }}"
+    - name: delete report from cluster node
+      file:
+        state: absent
+        path: "{{ remote_report_path }}"
+    when: check_aide is defined or update_aide is defined

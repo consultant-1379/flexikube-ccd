@@ -1,0 +1,32 @@
+---
+# Remote centos 7 repo url
+centos_repo_loc: ''
+
+# File location to overwrite CentOS-Base with. Defaults to files/etc.yum.repos.d/CentOS-Base.repo.default
+centos_base_repo_file_loc: 'etc.yum.repos.d/CentOS-Base.repo.default'
+
+# When set to true, ansible will not overwrite the /etc/yum.repos.d/CentOS-Base.repo file
+use_default_centos_base_repo: true
+
+# When set to true, ansible will update OS packages and package information cache
+update_os: false
+
+# To reduce the effects of repo instability from time to time while os
+# packages are being installed, set the following variables to allow package
+# installation to retry operation at desired interval.
+install_os_packages_retries: 3
+install_os_packages_delay: 5
+
+# flag to allow user to perform host upgrades manually while ansible takes
+# care of drain.
+manual_prepare_host: false
+
+# arguments passed to kubectl drain when quiescing a node during upgrading
+kubectl_drain_force_args: '--ignore-daemonsets --delete-emptydir-data --force'
+
+# arguments passed to kubectl drain for timeouts
+kubectl_drain_timeout_args: '--grace-period=60 --timeout=10m'
+
+kubectl_drain_select_args: ''
+
+

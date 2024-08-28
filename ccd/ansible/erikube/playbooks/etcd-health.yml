@@ -1,0 +1,8 @@
+---
+- name: Check etcd health
+  hosts: "{{ groups.reachable_etcd | d(groups.etcd) }}"
+  tasks:
+    - name: Check etcd health
+      include_role:
+        name: etcd
+        tasks_from: check-health

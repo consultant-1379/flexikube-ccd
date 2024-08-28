@@ -1,0 +1,59 @@
+---
+- name: Include ingress LB default vars
+  include_vars: "{{ item }}"
+  with_items:
+  - roles/ingress-lb/defaults/main.yml
+
+- debug: msg="Update loadbalancer to image {{ ingress_lb_image }}"
+
+- name: Check for ingress LB service file
+  stat:
+    path: "/etc/systemd/system/{{ ingress_lb_service }}.service"
+  register: lb_service
+
+- name: Stop Erikube LB ingress service
+  become: yes
+  systemd:
+    name: "{{ ingress_lb_service }}.service"
+    state: stopped
+    enabled: no
+  when: lb_service.stat.exists
+
+- name: Log into local registry and force re-authorization
+  docker_login:
+    registry: "{{ kube_image_prefix }}"
+    username: "{{ local_registry_user }}"
+    password: "{{ local_registry_password }}"
+    reauthorize: yes
+  when: local_registry_user is defined and local_registry_user != ""
+
+- name: Pull lb ingress image
+  docker_image:
+    name: "{{ ingress_lb_image }}"
+    pull: true
+  when: local_registry_user is defined and local_registry_user != ""
+
+- name: Generate Erikube LB ingress systemd unit file
+  become: true
+  template:
+    src: "{{ role_path }}/templates/ingress_lb.service.j2"
+    dest: "/etc/systemd/system/{{ ingress_lb_service  }}.service"
+    owner: root
+    group: root
+    mode: '0644'
+    force: true
+
+- name: Update RBAC configuration
+  import_tasks: rbac.yml
+  become: yes
+  delegate_to: "{{ kube_client_ca }}"
+
+- name: Start Erikube LB ingress service
+  become: true
+  systemd:
+    name: "{{ ingress_lb_service }}.service"
+    state: restarted
+    daemon_reload: yes
+    enabled: yes
+
+# TODO: delete iptables and ipvsadm rules?

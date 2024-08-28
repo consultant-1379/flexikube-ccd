@@ -1,0 +1,32 @@
+---
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/cinder-wa-XXXXXX
+  register: mktemp_csi
+  changed_when: False
+
+- set_fact:
+    k8s_csi_file_loc: "{{ mktemp_csi.stdout }}"
+
+- name: Create Cinder CSI yaml files
+  template:
+    src: "{{item}}.j2"
+    dest: "{{ k8s_csi_file_loc }}/{{item}}"
+  with_items:
+    - csi-cinder-controllerplugin.yml
+    - csi-cinder-nodeplugin.yml
+
+- name: Apply Openstack Cinder files
+  shell: "{{ kubectl }} apply -f {{ k8s_csi_file_loc }}/{{item}}"
+  register: output
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: output.rc == 0
+  with_items:
+    - csi-cinder-controllerplugin.yml
+    - csi-cinder-nodeplugin.yml
+
+- name: Delete temp directory
+  file:
+    name: "{{ k8s_csi_file_loc }}"
+    state: absent
+  changed_when: False

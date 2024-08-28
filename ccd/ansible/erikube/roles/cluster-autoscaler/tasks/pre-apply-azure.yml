@@ -1,0 +1,34 @@
+# perform azure-specific configuration before applying cluster-autoscaler yaml
+
+- name: Copy file to master node
+  copy:
+    src: "{{ inventory_dir }}/.tmp/azure-cas.json"
+    dest: "{{ cloudprovidertemp.stdout }}/azure-cas.json"
+
+- name: Delete secret {{ cluster_autoscaler_azure_secret }} if exists
+  shell: "{{ kubectl }} delete secret {{ cluster_autoscaler_azure_secret }} -n kube-system"
+  ignore_errors: yes
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (result.rc == 0 or "not found" in result.stderr)
+
+- name: Get contents of azure-cas.json
+  shell: "cat {{ cloudprovidertemp.stdout}}/azure-cas.json"
+  register: content
+
+- name: Create secret {{ cluster_autoscaler_azure_secret }} to kube-system namespace
+  shell:
+    "{{ kubectl }} create secret generic {{ cluster_autoscaler_azure_secret }} \
+    --from-literal=ClientID={{ (content.stdout | from_json).get('ClientID') }} \
+    --from-literal=ClientSecret={{ (content.stdout | from_json).get('ClientSecret') }} \
+    --from-literal=ResourceGroup={{ (content.stdout | from_json).get('ResourceGroup') }} \
+    --from-literal=SubscriptionID={{ (content.stdout | from_json).get('SubscriptionID') }} \
+    --from-literal=TenantID={{ (content.stdout | from_json).get('TenantID') }} \
+    --from-literal=VMType={{ (content.stdout | from_json).get('VMType') }} \
+    -n kube-system"
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+

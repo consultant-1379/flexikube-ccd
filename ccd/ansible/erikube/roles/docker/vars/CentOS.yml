@@ -1,0 +1,35 @@
+---
+docker_version: "19.03.13"
+docker_pkg_name: docker-ce
+docker_pkg_cli_name: docker-ce-cli
+docker_pkg_selinux_name: docker-ce-selinux
+docker_packages:
+  - "{{ docker_pkg_name }}-{{ docker_version }}"
+  - "{{ docker_pkg_cli_name }}-{{ docker_version }}"
+  - python-docker-py
+  - cloud-utils-growpart
+  - lvm2
+  - device-mapper-persistent-data
+
+# See ECE-3341 on installation failures.  Certain pre-installed packages
+# on a VM may conflict with specific versions of docker-ce.  The official
+# recommend list of packages to be removed is defined in docker_base_purge_packages.
+# Additional packages that maybe considered for removal all:
+#   containerd.io
+#   container-storage-setup
+docker_purge_packages:
+  - "{{ docker_pkg_name }}"
+  - "{{ docker_pkg_cli_name }}"
+  - "{{ docker_pkg_selinux_name }}"
+  - container-selinux
+  - runc
+
+ca_certs_path: /etc/pki/ca-trust/source/anchors/
+ca_cert_update_cmd: update-ca-trust
+
+docker_config_os_specific:
+  add-runtime: "docker-runc=/usr/libexec/docker/docker-runc-current"
+  default-runtime: "docker-runc"
+  runtimes:
+    docker-runc:
+      path: "/usr/bin/runc"

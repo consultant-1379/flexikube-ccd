@@ -1,0 +1,29 @@
+---
+- name: Create CA directories
+  file:
+    path: "{{ etcd_ca_new_certs_dir }}"
+    state: directory
+    mode: 0700
+    owner: root
+    group: root
+    recurse: yes
+
+- name: Create empty CA index file
+  copy:
+    dest: "{{ etcd_ca_db }}"
+    content: ""
+    force: no
+
+- name: Write openssl config
+  template:
+    src: "openssl.conf.j2"
+    dest: "{{ etcd_openssl_conf }}"
+
+- name: Create CA certificate
+  command: >
+    openssl req -newkey rsa:4096 -keyout {{ etcd_ca_key }}
+      -x509 -days {{ etcd_ca_default_days }} -batch -nodes -out {{ etcd_ca_cert }} -subj /CN=etcd-ca
+  args:
+    creates: "{{ etcd_ca_cert }}"
+  run_once: true
+  delegate_to: "{{ etcd_ca_host }}"

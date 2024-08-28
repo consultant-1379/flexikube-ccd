@@ -1,0 +1,19 @@
+---
+- block:
+  - name: Add gateway to private_interface
+    interfaces_file:
+      iface: "{{ private_interface }}"
+      option: gateway
+      value: "{{ vagrant_gw }}"
+  - name: Add dns-nameservers to private_interface
+    interfaces_file:
+      iface: "{{ private_interface }}"
+      option: dns-nameservers
+      value: "{{ vagrant_gw }}"
+  when: hostvars[inventory_hostname]['ansible_%s'|format(private_interface)].ipv4.address != vagrant_gw
+
+- name: Disable vagrant interface
+  command: ip addr flush dev {{ vagrant_interface }}
+
+- name: Bounce private_interface
+  shell: ifdown {{ private_interface }}; ifup {{ private_interface }}

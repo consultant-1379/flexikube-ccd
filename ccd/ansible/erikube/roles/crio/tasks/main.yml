@@ -1,0 +1,104 @@
+---
+- include_vars: "{{ item }}"
+  with_first_found:
+    - files:
+      - "../vars/{{ ansible_distribution }}.yml"
+      - "../vars/{{ ansible_os_family }}.yml"
+      skip: True
+
+- name: Install and setup crio
+  become: yes
+  any_errors_fatal: true
+  block:
+    - include_tasks: install.yml
+
+- block:
+  - name: Check crio config directory.
+    stat:
+      path: "{{ crio_config_dir }}"
+    register: crio_config_path
+
+  - name: Create crio config directory if not exists
+    file:
+      path: "{{ crio_config_dir }}"
+      state: directory
+    become: yes
+    when: crio_config_path.stat.exists == false
+
+  - name: Check crio.conf.d config directory.
+    stat:
+      path: "{{ crio_conf_d_dir }}"
+    register: crio_conf_d_path
+
+  - name: Create crio.conf.d directory if not exists
+    file:
+      path: "{{ crio_conf_d_dir }}"
+      state: directory
+    become: yes
+    when: crio_conf_d_path.stat.exists == false
+
+  - name: Check oci hooks.d config directory.
+    stat:
+      path: "{{ oci_hooks_d_dir }}"
+    register: oci_hooks_d_path
+
+  - name: Create oci hooks.d directory if not exists
+    file:
+      path: "{{ oci_hooks_d_dir }}"
+      state: directory
+    become: yes
+    when: oci_hooks_d_path.stat.exists == false
+
+  - name: Check oci umount.d directory.
+    stat:
+      path: "{{ oci_umount_d_dir }}"
+    register: oci_umount_d_path
+
+  - name: Create oci umount.d directory if not exists
+    file:
+      path: "{{ oci_umount_d_dir }}"
+      state: directory
+    become: yes
+    when: oci_umount_d_path.stat.exists == false
+
+  - name: Check var lib eccd directory.
+    stat:
+      path: "{{ var_lib_eccd_dir }}"
+    register: var_lib_eccd_path
+
+  - name: Create var lib eccd directory if not exists
+    file:
+      path: "{{ var_lib_eccd_dir }}"
+      state: directory
+    become: yes
+    when: var_lib_eccd_path.stat.exists == false
+
+  - name: Copy crio-umount.conf config file
+    copy:
+      src: "crio-umount.conf"
+      dest: "{{ oci_umount_d_dir }}/crio-umount.conf"
+    register: crio_umount_config
+
+  - name: Copy crio config file
+    template:
+      src: "crio.conf.j2"
+      dest: "{{ crio_config_dir }}/crio.conf"
+    become: yes
+    register: crio_config
+
+
+  - name: Copy crio config file
+    template:
+      src: "crio-eph.conf.j2"
+      dest: "{{ crio_config_dir }}/crio-eph.conf"
+    become: yes
+    register: crio_config_eph
+
+
+  - name: Copy cpu-workload-pinning config file
+    copy:
+      src: "cpu_workload_pinning"
+      dest: "{{ var_lib_eccd_dir }}/cpu_workload_pinning"
+    register: cpu_workload_pinning_config
+
+  when: not is_atomic

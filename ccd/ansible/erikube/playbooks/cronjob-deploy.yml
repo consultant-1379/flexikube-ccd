@@ -1,0 +1,6 @@
+---
+- name: Deploy cron job
+  hosts: [master, worker, add_master, add_worker]
+  become: yes
+  roles:
+    - kubelet_service_check

@@ -1,0 +1,14 @@
+---
+- name: Collect erikube instances data and create Erikube Cluster inventory file
+  hosts: localhost
+  gather_facts: yes
+
+  become: yes
+  tasks:
+  - include_role:
+      name: openstack
+      tasks_from: collect_erikube_instances_data
+  - include_role:
+      name: openstack
+      tasks_from: generate_inventory_file
+    when: os_username is defined and os_username and os_password is defined and os_password

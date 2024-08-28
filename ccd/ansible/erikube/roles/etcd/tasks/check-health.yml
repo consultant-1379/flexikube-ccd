@@ -1,0 +1,14 @@
+---
+# Ubuntu's default shell is dash, not bash which does not support 'source' command,
+# so we will explicitly define /bin/bash here.
+# in the etcd 3.3.15 output will be in stderr instead of stdout
+- name: Check if etcd node is healthy
+  shell: source /etc/profile.d/etcdctl.sh && etcdctl3 endpoint health
+  register: etcd_status
+  until: "'is healthy' in etcd_status.stderr or 'is healthy' in etcd_status.stdout"
+  args:
+    executable: /bin/bash
+  retries: 90
+  delay: 2
+  become: yes
+  changed_when: false

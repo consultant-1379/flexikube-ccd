@@ -1,0 +1,27 @@
+# this task will force the master to restart then wait for it to be ready
+- name: bounce apiserver
+  shell: >
+    mv "{{ apisvr_cfg_loc }}" "{{ apisvr_cfg_loc }}.restart";
+    sleep 5;
+    mv "{{ apisvr_cfg_loc }}.restart" "{{ apisvr_cfg_loc }}";
+    sleep 5;
+  become: yes
+
+- name: Restart kubelet
+  systemd:
+    state: restarted
+    daemon_reload: yes
+    name: kubelet
+  become: yes
+  when: not image_based_deployment | default(false) | bool
+
+- name: Wait for apiserver to be Ready
+  shell: >
+    sleep 1;
+    {{ kubectl }} -n kube-system get pod kube-apiserver-{{ ansible_nodename }}
+    -o 'jsonpath={.status.conditions[?(@.type=="Ready")].status}' | grep True
+  register: get_pod
+  become: yes
+  retries: 120
+  delay: 2
+  until: get_pod.rc == 0

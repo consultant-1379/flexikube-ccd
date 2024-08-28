@@ -1,0 +1,15 @@
+- name: "Disable {{ kube_lb_service_name }} service"
+  systemd:
+    name: "{{ kube_lb_service_name }}"
+    state: stopped
+    enabled: false
+  failed_when: false
+
+- name: "Purge {{ kube_lb_service_name }}"
+  file:
+    path: "{{ item }}"
+    state: absent
+  with_items:
+    - "{{ kube_lb_config_dir }}"
+    - "{{ systemd_dir }}/{{ kube_lb_service_name }}.service"
+  failed_when: false

@@ -1,0 +1,35 @@
+---
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/erikube-k8s-XXXXXX
+  register: mktemp
+  changed_when: False
+
+- set_fact:
+    k8s_file_loc: "{{ mktemp.stdout }}"
+
+- name: Prepare Calico manifest
+  template:
+    src: "calico.yml.j2"
+    dest: "{{ k8s_file_loc }}/calico.yml"
+
+- name: Update Calico
+  command: "{{ kubectl }} apply -f {{ k8s_file_loc }}/calico.yml --validate=false"
+  become: yes
+  register: update_calico
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: update_calico.rc == 0
+
+- name: Delete temp directory
+  file:
+    name: "{{ mktemp.stdout }}"
+    state: absent
+  changed_when: False
+
+- name: Delete calico-node RBAC
+  command: "{{ kubectl }} delete ClusterRoleBinding/calico-node ClusterRole/calico-node ServiceAccount/calico-node --cascade=true --ignore-not-found=true"
+  become: yes
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (result.rc == 0 or "not found" in result.stderr)

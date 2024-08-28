@@ -1,0 +1,58 @@
+---
+
+- include_vars: "{{ item }}"
+  with_first_found:
+    - files:
+      - "../vars/{{ ansible_distribution }}.yml"
+      - "../vars/{{ ansible_os_family }}.yml"
+      skip: True
+
+- name: Remove Docker packages
+  package:
+    name: "{{ item }}"
+    state: absent
+  with_items: "{{ docker_base_purge_packages}} + {{ docker_purge_packages }}"
+  when: ansible_os_family != 'Debian'
+
+- name: Remove Docker packages (Ubuntu)
+  package:
+    name: "{{ docker_base_purge_packages}} + {{ docker_purge_packages }}"
+    state: absent
+    purge: yes # Use the apt module because it includes purge functionality.
+  when: ansible_os_family == 'Debian'
+
+- name: Remove docker config
+  become: yes
+  file:
+    path: /etc/docker
+    state: absent
+  when: purge_docker_destructive | default(true) | bool
+
+- name: Remove docker command-line config
+  become: yes
+  file:
+    path: /etc/sysconfig/docker-network
+    state: absent
+  with_items:
+  - /etc/sysconfig/docker
+  - /etc/sysconfig/docker-network
+  - /etc/sysconfig/docker-storage
+  - /etc/sysconfig/docker-storage-setup
+  when: ansible_os_family == 'RedHat'
+
+- name: Unmount overlay
+  command: umount overlay
+  become: yes
+  ignore_errors: true
+
+- name: Unmount overlay2
+  command: umount overlay2
+  become: yes
+  ignore_errors: true
+
+- name: Clear docker storage
+  become: yes
+  file:
+    path: /var/lib/docker
+    state: absent
+  when: purge_docker_destructive | default(true) | bool

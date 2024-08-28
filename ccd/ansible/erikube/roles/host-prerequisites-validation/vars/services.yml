@@ -1,0 +1,15 @@
+---
+running_services:
+  - docker
+  - containerd
+
+disable_services:
+  - NetworkManager
+  - selinux
+  - swap
+
+debian_specific_disable_services:
+  - apt-daily.timer
+  - apt-daily-upgrade.timer
+  - apt-daily
+  - apt-daily-upgrade

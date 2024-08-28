@@ -1,0 +1,24 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: {{ ecfe_configmap_name_space }}
+  name: {{ ecfe_configmap_name }}
+data:
+  config: |
+    bgp-peers:
+{% for peer in ecfe_config_map_peers -%}
+{{ ("- peer-address: " + (peer.peer_address| string) ) | indent(4, true) }}
+{{ ("  peer-asn: " + (peer.peer_asn | string) ) | indent(4, true) }}
+{{ ("  my-asn: " + (ecfe_my_asn | string ) ) | indent(4, true) }}
+{% if peer.password_key is defined  and peer.password_key != "" %}
+{{ ("  password-key: " + (peer.password_key | string) ) | indent(4, true) }}
+{% endif %}
+{% endfor -%}
+    {{ "address-pools:"  | indent(4, true) }}
+    - name: default
+      protocol: bgp
+      addresses:
+{% for cidr in ecfe_pool_cidrs -%}
+{{ ("- " + cidr) | indent(6, true) }}
+{% endfor %}

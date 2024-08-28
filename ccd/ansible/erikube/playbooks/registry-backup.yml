@@ -1,0 +1,7 @@
+---
+- name: Backup Registry container
+  hosts: localhost
+  tasks:
+    - include_role:
+        name: backup
+        tasks_from: registry

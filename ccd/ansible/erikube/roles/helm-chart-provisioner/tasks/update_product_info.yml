@@ -1,0 +1,41 @@
+---
+- name: Set product info filename
+  set_fact:
+    product_info_file: "{{ k8s_helm_file_loc }}/{{ chart_name }}/eric-product-info.yaml"
+    old_archive: "{{ k8s_helm_file_loc }}/{{ chart_name }}"
+    new_archive: "{{ k8s_helm_file_loc }}/{{ chart_name }}.tgz"
+
+- name: Rename {{ chart_name }} chart package
+  command: mv "{{ old_archive }}" "{{ new_archive }}"
+
+- name: Unarchive {{ chart_name }} chart package
+  unarchive:
+    src: "{{ new_archive }}"
+    dest: "{{ k8s_helm_file_loc }}"
+    remote_src: yes
+
+- name: Delete {{ chart_name }} chart package file
+  file:
+    state: absent
+    path: "{{ new_archive }}"
+
+- name: Read product info
+  slurp:
+    src: "{{ product_info_file }}"
+  register: product_info
+
+- name: Parse existing product info
+  set_fact:
+    product_info_values: "{{ product_info['content'] | b64decode | from_yaml }}"
+
+- name: Combine product info
+  set_fact:
+    product_info_values: >-
+      {{
+          product_info_values | combine( productInfo, recursive=True )
+      }}
+
+- name: Write new product info
+  copy:
+    content: "{{ product_info_values | to_nice_yaml }}"
+    dest: "{{ product_info_file }}"

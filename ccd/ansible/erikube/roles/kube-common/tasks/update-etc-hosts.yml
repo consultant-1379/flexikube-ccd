@@ -1,0 +1,46 @@
+---
+
+- set_fact:
+    master_hosts: "{{ groups['master'] | default([]) }}"
+    worker_hosts: "{{ groups['worker'] | default([]) }}"
+    new_worker_hosts: "{{ groups['add_worker'] | default([]) }}"
+    new_master_hosts: "{{ groups['add_master'] | default([]) }}"
+
+- set_fact:
+    worker_hosts: "{{ worker_hosts + new_worker_hosts }}"
+
+- set_fact:
+    master_hosts: "{{ master_hosts + new_master_hosts }}"
+  when: not image_based_deployment | default(false) | bool
+
+- debug: { msg: "Using kube_apiserver_fqdn value '{{ kube_apiserver_fqdn }}' for {{ hostvars[inventory_hostname].k8s_ip_address }}"}
+
+- name: Add hostname and kube_apiserver_fqdn to IP translation for master to self
+  lineinfile:
+    path: /etc/hosts
+    regexp: "^{{ hostvars[inventory_hostname].k8s_ip_address }}"
+    line: "{{ hostvars[inventory_hostname].k8s_ip_address }} {{ ansible_hostname }} {{ kube_apiserver_fqdn }}"
+    state: present
+  become: true
+  when: inventory_hostname in master_hosts
+
+- name: Add hostname to IP translation for worker to worker /etc/hosts
+  lineinfile:
+    path: /etc/hosts
+    regexp: "^{{ hostvars[inventory_hostname].k8s_ip_address }}"
+    line: "{{ hostvars[inventory_hostname].k8s_ip_address }} {{ ansible_hostname }} "
+    state: present
+  become: true
+  when: inventory_hostname in worker_hosts
+
+- name: Add nodelocal-api.eccd.local to IP translation for API server to worker /etc/hosts when its used
+  lineinfile:
+    path: /etc/hosts
+    regexp: "^{{ kube_apiserver_ip }}"
+    line: "{{ kube_apiserver_ip }}  nodelocal-api.eccd.local"
+    state: present
+  become: true
+  when:
+    - inventory_hostname in worker_hosts
+    - kube_apiserver_fqdn == "nodelocal-api.eccd.local"
+

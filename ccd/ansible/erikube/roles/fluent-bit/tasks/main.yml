@@ -1,0 +1,12 @@
+---
+- name: Create CA directories
+  import_tasks: ca-deploy.yml
+  vars:
+    dir: /tmp/erikube-fluent-ca
+    dir2: /tmp/erikube-fluent-rsyslog
+
+- name: Create ca certs for fluent-bit
+  import_tasks: create.yml
+  vars:
+    dir: /tmp/erikube-fluent-ca
+    dir2: /tmp/erikube-fluent-rsyslog

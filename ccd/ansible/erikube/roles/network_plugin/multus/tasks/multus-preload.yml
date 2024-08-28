@@ -1,0 +1,14 @@
+---
+
+- name: Prefetch Master multus images
+  command: "{{ crictl_cmd }} pull {{ item }}"
+  become: true
+  when: inventory_hostname in groups['master']
+  with_items:
+    - "{{ multus_cni_image }}"
+
+- name: Prefetch Node multus images
+  command: "{{ crictl_cmd }} pull {{ item }}"
+  become: true
+  with_items:
+    - "{{ multus_cni_image }}"

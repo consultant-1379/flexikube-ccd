@@ -1,0 +1,13 @@
+nerdctl_install_path: "/usr/local/bin"
+nerdctl_runtime: "containerd"
+nerdctl_config_dir: "/etc/nerdctl"
+cni_path: "/usr/local/lib/cni/bin"
+#nerdctl command
+nerdctl_cmd: "{{ nerdctl_install_path }}/nerdctl"
+#crictl_cmd: /usr/local/bin/crictl
+
+# default sleep value after container restart
+# can be increased per container restart if container
+# requires more time for stabilizing
+container_sleep_after_restart: 1
+certs_dir: "/etc/containerd/certs.d"

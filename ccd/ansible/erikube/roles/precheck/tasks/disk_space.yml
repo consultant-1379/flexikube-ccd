@@ -1,0 +1,45 @@
+---
+- name: Check all nodes disk spaces requirements
+  block:
+  - name: Identify the space available in /var for all nodes
+    shell: |
+      df -BG /var | awk '!/^Filesystem/ {print $4}' | sed 's/G//'
+    changed_when: false
+    register: var_dir_free_space_gb
+
+  - name: Check free disk space in '/var' with minimum requirements
+    assert:
+      that: "var_dir_free_space_gb.stdout | int >= all_min_diskspace | int"
+      msg: "Not enough disk space in '/var' path. Require {{ all_min_diskspace }}GB, but only {{ var_dir_free_space_gb }}GB available"
+
+
+- name: Check etcd nodes disk spaces requirements
+  block:
+  - name: Identify the space available in etcd nodes
+    shell: |
+      df -BG / | awk '!/^Filesystem/ {print $4}' | sed 's/G//'
+    changed_when: false
+    register: etcd_space_available_gb
+
+  - name: Check free disk space in '/' with minimum requirements
+    assert:
+      that: "etcd_space_available_gb.stdout | int >= (all_min_diskspace | int) + (etcd_extra_diskspace | int)"
+      msg: "Not enough disk space in '/' path. Require {{ (all_min_diskspace | int) + (etcd_extra_diskspace | int) }}GB, but only {{ etcd_space_available_gb.stdout }}GB available"
+
+  when: ansible_hostname in etcd_hosts
+
+
+- name: Check K8S nodes disk spaces requirements
+  block:
+  - name: Identify the space available in K8S nodes
+    shell: |
+      df -BG / | awk '!/^Filesystem/ {print $4}' | sed 's/G//'
+    changed_when: false
+    register: k8s_space_available_gb
+
+  - name: Check free disk space in '/' with minimum requirements
+    assert:
+      that: "k8s_space_available_gb.stdout | int >= (all_min_diskspace | int) + (workder_extra_diskspace | int)"
+      msg: "Not enough disk space in '/' path. Require {{ (all_min_diskspace | int) + (workder_extra_diskspace | int) }}GB, but only {{ k8s_space_available_gb.stdout }}GB available"
+
+  when: ansible_hostname in master_hosts or ansible_hostname in worker_hosts

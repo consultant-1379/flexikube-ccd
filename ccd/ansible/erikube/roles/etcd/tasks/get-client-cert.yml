@@ -1,0 +1,99 @@
+---
+- name: Check variables required to generate an etcd client certificate
+  assert:
+    that:
+      - etcd_generated_certs_dir is defined
+      - etcd_cert_subdir is defined
+      - etcd_cert_prefix is defined
+      - etcd_client_cert_cn is defined
+
+- name: Include etcd role defaults
+  include_vars: roles/etcd/defaults/main.yml
+
+- set_fact:
+    ca_client_subdir: "{{ etcd_generated_certs_dir }}/{{ etcd_cert_subdir }}"
+
+- name: Check existence of certificate at destination (client)
+  stat:
+    path: "{{ etcd_cert_config_dir }}/{{ etcd_cert_prefix }}client.crt"
+  register: stat_result
+  become: true
+
+- set_fact:
+    client_cert_missing: "{{ not stat_result.stat.exists }}"
+
+- block:
+  - name: "Ensure {{ ca_client_subdir }} directory exist"
+    file:
+      path: "{{ ca_client_subdir }}"
+      state: directory
+      mode: 0700
+      recurse: true
+
+  - name: Create the client CSR
+    command: >
+      openssl req -new -config {{ etcd_openssl_conf }}
+        -keyout {{ etcd_cert_prefix }}client.key
+        -out {{ etcd_cert_prefix }}client.csr
+        -extensions etcd_v3_req -batch -nodes
+        -subj /CN={{ etcd_client_cert_cn }}
+    args:
+      chdir: "{{ ca_client_subdir }}"
+    environment:
+      SAN: "DNS:{{ etcd_client_cert_cn }}-{{ etcd_hostname }}"
+
+  - name: Sign the client CSR
+    command: >
+      openssl ca -name etcd_ca -config {{ etcd_openssl_conf }}
+        -out {{ etcd_cert_prefix }}client.crt
+        -in {{ etcd_cert_prefix }}client.csr
+        -extensions etcd_v3_ca_client -batch
+        -create_serial
+    args:
+      chdir: "{{ ca_client_subdir }}"
+    environment:
+      SAN: "IP:{{ etcd_ip }}"
+
+  - name: Check if hard link exist to CA cert
+    stat:
+      path: "{{ ca_client_subdir }}/{{ etcd_cert_prefix }}ca.crt"
+    register: ca_cert_link
+
+  - name: Link CA cert to subdir
+    file:
+      src: "{{ etcd_ca_cert }}"
+      dest: "{{ ca_client_subdir }}/{{ etcd_cert_prefix }}ca.crt"
+      state: hard
+    when: not ca_cert_link.stat.exists
+
+  - name: Slurp (fetch) certs
+    slurp:
+      src: "{{ item }}"
+    with_items:
+      - "{{ ca_client_subdir }}/{{ etcd_cert_prefix }}client.crt"
+      - "{{ ca_client_subdir }}/{{ etcd_cert_prefix }}client.key"
+      - "{{ ca_client_subdir }}/{{ etcd_cert_prefix }}ca.crt"
+    register: client_certs
+
+  when: client_cert_missing
+  delegate_to: "{{ etcd_ca_host }}"
+  become: true
+
+- block:
+  - name: Ensure certificate directory exists at client
+    file:
+      path: "{{ etcd_cert_config_dir }}"
+      state: directory
+
+  - name: Write out client certs
+    copy:
+      dest: "{{ etcd_cert_config_dir }}/{{ item.item.split('/')[-1] }}"
+      content: "{{ item.content | b64decode }}"
+      owner: root
+      group: root
+      mode: 0600
+    no_log: true
+    with_items: "{{ client_certs.results }}"
+
+  when: client_cert_missing
+  become: true

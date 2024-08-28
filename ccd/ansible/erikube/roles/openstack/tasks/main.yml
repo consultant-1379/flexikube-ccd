@@ -1,0 +1,7 @@
+---
+
+- name: Install dependency package
+  include: ansible_dependency_install.yml
+
+- name: Create ansible executor instance and its inventory file
+  include: deploy_ansibie_executor.yml

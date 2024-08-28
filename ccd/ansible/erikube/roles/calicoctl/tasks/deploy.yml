@@ -1,0 +1,41 @@
+#Calico comes with CCD, but only calico-kube-controllers and calico-node, calicoctl is not installed by default.
+---
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/erikube-k8s-XXXXXX
+  register: mktemp_calicoctl
+  changed_when: False
+
+- set_fact:
+    k8s_file_calicoctl_loc: "{{ mktemp_calicoctl.stdout }}"
+
+- name: Prepare Calicoctl manifest (Kubernetes API datastore)
+  template:
+    src: "calicoctl.yml.j2"
+    dest: "{{ k8s_file_calicoctl_loc }}/calicoctl.yml"
+- name: Installing Calicoctl as a Kubernetes pod (Kubernetes API datastore)
+  command: "{{ kubectl }} apply -f {{ k8s_file_calicoctl_loc }}/calicoctl.yml --validate=false"
+  become: yes
+  register: install_calico_pod
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: install_calico_pod.rc == 0
+
+- name: Prepare Calicoctl Deployment and Custom Resource Definitions (CRD) Manifest
+  template:
+    src: "calico-crd-calicoctl-deployment.yml.j2"
+    dest: "{{ k8s_file_calicoctl_loc }}/calico-crd-calicoctl-deployment.yml"
+
+- name: Install Calicoctl and Deploy Custom Resource Definitions (CRD)
+  command: "{{ kubectl }} apply -f {{ k8s_file_calicoctl_loc }}/calico-crd-calicoctl-deployment.yml --validate=false"
+  become: yes
+  register: install_calico_crd
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: install_calico_crd.rc == 0
+
+- name: Delete temp directory
+  file:
+    name: "{{ mktemp_calicoctl.stdout }}"
+    state: absent
+  become: yes
+  changed_when: False

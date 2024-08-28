@@ -1,0 +1,82 @@
+- name: Create private key
+  command: "openssl genrsa -out {{ mktemp.stdout }}/ingress_controller_default_tls.key 2048"
+
+- name: Prepare openssl.conf for ingress controller certificate
+  template:
+    src: "roles/ingress-controller-nginx/templates/openssl.conf.j2"
+    dest: "{{ mktemp.stdout }}/openssl.conf"
+
+- name: Create CSR
+  command: "openssl req -new -key {{ mktemp.stdout }}/ingress_controller_default_tls.key -config {{ mktemp.stdout }}/openssl.conf -subj '/CN=Kubernetes Ingress Controller Fake Certificate/O=Acme Co' -out {{ mktemp.stdout }}/ingress.csr"
+
+- name: Copy openssl.conf file as ssl-extensions-x509.cnf
+  command: "cp {{ mktemp.stdout }}/openssl.conf {{ mktemp.stdout }}/ssl-extensions-x509.cnf"
+
+- name: Fix ssl-extensions-x509.cnf content
+  command: "sed -i 's/v3_req/v3_ca/g' {{ mktemp.stdout }}/ssl-extensions-x509.cnf"
+
+- name: Create Self-Signed certificate for ingress controller
+  command: "openssl x509 -req -in {{ mktemp.stdout }}/ingress.csr -CA /etc/kubernetes/pki/ca.crt -CAkey /etc/kubernetes/pki/ca.key -CAcreateserial -out {{ mktemp.stdout }}/ingress_controller_default_tls.crt -days 3650 -sha256 -extensions v3_ca -extfile {{ mktemp.stdout }}/ssl-extensions-x509.cnf"
+
+- name: Check for existing secret
+  command: "{{ kubectl }} -n {{ controller_namespace }} get secret ingress-controller-default-tls -o yaml"
+  register: get_secret
+  failed_when: false
+  changed_when: false
+
+- name: Reconfigure ingress-controller-default-tls in case if exist
+  block:
+
+  - name: Slurp nginx crt
+    slurp:
+      src: "{{ mktemp.stdout }}/ingress_controller_default_tls.crt"
+    register: nginx_crt_base64
+    run_once: true
+
+  - name: Slurp nginx key
+    slurp:
+      src: "{{ mktemp.stdout }}/ingress_controller_default_tls.key"
+    register: nginx_key_base64
+    run_once: true
+
+  - name: Create secret yaml for updating purpose
+    copy:
+      content: "{{ get_secret.stdout }}"
+      dest: "{{ mktemp.stdout }}/secret.yaml"
+
+  - name: Check secret yaml
+    command: "cat {{ mktemp.stdout }}/secret.yaml"
+    register: cat
+
+  - name: Change the content of tls.crt
+    lineinfile:
+      path: "{{ mktemp.stdout }}/secret.yaml"
+      regexp: '^(.*)  tls.crt:(.*)$'
+      line: '  tls.crt: {{ nginx_crt_base64.content }}'
+      backrefs: yes
+
+  - name: Change the content of tls.key
+    lineinfile:
+      path: "{{ mktemp.stdout }}/secret.yaml"
+      regexp: '^(.*)  tls.key:(.*)$'
+      line: '  tls.key: {{ nginx_key_base64.content }}'
+      backrefs: yes
+
+  - name: update the ingress-controller-default-tls secret
+    command: "{{ kubectl }} apply -f {{ mktemp.stdout }}/secret.yaml"
+
+  - name: Restart Ingress Controller
+    command: "{{ kubectl }} rollout restart deployment nginx-ingress-controller -n ingress-nginx"
+
+  - name: Wait for Ingress Controller to be Ready
+    shell: "{{ kubectl }} -n ingress-nginx get pod -A -l app=ingress-nginx --no-headers | grep -v Running | wc -l"
+    register: check_pods_non_running_state
+    until: check_pods_non_running_state.stdout.find("0") != -1
+    retries: 45
+    delay: 10
+
+  when: (get_secret.rc == 0 and "NotFound" not in get_secret.stderr)
+
+- name: Create TLS secret with new certificate files
+  command: "{{ kubectl }} create secret tls ingress-controller-default-tls --cert {{ mktemp.stdout }}/ingress_controller_default_tls.crt --key {{ mktemp.stdout }}/ingress_controller_default_tls.key -n {{ controller_namespace }}"
+  when: (get_secret.rc == 1 and "NotFound" in get_secret.stderr)

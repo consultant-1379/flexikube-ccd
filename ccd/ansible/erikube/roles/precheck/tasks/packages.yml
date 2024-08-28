@@ -1,0 +1,16 @@
+---
+- name: Check if packages are installed
+  become: yes
+  package:
+    name: "{{ item }}"
+    state: present
+  check_mode: true
+  register: packages_installed
+  with_items:
+    - "{{ required_packages }}"
+
+- name: Fail if packages are not installed
+  assert:
+    that: 1 > 2
+    msg: "These packages have not yet been installed: {{ packages_installed|json_query('results[*].changes.installed')|join(', ') }}"
+  when: packages_installed.changed

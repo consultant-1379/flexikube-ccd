@@ -1,0 +1,8 @@
+---
+dependencies:
+- role: erikube-defaults
+- role: ingress-controller-common
+  vars:
+    controller_namespace: "{{ ingressctrl_namespace | default('ingress-nginx') }}"
+    controller_name: 'nginx'
+    controller_servicename: "{{ ingressctrl_servicename | default('ingress-nginx') }}"

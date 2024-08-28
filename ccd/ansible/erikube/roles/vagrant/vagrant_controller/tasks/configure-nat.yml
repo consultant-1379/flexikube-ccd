@@ -1,0 +1,31 @@
+---
+- name: allow ip v4 forwarding
+  sysctl:
+    name: net.ipv4.ip_forward
+    value: 1
+    sysctl_set: 'yes'
+    state: present
+    reload: 'yes'
+
+- name: add NAT iptable rules - MASQUERADE
+  iptables:
+    table: nat
+    chain: POSTROUTING
+    out_interface: "{{ public_interface }}"
+    jump: MASQUERADE
+
+- name: iptable rules - forwarding private to public
+  iptables:
+    chain: FORWARD
+    in_interface: "{{ private_interface }}"
+    out_interface: "{{ public_interface }}"
+    jump: ACCEPT
+
+- name: iptables rules - forwarding public to private RELATED,ESTABLISHED
+  iptables:
+    chain: FORWARD
+    in_interface: "{{ public_interface }}"
+    out_interface: "{{ private_interface }}"
+    jump: ACCEPT
+    match: state
+    ctstate: RELATED,ESTABLISHED

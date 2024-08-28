@@ -1,0 +1,72 @@
+---
+- name: Create ca certs for fluent-bit and fluentd
+  block:
+    - name: Create CA main directory
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: 0700
+        owner: root
+        group: root
+        recurse: yes
+      with_items:
+        - "{{ dir }}"
+        - "{{ dir2 }}"
+
+    - name: Create CA sub directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: 0700
+        owner: root
+        group: root
+        recurse: yes
+      with_items:
+        - "{{ dir }}/private"
+        - "{{ dir }}/certs"
+        - "{{ dir }}/csr"
+        - "{{ dir2 }}/private"
+        - "{{ dir2 }}/certs"
+        - "{{ dir2 }}/csr"
+
+    - name: Create empty CA index file
+      copy:
+        dest: "{{ item }}/index.txt"
+        content: ""
+        force: no
+      with_items:
+        - "{{ dir }}"
+        - "{{ dir2 }}"
+
+    - name: Create serial file
+      copy:
+        dest: "{{ item }}/serial"
+        content: "1000"
+        force: no
+      with_items:
+        - "{{ dir }}"
+        - "{{ dir2 }}"
+
+    - name: Write openssl config
+      template:
+        src: "openssl.conf.j2"
+        dest: "{{ item }}/openssl.cnf"
+      with_items:
+        - "{{ dir }}"
+        - "{{ dir2 }}"
+
+    - name: Create CA private key
+      shell: openssl genrsa -out {{ dir }}/private/ca.key.pem 4096
+
+    - name: copy CA private key
+      copy: src={{ dir }}/private/ca.key.pem dest={{ dir2 }}/private/ca.key.pem remote_src=yes
+
+    - name: Create CA certificate
+      shell: >-
+        openssl req -config {{ dir }}/openssl.cnf -key {{ dir }}/private/ca.key.pem \
+        -new -x509 -days 3650 -sha256 -extensions v3_ca \
+        -out {{ dir }}/certs/ca.crt.pem -subj \
+        "/CN=fluentd"
+
+    - name: copy CA certificate
+      copy: src={{ dir }}/certs/ca.crt.pem dest={{ dir2 }}/certs/ca.crt.pem remote_src=yes

@@ -1,0 +1,107 @@
+[Global]
+auth-url = {{openstack_auth_url}}
+{% if  openstack_user_id is defined and openstack_user_id != "" %}
+user-id = {{openstack_user_id}}
+{% elif openstack_username is defined and openstack_username != "" %}
+username = "{{openstack_username}}"
+{% endif %}
+{% if secure_openstack_password is defined and secure_openstack_password %}
+password = "{{openstack_user_password | b64decode}}"
+{% else %}
+password = "{{openstack_user_password}}"
+{% endif %}
+{% if openstack_trust_id is defined and openstack_trust_id != "" %}
+trust-id = {{openstack_trust_id}}
+{% elif openstack_project_id is defined and openstack_project_id != "" %}
+tenant-id = {{openstack_project_id}}
+{% elif openstack_project_name is defined and openstack_project_name != "" %}
+tenant-name = "{{openstack_project_name}}"
+{% endif %}
+{% if  openstack_domain_id is defined and openstack_domain_id != "" %}
+domain-id = {{openstack_domain_id}}
+{% elif openstack_domain_name is defined and openstack_domain_name != "" %}
+domain-name = "{{openstack_domain_name}}"
+{% endif %}
+{% if openstack_user_domain_name is defined and openstack_user_domain_name != "" %}
+user-domain-name = "{{openstack_user_domain_name}}"
+{% endif %}
+{% if openstack_region is defined and openstack_region != "" %}
+region = "{{openstack_region}}"
+{% else %}
+region = regionOne
+{% endif %}
+{% if openstack_ca_cert is defined and openstack_ca_cert != "" %}
+ca-file = {{ openstack_ca_cert_path }}/os_cacert
+{% endif %}
+
+[LoadBalancer]
+{% if openstack_lb_version is defined and openstack_lb_version != "" %}
+lb-version = {{openstack_lb_version}}
+{% else %}
+lb-version = "invalid"
+{% endif %}
+{% if openstack_use_octavia is defined and openstack_use_octavia != "" %}
+use-octavia = {{openstack_use_octavia}}
+{% endif %}
+{% if openstack_subnet_id is defined and openstack_subnet_id != "" %}
+subnet-id = {{openstack_subnet_id}}
+{% endif %}
+{% if openstack_floating_network_id is defined and openstack_floating_network_id != "" %}
+floating-network-id = {{openstack_floating_network_id}}
+{% endif %}
+{% if openstack_lb_method is defined and openstack_lb_method != "" %}
+lb-method = {{openstack_lb_method}}
+{% endif %}
+{% if openstack_lb_provider is defined and openstack_lb_provider != "" %}
+lb-provider = {{openstack_lb_provider}}
+{% endif %}
+{% if openstack_create_monitor is defined and openstack_create_monitor != "" %}
+create-monitor = {{openstack_create_monitor}}
+{% endif %}
+{% if openstack_monitor_delay is defined and openstack_monitor_delay != "" %}
+monitor-delay = {{openstack_monitor_delay}}
+{% endif %}
+{% if openstack_monitor_timeout is defined and openstack_monitor_timeout != "" %}
+monitor-timeout = {{openstack_monitor_timeout}}
+{% endif %}
+{% if openstack_monitor_max_retries is defined and openstack_monitor_max_retries != "" %}
+monitor-max-retries = {{openstack_monitor_max_retries}}
+{% endif %}
+{% if openstack_manage_security_groups is defined and openstack_manage_security_groups != "" %}
+manage-security-groups = {{openstack_manage_security_groups}}
+{% endif %}
+
+[BlockStorage]
+{% if openstack_bs_version is defined and openstack_bs_version != "" %}
+bs-version = {{openstack_bs_version}}
+{% endif %}
+{% if openstack_trust_device_path is defined and openstack_trust_device_path != "" %}
+trust-device-path = {{openstack_trust_device_path}}
+{% endif %}
+{% if openstack_ignore_volume_az is defined and openstack_ignore_volume_az != "" %}
+ignore-volume-az = {{openstack_ignore_volume_az}}
+{% endif %}
+{% if openstack_node_volume_attach_limit is defined and openstack_node_volume_attach_limit != "" %}
+node-volume-attach-limit = {{openstack_node_volume_attach_limit}}
+{% endif %}
+{% if openstack_blockstorage_version is defined and openstack_blockstorage_version != "" %}
+version = {{openstack_blockstorage_version}}
+{% endif %}
+{% if openstack_rescan_on_resize is defined and openstack_rescan_on_resize | bool %}
+rescan-on-resize = true
+{% endif %}
+{% if openstack_legacy is defined and openstack_legacy | bool %}
+legacy = true
+{% endif %}
+
+[Networking]
+{% if openstack_internal_network_name is defined and openstack_internal_network_name != "" %}
+internal-network-name = "{{openstack_internal_network_name}}"
+{% endif %}
+{% if k8s_ip_version is defined and k8s_ip_version != "" %}
+k8s-ip-version = "{{k8s_ip_version}}"
+{% endif %}
+
+
+[Metadata]
+search-order = configDrive,metadataService

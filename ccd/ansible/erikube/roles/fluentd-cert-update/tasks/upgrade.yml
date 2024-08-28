@@ -1,0 +1,44 @@
+---
+- name: Create ca certs for fluentd
+  block:
+    - name: Create server private key
+      shell: openssl genrsa -out {{ dir }}/private/server.key.pem 4096
+
+    - name: Create server csr
+      shell: >-
+        openssl req -config {{ dir }}/openssl.cnf -key {{ dir }}/private/server.key.pem \
+        -new -sha256 -out {{ dir }}/csr/server.csr.pem  \
+        -subj "/CN=fluentd"
+
+    - name: Get serial number
+      shell: >-
+        openssl x509 -noout -serial -in {{ dir }}/certs/server.crt.pem | cut -d'=' -f2
+      register: serial_result
+
+    - name: Revoke certificate if it already exists
+      shell: >-
+        openssl ca -revoke {{ dir }}/certs/server.crt.pem -config {{ dir }}/openssl.cnf
+      when:
+        - serial_result.stdout != 1000
+        - not serial_result.stderr
+        - not "Already revoked" in serial_result.stderr
+
+    - name: Create server certificate
+      shell: >-
+        openssl ca -batch -config {{ dir }}/openssl.cnf -outdir {{ dir }}/certs  \
+        -cert {{ dir }}/certs/ca.crt.pem -keyfile {{ dir }}/private/ca.key.pem \
+        -extensions server_cert -days 3650 -notext -md sha256 \
+        -in {{ dir }}/csr/server.csr.pem -out {{ dir }}/certs/server.crt.pem \
+        -subj "/CN=fluentd"
+
+    - name: Update fluentd secret with new certificates
+      shell: >-
+        {{ kubectl }} create secret generic fluentd-tls -n ccd-logging \
+        --from-file=ca.crt.pem={{ dir }}/certs/ca.crt.pem \
+        --from-file=server.crt.pem={{ dir }}/certs/server.crt.pem \
+        --from-file=server.key.pem={{ dir }}/private/server.key.pem \
+        --dry-run=client -o yaml | {{ kubectl }} apply -f -
+      register: update_secret
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: update_secret.rc == 0

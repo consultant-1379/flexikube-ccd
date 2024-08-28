@@ -1,0 +1,162 @@
+---
+- name: Check CA crt exists
+  stat:
+    path: "{{ kube_cert_dir }}/ca.crt"
+  register: ca_cert_file
+  become: yes
+
+- name: check CA key exists
+  stat:
+    path: "{{ kube_cert_dir }}/ca.key"
+  register: ca_key_file
+  become: yes
+
+- name: create Kubernetes certificate directory
+  file:
+    path: "{{ kube_cert_dir }}"
+    mode: "{{ file_default_mode }}"
+    owner: "{{ file_default_owner }}"
+    group: "{{ file_default_group }}"
+    state: directory
+  become: yes
+
+- set_fact:
+      create_cert_dex: false
+  when: dex_cert_file is defined or dex_cert_content is defined
+
+- set_fact:
+      create_cert_dex: true
+  when: dex_cert_file is undefined and dex_cert_content is undefined
+
+- block:
+  - name: create SAN config file
+    copy:
+      dest: "/sanconfigfile_dex"
+      content: |
+        [ req ]
+        distinguished_name = req_distinguished_name
+        req_extensions     = req_ext
+
+        [ req_distinguished_name ]
+
+        [ req_ext  ]
+        subjectAltName     = @alt_names
+
+        [alt_names]
+        DNS.1              = {{ dex_ingress_host }}
+        DNS.2              = {{ auth_client_ingress_host }}
+    become: yes
+
+  - name: generate a DEX key
+    command: |
+      openssl genrsa -out "{{ kube_cert_dir }}/dex.key" 4096
+    args:
+      creates: "{{ kube_cert_dir }}/dex.key"
+    become: yes
+
+  - name: Generate self-signed certificate
+    command: |
+      openssl req -x509 -new -sha256 -nodes -days 3650 \
+        -key "{{ kube_cert_dir }}/dex.key" \
+        -out "{{ kube_cert_dir }}/dex.crt" \
+        -subj "/CN={{ dex_ingress_host }}" \
+        -extensions req_ext -config /sanconfigfile_dex
+    args:
+      creates: "{{ kube_cert_dir }}/dex.crt"
+    become: yes
+    when:
+    - not ca_cert_file.stat.exists or not ca_key_file.stat.exists
+
+  - block:
+    - name: Create a DEX csr
+      command: |
+        openssl req -new -nodes -days 3650 \
+          -key "{{ kube_cert_dir }}/dex.key" \
+          -out "{{ kube_cert_dir }}/dex.csr" \
+          -subj "/CN={{ dex_ingress_host }}" \
+          -extensions req_ext -config /sanconfigfile_dex
+      args:
+        creates: "{{ kube_cert_dir }}/dex.csr"
+      become: yes
+    - name: Create a DEX certificate and sign it with trusted cert
+      command: |
+        openssl x509 -req -days 3650 \
+          -in "{{ kube_cert_dir }}/dex.csr" \
+          -CA "{{ kube_cert_dir }}/ca.crt" \
+          -CAkey "{{ kube_cert_dir }}/ca.key" \
+          -CAcreateserial \
+          -out "{{ kube_cert_dir }}/dex.crt" \
+          -extensions req_ext -extfile /sanconfigfile_dex
+      args:
+        creates: "{{ kube_cert_dir }}/dex.crt"
+      become: yes
+    when:
+    - ca_cert_file.stat.exists and ca_key_file.stat.exists
+
+  - name: get temp dir
+    shell: mktemp -d
+    delegate_to: localhost
+    register: tmpdir
+  - set_fact:
+      local_tmpdir: "{{ tmpdir.stdout }}"
+  - name: fetch a DEX cert
+    fetch:
+      src: "{{ kube_cert_dir }}/dex.crt"
+      dest: "{{ local_tmpdir }}/dex.crt"
+      flat: yes
+    become: yes
+  - name: fetch a DEX key
+    fetch:
+      src: "{{ kube_cert_dir }}/dex.key"
+      dest: "{{ local_tmpdir }}/dex.key"
+      flat: yes
+    become: yes
+  when:
+  - create_cert_dex | bool
+  - inventory_hostname == groups['master'][0]
+
+- name: distribute DEX cert
+  copy:
+    src: "{{ hostvars[groups['master'][0]]['local_tmpdir'] }}/dex.crt"
+    dest: "{{ kube_cert_dir }}/dex.crt"
+  become: yes
+  when: create_cert_dex | bool
+
+- block:
+  - name: distribute DEX cert if defined (from file)
+    copy:
+      src: "{{ dex_cert_file }}"
+      dest: "{{ kube_cert_dir }}/dex.crt"
+    become: yes
+
+  - name: distribute DEX key if defined (from file)
+    copy:
+      src: "{{ dex_key_file }}"
+      dest: "{{ kube_cert_dir }}/dex.key"
+    become: yes
+  when: dex_cert_file is defined and not (image_based_deployment | default(false) | bool)
+
+- block:
+  - name: distribute DEX cert if defined (from variable)
+    copy:
+      content: "{{ dex_cert_content }}"
+      dest: "{{ kube_cert_dir }}/dex.crt"
+    become: yes
+
+  - name: distribute DEX key if defined (from variable)
+    copy:
+      content: "{{ dex_key_content }}"
+      dest: "{{ kube_cert_dir }}/dex.key"
+    become: yes
+  when: dex_cert_content is defined
+
+- name: assign Dex cert variable
+  set_fact:
+    dex_cert_file: "{{ kube_cert_dir }}/dex.crt"
+    dex_key_file: "{{ kube_cert_dir }}/dex.key"
+
+- name: delete dex san config file
+  file:
+    name: /sanconfigfile_dex
+    state: absent
+  become: yes

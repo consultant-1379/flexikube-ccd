@@ -1,0 +1,77 @@
+---
+- name: Include services
+  include_vars: "{{ item }}"
+  with_first_found:
+    - files:
+      - "vars/services.yml"
+
+- name: Check whether services are disabled
+  become: true
+  block:
+    - name: Get service status
+      command: systemctl -p ActiveState show "{{item}}"
+      register: service_status
+      with_items: "{{disable_services | default([])}}"
+      ignore_errors: True
+      failed_when: false
+
+    - name: Display services which are currently disabled or not
+      assert:
+        that: item.stdout.split('=')[1] == "inactive"
+        fail_msg: "Please disable the {{item.item}} service in {{ansible_hostname}}"
+        quiet: true
+      loop: "{{service_status.results}}"
+      loop_control:
+        label: "{{item.item}}"
+
+- name: Check whether specifice Debian OS services are disabled
+  become: true
+  block:
+    - name: Get service status for Debian specific services
+      command: systemctl -p ActiveState show "{{item}}"
+      register: os_service_status
+      with_items: "{{debian_specific_disable_services | default([])}}"
+      ignore_errors: True
+      failed_when: false
+
+    - name: Display services which are currently disabled or not for Debian specific services
+      assert:
+        that: item.stdout.split('=')[1] == "inactive"
+        fail_msg: "Please disable the {{item.item}} service in {{ansible_hostname}}"
+        quiet: true
+      loop: "{{os_service_status.results}}"
+      loop_control:
+        label: "{{item.item}}"
+  when: ansible_os_family == "Debian"
+
+- name: Check firewall is disabled for Debian
+  become: true
+  block:
+    - name: Get firewall status for Debian
+      command: ufw status
+      register: ufw_status
+      ignore_errors: true
+      failed_when: false
+
+    - name: Display firewall status for Debian
+      assert:
+        that: ufw_status.stdout.split(':')[1] == " inactive"
+        fail_msg: Please disable the Ubuntu firewall on {{ansible_hostname}}"
+        quiet: true
+  when: ansible_os_family == "Debian"
+
+- name: Check firewall is disabled for SLES
+  become: true
+  block:
+    - name: Get firewall status
+      command: systemctl -p ActiveState show firewalld
+      register: firewalld_status
+      ignore_errors: true
+      failed_when: false
+
+    - name: Display firewall status
+      assert:
+        that: firewalld_status.stdout.split('=')[1] == "inactive"
+        fail_msg: Please disable the Ubuntu firewall on {{ansible_hostname}}"
+        quiet: true
+  when: ansible_os_family == "Suse" or ansible_os_family == "RedHat"

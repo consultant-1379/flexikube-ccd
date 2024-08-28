@@ -1,0 +1,130 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ccd-license-consumer
+  namespace: {{ ccd_lc_namespace }}
+  labels:
+    app: ccd-license-consumer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ccd-license-consumer
+  template:
+    metadata:
+      labels:
+        app: ccd-license-consumer
+      annotations:
+        container.apparmor.security.beta.kubernetes.io/ccd-license-consumer: "runtime/default"
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+    spec:
+      priorityClassName: system-cluster-critical
+      serviceAccountName: ccd-license-consumer
+{% if  infra_node_pool_name is defined %}
+      nodeSelector:
+        node-pool: "{{ infra_node_pool_name }}"
+{% endif %}
+      imagePullSecrets:
+        - name: local-registry-secret
+      containers:
+        - name: ccd-license-consumer
+          image: {{ ccd_lc_image }}
+
+          resources:
+            requests:
+              cpu: {{ ccd_lc_cpu_req }}
+              memory: {{ ccd_lc_mem_req }}
+            limits:
+              cpu: {{ ccd_lc_cpu_limit }}
+              memory: {{ ccd_lc_mem_limit }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            privileged: false
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: RuntimeDefault
+          args:
+        {% for item in enable_flags if item != '' %}
+          - --enable-flags={{ item }}
+        {% endfor %}
+
+          env:
+          - name: LM_URL
+            value: {{ license_manager_url }}
+
+          - name: LC_PROD_TYPE
+            value: {{ ccd_lc_product_type }}
+
+          - name: LC_LIC_REPORT_TYPE
+            value: {{ ccd_lc_report_type }}
+
+          - name: LC_CONSUMER_ID
+            value: {{ ccd_lc_consumer_id }}
+
+          - name: LC_LOG_LEVEL
+            value: {{ ccd_lc_log_level }}
+
+          - name: LC_LISTEN_PORT
+            value: "8080"
+
+          ports:
+            - containerPort: 8000
+              name: http
+              protocol: TCP
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 3
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 184979
+        runAsGroup: 184979
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app: ccd-license-consumer
+  name: ccd-license-consumer
+  namespace: {{ ccd_lc_namespace }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: reader-for-license-consumer
+rules:
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "watch", "list"]
+
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: license-consumer-clusterrolebinding
+subjects:
+- kind: ServiceAccount
+  name: ccd-license-consumer
+  namespace: {{ ccd_lc_namespace }}
+roleRef:
+  kind: ClusterRole
+  name: reader-for-license-consumer
+  apiGroup: ""

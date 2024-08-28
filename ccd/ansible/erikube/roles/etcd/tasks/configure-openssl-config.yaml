@@ -1,0 +1,32 @@
+---
+- name: Change openssl configuration to use new_ca.crt and new_ca.key
+  block:
+  - name: Create backup of openssl.cnf
+    copy:
+      src: "{{ etcd_openssl_conf }}"
+      dest: "{{ etcd_openssl_conf }}_backup"
+      remote_src: true
+
+  - name: replace ca.crt with new_ca.crt
+    lineinfile:
+      path: "{{ etcd_openssl_conf }}"
+      regexp: '^(.*)ca.crt(.*)$'
+      line: 'certificate     = {{ etcd_ca_dir }}/new_ca.crt'
+      backrefs: yes
+  - name: replace ca.key with new_ca.key
+    lineinfile:
+      path: "{{ etcd_openssl_conf }}"
+      regexp: '^(.*)ca.key(.*)$'
+      line: 'private_key     = {{ etcd_ca_dir }}/new_ca.key'
+      backrefs: yes
+
+  when: openssl_configure_action == "change"
+
+- name: Revert openssl configuration to use old settings
+  block:
+  - name: Replace openssl configuration with backup file
+    copy:
+      src: "{{ etcd_openssl_conf }}_backup"
+      dest: "{{ etcd_openssl_conf }}"
+      remote_src: true
+  when: openssl_configure_action == "revert"

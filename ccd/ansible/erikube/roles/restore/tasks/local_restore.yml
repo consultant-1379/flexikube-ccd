@@ -1,0 +1,72 @@
+---
+- name: Include backup variable defaults
+  include_vars: roles/backup/defaults/main.yml
+
+- block:
+  - name: Create temp directory
+    become: no
+    run_once: true
+    local_action: command mktemp -td erikube-restore-ansible-XXXXXX
+    register: tempdir
+    changed_when: False
+
+  - name: Extract backup to temp directory
+    become: no
+    run_once: true
+    local_action: command tar -xzvf {{ backup_file_path }} -C {{ tempdir.stdout }}
+
+  - name: Copy hosts backups to remote hosts
+    copy:
+      src: "{{ tempdir.stdout }}/{{ ansible_hostname }}.tgz"
+      dest: /tmp/{{ ansible_hostname }}.tgz
+
+  - name: Copy etcd snapshot to etcd hosts
+    copy:
+      src: "{{ tempdir.stdout }}/{{ etcd_snapshot_name }}"
+      dest: /tmp/{{ etcd_snapshot_name }}
+    when: inventory_hostname in etcd_hosts
+
+  - name: Copy k8s-bins.tgz to kuberenetes nodes
+    copy:
+      src: "{{ tempdir.stdout }}/k8s-bins.tgz"
+      dest: /tmp/k8s-bins.tgz
+    when: inventory_hostname in kube_hosts
+
+  - name: Copy etcd-bins.tgz to etcd nodes
+    copy:
+      src: "{{ tempdir.stdout }}/etcd-bins.tgz"
+      dest: /tmp/etcd-bins.tgz
+    when: inventory_hostname in etcd_hosts
+  rescue:
+    - name: Delete etcd snapshot
+      file:
+        path: /tmp/{{ etcd_snapshot_name }}
+        state: absent
+      changed_when: False
+      when: inventory_hostname in etcd_hosts
+
+    - name: Delete host backup
+      file:
+        path: /tmp/{{ ansible_hostname }}.tgz
+        state: absent
+
+    - name: Delete k8s-bins.tgz
+      file:
+        path: /tmp/k8s-bins.tgz
+        state: absent
+      when: inventory_hostname in kube_hosts
+
+    - name: Delete etcd-bins.tgz
+      file:
+        path: /tmp/etcd-bins.tgz
+        state: absent
+      when: inventory_hostname in etcd_hosts
+  always:
+    - name: Delete temp directory
+      become: no
+      run_once: true
+      local_action:
+        module: file
+        name: "{{ tempdir.stdout }}"
+        state: absent
+      changed_when: False

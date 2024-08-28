@@ -1,0 +1,143 @@
+---
+- name: Create temp directory
+  command: mktemp -d /tmp/authclient-XXXXXX
+  register: tempdir
+  changed_when: false
+- set_fact:
+    tempdir: "{{ tempdir.stdout }}"
+
+- name: Check for existing deployment
+  command: "{{ kubectl }} -n {{ auth_client_namespace }} get deployment auth-client"
+  register: deployment_exist
+  failed_when: false
+  changed_when: false
+  become: yes
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (deployment_exist.rc == 0 or "not found" in deployment_exist.stderr)
+
+- debug:
+    msg: "{{ deployment_exist }}"
+
+- name: Update pods with new image version
+  command: "{{ kubectl }} -n {{ auth_client_namespace }} set image deployment/auth-client auth-client={{ auth_client_image }}"
+  register: set_image
+  changed_when: "'image updated' in set_image.stdout"
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: set_image.rc == 0
+  when: deployment_exist.rc == 0
+  become: yes
+
+- name: Get dex service ip
+  register: dex_service_ip
+  become: yes
+  command: >
+    {{ kubectl }} get service dex -n kube-system  --output jsonpath={.spec.clusterIP}
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (dex_service_ip.rc == 0 or "not found" in dex_service_ip.stderr)
+- set_fact:
+    dex_service_ip: "{{ dex_service_ip.stdout }}"
+  changed_when: true
+
+- name: Get cluster context
+  become: yes
+  command: "{{ kubectl }} config view -o jsonpath='{.contexts[0].context.cluster}'"
+  register: context
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: context.rc == 0
+- set_fact:
+    cluster_context: "{{ context.stdout }}"
+
+- name: Get server URL
+  become: yes
+  command: "{{ kubectl }} config view -o jsonpath='{.clusters[0].cluster.server}'"
+  register: cluster_url
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (cluster_url.rc == 0 or "not found" in cluster_url.stderr)
+
+- set_fact:
+    cluster_server_url: "{{ cluster_url.stdout }}"
+  when: cluster_url.stdout
+
+- set_fact:
+    cluster_server_url: "https://{{ kube_apiserver_ip }}:{{ kube_apiserver_port }}"
+  when: cluster_server_url is undefined
+
+- name: Re-create auth-client manifest
+  template:
+    src: auth.j2
+    dest: "{{ tempdir }}/authclient.yml"
+  vars:
+    - ingress_class: "{{ authclient_ingress_controller | default(default_ingress_controller) | default('') }}"
+
+- name: Create auth-client resources
+  become: yes
+  command: "{{ kubectl }} -n kube-system apply -f {{ tempdir }}/authclient.yml"
+  register: apply
+  changed_when: '"configured" or "created" in apply.stdout'
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: apply.rc == 0
+
+- name: Get auth-client instance
+  register: loopoutput
+  shell: "{{ kubectl }} get pods -n kube-system -l app=auth-client -o jsonpath\\={.items[*].metadata.name}"
+  become: yes
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (loopoutput.rc == 0 or "not found" in loopoutput.stderr)
+
+- name: Restart auth-client instance
+  command: "{{ kubectl }} delete pod -n kube-system {{ item }}"
+  become: yes
+  with_list: "{{ loopoutput.stdout.split(' ') }}"
+  ignore_errors: true
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (result.rc == 0 or "not found" in result.stderr)
+
+- name: Wait until auth client pod is running
+  become: yes
+  shell: "{{ kubectl }} -n kube-system get pods | grep auth-client | grep -e Running "
+  register: task_result
+  until: task_result.rc == 0
+  retries: 100
+  delay: 5
+
+- name: Get dex instances
+  register: loopoutput
+  shell: "{{ kubectl }} get pods -n kube-system -l app=dex -o jsonpath\\={.items[*].metadata.name}"
+  become: yes
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (loopoutput.rc == 0 or "not found" in loopoutput.stderr)
+
+- name: Restart dex instances
+  command: "{{ kubectl }} delete pod -n kube-system {{ item }}"
+  become: yes
+  with_list: "{{ loopoutput.stdout.split(' ') }}"
+  ignore_errors: true
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (result.rc == 0 or "not found" in result.stderr)
+
+- name: Wait until dex pod is running
+  become: yes
+  shell: "{{ kubectl }} -n kube-system get pods | grep dex | grep -e Running "
+  register: task_result
+  until: task_result.rc == 0
+  retries: 100
+  delay: 5
+
+- name: Delete temp directory
+  file:
+    name: "{{ tempdir }}"
+    state: absent
+  changed_when: false
+

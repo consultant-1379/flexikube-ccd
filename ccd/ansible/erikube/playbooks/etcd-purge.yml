@@ -1,0 +1,16 @@
+---
+# Destroy the etcd cluster
+# - stop etcd
+# - clean up data
+
+- name: Gather facts as non root
+  hosts: [etcd]
+  gather_facts: yes
+
+- name: Purge the etcd cluster
+  hosts: [etcd]
+  become: yes
+  tasks:
+    - include_role:
+        name: etcd
+        tasks_from: purge

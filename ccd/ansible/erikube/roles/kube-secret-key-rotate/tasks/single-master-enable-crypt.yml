@@ -1,0 +1,19 @@
+# This flow is used when there is only one master and secrets encryption
+# has not been enabled previously.
+
+
+- name: Create cryptprov keys
+  include_tasks: update-cryptprov-cfg.yml
+  vars:
+    conf_file_exists: false
+    update_phase: 0
+
+- name: Update kubeadm configset
+  include_tasks: kubeadm-config-update.yml
+
+- name: Update kube-apiserver.yaml manifest
+  include_tasks: kubeapi-config-update.yml
+
+- name: Reencrypt secrets with new key
+  include_tasks: kube-process-secrets.yml
+

@@ -1,0 +1,7 @@
+---
+# defaults for kube-node
+
+# kubeadm flag to flip preflight checks, checks are enabled by default.
+kube_skip_preflight_checks: false
+
+cloud_provider: ""

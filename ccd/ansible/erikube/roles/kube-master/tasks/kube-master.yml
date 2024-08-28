@@ -1,0 +1,580 @@
+---
+# Serialize for each master to avoid race problems with CA's serial file
+# See https://github.com/ansible/ansible/issues/12170
+- name: Update /etc/hosts file with hostnames
+  include_tasks: "{{ role_path}}/../kube-common/tasks/update-etc-hosts.yml"
+
+- name: Update /etc/resolv.conf file with hostnames
+  include_tasks: "{{ role_path}}/../kube-common/tasks/update-etc-resolv.yml"
+
+- name: Create etcd client certificates for kubernetes
+  vars:
+    etcd_cert_config_dir: "{{ kube_etcd_cert_dir }}"
+    etcd_cert_subdir: "kubernetes-{{ ansible_hostname }}"
+    etcd_cert_prefix: "{{ kube_etcd_cert_prefix }}"
+    etcd_client_cert_cn: "kubernetes"
+  include_role:
+    name: etcd
+    tasks_from: get-client-cert
+  when: hostvars[host_item].inventory_hostname == inventory_hostname
+  with_items: "{{ ansible_play_hosts }}"
+  loop_control:
+    loop_var: host_item
+
+- name: Create directory {{ kube_cert_dir }}
+  file:
+    name: "{{ kube_cert_dir }}"
+    state: directory
+    mode: "{{ file_default_mode }}"
+    owner: "{{ file_default_owner }}"
+    group: "{{ file_default_group }}"
+  become: yes
+
+- name: Copy oidc CA to master
+  copy:
+    src: "{{ kube_oidc_ca_file_path }}"
+    dest: "{{ kube_cert_dir }}/oidc-ca.pem"
+  become: yes
+  when: kube_oidc_ca_file_path is defined
+
+- name: Create directory {{ erikube_config_dir }}
+  file:
+    name: "{{ erikube_config_dir }}"
+    mode: "{{ file_default_mode }}"
+    owner: "{{ file_default_owner }}"
+    group: "{{ file_default_group }}"
+    state: directory
+  become: yes
+
+- name: Create audit policy file
+  template:
+    src: "audit-policy.yml.j2"
+    dest: "{{ kube_auditlog_policy_file }}"
+  become: yes
+
+- name: Set first_master
+  set_fact:
+    first_master: "{{ alternative_first_master }}"
+  when: alternative_first_master is defined
+
+- name: Check if crypto provider is already set
+  stat:
+    path: "{{ kube_cryptprov_cfg_file }}"
+  register: cryptprov_conf_file
+  when:
+    - inventory_hostname == first_master
+  become: yes
+
+- name: Generate secrets key
+  block:
+    - name: Generate secrets key
+      set_fact:
+        newkeystruct:
+          name: "key-{{ lookup('pipe','date +%Y%m%dT%H%M%S') }}"
+          secret: "{{ lookup('keygen', 32) }}"
+
+    - set_fact:
+        keylist: "{{ [ newkeystruct ] }}"
+
+    - name: Create crypto provider config file
+      template:
+        src: "cryptprov-cfg.yml.j2"
+        dest: "{{ kube_cryptprov_cfg_file }}"
+        mode: "0600"
+      become: yes
+
+  when:
+    - inventory_hostname == first_master
+    - not hostvars[first_master].cryptprov_conf_file.stat.exists
+
+- name: Slurp crypto cfg from first master
+  slurp:
+    src: "{{ kube_cryptprov_cfg_file }}"
+  register: cryptprov_conf
+  delegate_to: "{{ first_master }}"
+  run_once: true
+  become: yes
+
+- name: Store crypto cfg in hostvars of {{ first_master }}
+  set_fact:
+    cryptprov_conf: "{{ cryptprov_conf }}"
+  delegate_to: "{{ first_master }}"
+  delegate_facts: true
+
+- name: Write out crypto cfg
+  copy:
+    dest: "{{ kube_cryptprov_cfg_file }}"
+    content: "{{ hostvars[first_master].cryptprov_conf['content'] | b64decode }}"
+    owner: root
+    group: root
+    mode: 0600
+  no_log: true
+  when:
+    - inventory_hostname != first_master
+  become: yes
+
+- name: Write kube-apiserver tls certificate to file
+  block:
+    - name: Write kube-apiserver tls certificate
+      copy:
+        content: "{{ kube_api_cert }}"
+        dest: "{{kube_cert_dir}}/kube_api.crt"
+        mode: '0644'
+      become: yes
+
+    - name: Write kube-apiserver tls certificate key
+      copy:
+        content: "{{ kube_api_key }}"
+        dest: "{{kube_cert_dir}}/kube_api.key"
+        mode: '0600'
+      become: yes
+
+  when: kube_api_cert is defined and kube_api_key is defined
+
+- name: Create pss rules directory
+  file:
+    path: /etc/kubernetes/policies
+    state: directory
+    mode: 0700
+  become: yes
+
+- name: Prepare default pss template
+  template: >
+    src="{{ item }}.j2"
+    dest="/etc/kubernetes/policies/{{ item }}"
+  with_items:
+  - pss-default-rules.yaml
+  become: yes
+
+- name: Create kubeadm config file
+  template:
+    src: "kubeadm-cfg.yml.j2"
+    dest: "{{ kube_config_dir }}/kubeadm-config.yaml"
+  become: yes
+  register: kubeadm_config
+
+- name: Check if kubeadm has already run
+  stat:
+    path: "{{ kube_config_dir }}/admin.conf"
+  register: admin_conf
+  become: yes
+
+- name: Configure the first master nodes
+  block:
+    - name: Pull the coredns container
+      become: yes
+      shell: "{{ ctr_cmd }} -n k8s.io image pull -u {{ local_registry_user }}:{{ local_registry_password }} {{ coredns_image }}"
+      when: local_registry_user is defined and local_registry_user != ""
+
+    - name: Pull the pause container
+      become: yes
+      shell: "{{ ctr_cmd }} -n k8s.io image pull -u {{ local_registry_user }}:{{ local_registry_password }} {{ erikube_pause_image }}"
+      when: local_registry_user is defined and local_registry_user != ""
+
+    - name: Pull the pause container
+      become: yes
+      shell: "{{ ctr_cmd }} -n k8s.io image pull {{ erikube_pause_image }}"
+      when: local_registry_user is not defined or local_registry_user == ""
+
+    - name: Tag the pause container with the tag k8s expects
+      become: yes
+      shell: "{{ ctr_cmd }} -n k8s.io image tag {{ erikube_pause_image }} {{ kubernetes_pause_image }}"
+      register: ctr_tag
+      failed_when: ctr_tag.rc != 0 and "already exists" not in ctr_tag.stderr
+
+    - name: Pull the erikube client container
+      become: yes
+      shell: "{{ ctr_cmd }} -n k8s.io image pull -u {{ local_registry_user }}:{{ local_registry_password }} {{ erikube_client_image }}"
+      when: local_registry_user is defined and local_registry_user != ""
+
+    - block:
+      - name: Pull the coredns container if authorized
+        become: yes
+        shell: "{{ ctr_cmd }} -n k8s.io image pull -u {{ local_registry_user }}:{{ local_registry_password }} {{ coredns_image }}"
+        when: local_registry_user is defined and local_registry_user != ""
+
+      - name: Pull the coredns container if unauthorized
+        become: yes
+        shell: "{{ ctr_cmd }} -n k8s.io image pull {{ coredns_image }}"
+        when: local_registry_user is not defined or local_registry_user == ""
+
+      - name: Tag the coredns container with the tag k8s expects
+        become: yes
+        shell: "{{ ctr_cmd }} -n k8s.io image tag {{ coredns_image }} {{ kubernetes_coredns_image }}"
+        register: ctr_tag
+        failed_when: ctr_tag.rc != 0 and "already exists" not in ctr_tag.stderr
+
+      - name: Fix coredns image version in {{ kube_config_dir }}/kubeadm-config.yaml
+        become: yes
+        shell: "sed -i 's/{{ opt_coredns_version }}/{{ major_coredns_version }}/g' {{ kube_config_dir }}/kubeadm-config.yaml"
+
+      when: not image_based_deployment | default(false) | bool
+
+    - name: Initialize first Kubernetes master
+      command: >
+        {{ kubeadm_cmd }} init --config {{ kube_config_dir }}/kubeadm-config.yaml
+        --ignore-preflight-errors=Port-{{ kube_apiserver_port }}
+        --ignore-preflight-errors=FileExisting-crictl
+        --ignore-preflight-errors=DirAvailable--var-lib-etcd
+        --ignore-preflight-errors=Port-2379
+        --ignore-preflight-errors=HTTPProxy
+      register: kubeadm_init
+      become: yes
+      ignore_errors: yes
+      environment:
+        PATH: /usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin:{{ ansible_env.PATH }}
+
+    # - debug: { msg: "{{ kubeadm_init.stdout.split('\n') }}" }
+    # - debug: { msg: "{{ kubeadm_init.stderr.split('\n') }}" }
+    - assert:
+        that:
+          - kubeadm_init.rc == 0
+        fail_msg: >-
+          First kubernetes master initialized failed.
+          stdout: {{ kubeadm_init.stdout.split('\n') }}
+          stderr: {{ kubeadm_init.stderr.split('\n') }}"
+        success_msg: "First kubernetes master initialized successfully"
+
+    - name: Create bootstrap fixed token for image based deployment
+      become: yes
+      shell: "{{ kubeadm_cmd }} token create {{ kube_bootstrap_token }} --ttl 0 --description 'Create bootstrap fixed token for image based deployment'"
+      when: kube_bootstrap_token is defined
+
+  when: inventory_hostname == first_master and not admin_conf.stat.exists
+
+# slurping and then copying with_items files hits a bug in ansible resulting in 20+ minutes delay.
+# to work around that we zip the files we want to transfer so only one file needs to be copied.
+- name: Prepare kubeadm configuration for other master nodes
+  block:
+    # apiserver cert and key are excluded because they need to be generated for each master separately
+    - name: Prepare kubeadm certs
+      archive:
+        path: "{{ kube_cert_dir }}/*"
+        dest: "{{ kube_cert_dir }}/all.tgz"
+        exclude_path:
+          - "{{ kube_cert_dir }}/apiserver.*"
+
+    - name: Create local temp folder
+      tempfile:
+        state: directory
+      become: no
+      delegate_to: localhost
+      register: tmpdir
+
+    - name: Fetch kubeadm certs from {{ first_master }}
+      fetch:
+        src: "{{ kube_cert_dir }}/all.tgz"
+        dest: "{{ tmpdir.path }}/"
+        flat: yes
+
+    - name: Store kubeadm certs in hostvars of {{ first_master }}
+      set_fact:
+        tmpdir: "{{ tmpdir }}"
+      delegate_facts: true
+
+    - name: Cleanup
+      file:
+        path: "{{ kube_cert_dir }}/all.tgz"
+        state: absent
+
+  delegate_to: "{{ first_master }}"
+  run_once: true
+  become: yes
+
+- name: Configure other Master nodes
+  block:
+    - name: Copy kubeadm certs
+      unarchive:
+        src: "{{ hostvars[first_master].tmpdir.path }}/all.tgz"
+        dest: "{{ kube_cert_dir }}/"
+
+    - name: Pull the coredns container
+      become: yes
+      shell: "{{ ctr_cmd }} -n k8s.io image pull -u {{ local_registry_user }}:{{ local_registry_password }} {{ coredns_image }}"
+      when: local_registry_user is defined and local_registry_user != ""
+
+    - name: Pull the pause container so we can tag it
+      shell: "{{ ctr_cmd }} -n k8s.io image pull -u {{ local_registry_user }}:{{ local_registry_password }} {{ erikube_pause_image }}"
+      when: local_registry_user is defined and local_registry_user != ""
+
+    - name: Pull the pause container
+      become: yes
+      shell: "{{ ctr_cmd }} -n k8s.io image pull {{ erikube_pause_image }}"
+      when: local_registry_user is not defined or local_registry_user == ""
+
+    - name: Tag the pause container with the tag k8s expects
+      become: yes
+      shell: "{{ ctr_cmd }} -n k8s.io image tag {{ erikube_pause_image }} {{ kubernetes_pause_image }}"
+      register: ctr_tag
+      failed_when: ctr_tag.rc != 0 and "already exists" not in ctr_tag.stderr
+
+    - name: Pull the erikube client container
+      become: yes
+      shell: "{{ ctr_cmd }} -n k8s.io image pull -u {{ local_registry_user }}:{{ local_registry_password }} {{ erikube_client_image }}"
+      when: local_registry_user is defined and local_registry_user != ""
+
+    - block:
+      - name: Pull the coredns container if authorized
+        become: yes
+        shell: "{{ ctr_cmd }} -n k8s.io image pull -u {{ local_registry_user }}:{{ local_registry_password }} {{ coredns_image }}"
+        when: local_registry_user is defined and local_registry_user != ""
+
+      - name: Pull the coredns container if unauthorized
+        become: yes
+        shell: "{{ ctr_cmd }} -n k8s.io image pull {{ coredns_image }}"
+        when: local_registry_user is not defined or local_registry_user == ""
+
+      - name: Tag the coredns container with the tag k8s expects
+        become: yes
+        shell: "{{ ctr_cmd }} -n k8s.io image tag {{ coredns_image }} {{ kubernetes_coredns_image }}"
+        register: ctr_tag
+        failed_when: ctr_tag.rc != 0 and "already exists" not in ctr_tag.stderr
+
+      - name: Fix coredns image version in {{ kube_config_dir }}/kubeadm-config.yaml
+        become: yes
+        shell: "sed -i 's/{{ opt_coredns_version }}/{{ major_coredns_version }}/g' {{ kube_config_dir }}/kubeadm-config.yaml"
+
+      when: not image_based_deployment | default(false) | bool
+
+    - name: Initialize other Kubernetes masters
+      command: >
+        {{ kubeadm_cmd }} init --config {{ kube_config_dir }}/kubeadm-config.yaml
+        --ignore-preflight-errors=Port-{{ kube_apiserver_port }}
+        --ignore-preflight-errors=FileExisting-crictl
+        --ignore-preflight-errors=DirAvailable--var-lib-etcd
+        --ignore-preflight-errors=Port-2379
+        --ignore-preflight-errors=HTTPProxy
+      ignore_errors: yes
+      register: kubeadm_init
+      environment:
+        PATH: /usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin:{{ ansible_env.PATH }}
+
+    # - debug: { msg: "{{ kubeadm_init.stdout.split('\n') }}" }
+    # - debug: { msg: "{{ kubeadm_init.stderr.split('\n') }}" }
+    - assert:
+        that:
+          - kubeadm_init.rc == 0
+        fail_msg: >-
+          Other kubernetes master initialized failed.
+          stdout: {{ kubeadm_init.stdout.split('\n') }}
+          stderr: {{ kubeadm_init.stderr.split('\n') }}"
+        success_msg: "Other kubernetes master initialized successfully"
+
+  when:
+    - inventory_hostname != first_master
+    - not admin_conf.stat.exists
+  become: yes
+
+- name: Cleanup
+  file:
+    path: "{{ hostvars[first_master].tmpdir.path }}/"
+    state: absent
+  delegate_to: localhost
+  run_once: yes
+
+- name: Restart kubelet service
+  systemd:
+    name: kubelet
+    state: restarted
+    daemon_reload: yes
+  become: yes
+
+- name: Verify kubectl is successfully running
+  shell: "{{ kubectl }} get pods -A"
+  register: kubectl_running
+  until: kubectl_running.rc == 0
+  retries: 50
+  delay: 2
+  become: yes
+
+# Configure authenticated local registry secret for kube-system namespace
+- name: Configure local registry
+  block:
+    - name: Create kube-system secret for accessing local registry
+      shell: |
+        {{ kubectl }} create secret docker-registry local-registry-secret \
+        --docker-server={{ 'registry.eccd.local:5000' if local_registry_user is defined and local_registry_user != "" else 'null.eccd.local' }} \
+        --docker-username={{ local_registry_user if local_registry_user is defined and local_registry_user != "" else 'null' }} \
+        --docker-password={{ local_registry_password if local_registry_password is defined and local_registry_password != "" else 'nopassword' }} -n kube-system \
+        --dry-run=client -o yaml | {{ kubectl }} apply -f -
+      register: result
+      become: yes
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: result.rc == 0
+
+    - name: Patch kube-system service accounts to include imagePullSecrets to templates
+      become: yes
+      register: get_patch
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: (get_patch.rc == 1)
+      failed_when: false
+      changed_when: false
+      shell: |
+        {{ kubectl }} get serviceaccount -n kube-system -o name | sed -e 's/.*\///g' | \
+        xargs -I {} {{ kubectl }} patch serviceaccount {} -n kube-system -p '{"imagePullSecrets": [{"name": "local-registry-secret"}]}'
+  when:
+    - inventory_hostname == first_master
+
+- name: Modify {{ ansible_env.HOME }}/.kube directory permissions
+  file:
+    path: "{{ ansible_env.HOME }}/.kube"
+    state: directory
+    mode: 0700
+    owner: "{{ ansible_effective_user_id |string }}"
+    group: "{{ ansible_effective_group_id |string }}"
+  become: yes
+
+- name: Copy /etc/kubernetes/admin.conf to {{ ansible_env.HOME }}/.kube/config
+  copy:
+    src: /etc/kubernetes/admin.conf
+    dest: "{{ ansible_env.HOME }}/.kube/config"
+    remote_src: yes
+    owner: "{{ ansible_effective_user_id |string }}"
+    group: "{{ ansible_effective_group_id |string }}"
+    mode: 0600
+  become: yes
+
+- name: Increase backend replicas for coredns for HA
+  become: yes
+  shell: "{{ kubectl }} --namespace=kube-system scale deployment coredns --replicas={{ kube_dns_replicas }}"
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+  when: inventory_hostname == first_master and not admin_conf.stat.exists
+
+- name: Update CoreDNS cache success denial TTL and hosts
+  block:
+    - name: create temp folder
+      shell: mktemp -d /tmp/coredns-configmap-XXXXXX
+      register: mktemp
+      changed_when: False
+
+    - name: Fetch the coredns configmap
+      become: yes
+      shell: "{{ kubectl }} get cm coredns -n kube-system -o yaml"
+      register: coredns_yaml
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: coredns_yaml.rc == 0
+
+    - name: Copy coredns configmap to temp file
+      copy:
+        content: "{{ coredns_yaml.stdout }}"
+        dest: "{{ mktemp.stdout }}/coredns_configmap.yaml"
+
+    - name: Update external dns server
+      lineinfile:
+        path: "{{ mktemp.stdout }}/coredns_configmap.yaml"
+        regexp: '^(.*)        forward . (.*)$'
+        line: '        forward . {{ dns_servers_ips }} {'
+        backrefs: yes
+
+    - name: Add the prefer_udp to coredns configmap if not present
+      lineinfile:
+        dest: "{{ mktemp.stdout }}/coredns_configmap.yaml"
+        line: "           prefer_udp"
+        insertafter: max_concurrent
+        state: present
+        firstmatch: yes
+
+    - name: Update cache success TTL if present
+      replace:
+        path: "{{ mktemp.stdout }}/coredns_configmap.yaml"
+        after: 'cache'
+        regexp: '^(\s+)success.*$'
+        replace: '\1success 9984 {{ kube_dns_success_ttl }}'
+
+    - name: Update cache denial TTL if present
+      replace:
+        path: "{{ mktemp.stdout }}/coredns_configmap.yaml"
+        after: 'cache'
+        regexp: '^(\s+)denial.*$'
+        replace: '\1denial 9984 {{ kube_dns_denial_ttl }}'
+
+    - name: Add cache success and denial if not present yet
+      replace:
+        path: "{{ mktemp.stdout }}/coredns_configmap.yaml"
+        regexp: '^(\s+)cache (\d+)$'
+        replace: '\1cache \2 {\n\1  success 9984 {{ kube_dns_success_ttl }}\n\1  denial 9984 {{ kube_dns_denial_ttl }}\n\1}'
+
+    - name: Apply the coredns configmap fix
+      become: yes
+      shell: "{{ kubectl }} apply -f {{ mktemp.stdout }}/coredns_configmap.yaml"
+      register: result
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: result.rc == 0
+
+    - name: Delete temp directory
+      file:
+        name: "{{ mktemp.stdout }}"
+        state: absent
+
+  when: inventory_hostname == first_master
+
+- name: Deploy NodeLocal DNS
+  include_role:
+    name: kube-common
+    tasks_from: deploy-nodelocaldns
+
+- name: Set controller-manager.conf to 0600
+  file:
+    path: "{{ kube_config_dir }}/controller-manager.conf"
+    mode: 0600
+  become: yes
+  when: openstack_enable_cloud_provider | default('false') | bool
+
+- name: Update API server access to use nodelocal
+  include_role:
+    name: kube-common
+    tasks_from: update-k8s-conf
+
+- name: Configure Openstack Cloud Provider
+  include_role:
+    name: openstack-cloud-provider
+  vars:
+    ansible_become: yes
+  when: openstack_enable_cloud_provider | default('false') | bool and inventory_hostname == first_master
+
+- name: Configure kube-controller-manager
+  include_role:
+    name: kube-controller-manager
+  vars:
+    ansible_become: yes
+  when: inventory_hostname == first_master
+
+- name: Configure Subport Manager and Subport Controller
+  include_role:
+    name: subport-manager-controller
+  vars:
+    ansible_become: yes
+  when:
+    - openstack_auth_url is defined
+    - openstack_username is defined
+    - openstack_user_password is defined
+    - openstack_project_name is defined or openstack_project_id is defined or openstack_tenant_name is defined or openstack_tenant_id is defined
+    - openstack_domain_name is defined or openstack_domain_id is defined
+    - subport_handling | default('true') | bool
+    - inventory_hostname == first_master
+
+- block:
+    - name: Remove default cluster admin group
+      become: yes
+      shell: "{{ kubectl }} delete --ignore-not-found=true clusterrolebinding {{ kube_cluster_admin_group }}-cluster-admin"
+      register: result
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: result.rc == 0
+
+    - name: Add default cluster admin group
+      become: yes
+      shell: "{{ kubectl }} create clusterrolebinding --group {{ kube_cluster_admin_group }} --clusterrole cluster-admin {{ kube_cluster_admin_group }}-cluster-admin"
+      register: result
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: result.rc == 0
+
+  when: inventory_hostname == first_master and kube_cluster_admin_group is defined

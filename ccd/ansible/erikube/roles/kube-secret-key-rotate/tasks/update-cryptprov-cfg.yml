@@ -1,0 +1,76 @@
+# update phases:
+# 0 - new key is generated and enabled in one pass
+# 1 - new key is generated and made secondary to existing key
+# 2 - secondary key is moved to primary
+# 3 - secondary key is removed
+
+- debug:
+    msg: "Performing phase {{ update_phase }} creation of {{ kube_cryptprov_cfg_file }}"
+  when: not conf_file_exists
+
+- debug:
+    msg: "Performing phase {{ update_phase }} update to existing {{ kube_cryptprov_cfg_file }}"
+  when: conf_file_exists
+
+- set_fact:
+    keylist: []
+
+- set_fact:
+    first_provider: "{{ (update_phase == 1 and not conf_file_exists)  | ternary('identity','aescbc') }}"
+
+- block:
+  - name: Slurp existing crypto cfg
+    slurp:
+      src: "{{ kube_cryptprov_cfg_file }}"
+    register: cryptprov_conf
+
+  - name: parse existing config
+    set_fact:
+      existing_crypt_cfg: "{{ cryptprov_conf['content'] | b64decode | from_yaml }}"
+
+  - name: get existing providers
+    set_fact:
+      existing_providers: "{{ existing_crypt_cfg['resources'][0].providers }}"
+
+  - name: get existing keys
+    set_fact:
+      keylist: "{{ item.aescbc['keys'] }}"
+    with_items: "{{ existing_providers }}"
+    when: item.aescbc is defined
+
+  when: conf_file_exists
+
+- block:
+  - name: Generate new secrets key
+    set_fact:
+      newkeystruct:
+        name: "key-{{ lookup('pipe','date +%Y%m%dT%H%M%S') }}"
+        secret: "{{ lookup('keygen', 32) }}"
+
+  - name: Put new key at start of key list
+    set_fact:
+      keylist: "{{ [ newkeystruct ] + keylist  }}"
+    when: update_phase == 0
+
+  - name: Append new key to end of key list
+    set_fact:
+      keylist: "{{ keylist + [ newkeystruct ] }}"
+    when: update_phase == 1
+
+  when: update_phase == 0 or update_phase == 1
+
+- name: Make secondary secrets key primary
+  set_fact:
+    keylist: "{{ keylist | reverse | list }}"
+  when: update_phase == 2
+
+- name: Remove secondary secrets key
+  set_fact:
+    keylist: "{{ [ keylist[0] ] }}"
+  when: update_phase == 3
+
+- name: Write crypto provider config
+  template:
+    src: "cryptprov-cfg.yml.j2"
+    dest: "{{ kube_cryptprov_cfg_file }}"
+    mode: '0600'

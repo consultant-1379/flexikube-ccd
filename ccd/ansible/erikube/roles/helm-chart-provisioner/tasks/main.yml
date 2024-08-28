@@ -1,0 +1,29 @@
+---
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/erikube-helm-chart-XXXXXX
+  register: mktemp
+  changed_when: False
+
+- set_fact:
+    k8s_helm_file_loc: "{{ mktemp.stdout }}"
+
+- set_fact:
+    get_helm_status: "{{ helm }} status {{ chart_name }} --namespace {{ kube_namespace | default('default') }}"
+
+- include: purge_chart.yml
+  when: state == "purged"
+
+- include: install_chart.yml
+  when: state == "installed"
+
+- include: upgrade_chart.yml
+  when: state == "update-installed"
+
+- include: get_chart.yml
+  when: state == "get"
+
+- name: Delete temp directory
+  file:
+    name: "{{ mktemp.stdout }}"
+    state: absent
+  changed_when: False

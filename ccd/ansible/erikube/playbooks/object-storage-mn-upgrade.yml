@@ -1,0 +1,11 @@
+---
+- name: Delete Object Storage MN Service
+  hosts: master[0]
+  become: yes
+  ignore_errors: True
+  roles:
+    - role: helm-chart-provisioner
+      vars:
+        - chart_name: eric-data-object-storage-mn
+        - state: purged
+        - kube_namespace: "kube-system"

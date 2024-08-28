@@ -1,0 +1,13 @@
+---
+- name: Create CA certs for fluentd
+  import_tasks: create.yml
+  vars:
+    dir: /tmp/erikube-fluent-ca
+
+- name: Create external server secret
+  import_tasks: external_server.yml
+
+- name: Create certs for rsyslog on directors
+  import_tasks: create_director_certs.yml
+  vars:
+    dir2: /tmp/erikube-fluent-rsyslog

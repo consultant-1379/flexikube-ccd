@@ -1,0 +1,31 @@
+---
+
+# ETCD and Masters are splitted because there is ssh bug that causes failures
+# if two ssh connections are made to same node simultaneously
+- name: Gather facts as non root from etcds
+  hosts: etcd
+  gather_facts: yes
+
+- name: Gather facts as non root from masters
+  hosts: master
+  gather_facts: yes
+
+- name: Set ECCD default values
+  hosts: master
+  roles:
+    - erikube-defaults
+
+- name: Set ECCD default values
+  hosts: etcd
+  roles:
+    - erikube-defaults
+
+# Start ECCD installation
+- import_playbook: playbooks/etcd-deploy.yml
+- import_playbook: playbooks/kube-deploy.yml
+- import_playbook: playbooks/etcd-post-kube-deploy.yml
+- import_playbook: playbooks/label.yml
+- import_playbook: playbooks/label-node-id.yml
+- import_playbook: playbooks/cinder.yml
+- import_playbook: playbooks/manila.yml
+- import_playbook: playbooks/whereabouts-ipam.yml

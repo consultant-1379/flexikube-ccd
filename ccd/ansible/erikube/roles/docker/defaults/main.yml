@@ -1,0 +1,107 @@
+---
+# Version of docker to install
+# For now, vars/RedHat.yml has 1.13.1-* defined
+docker_version: 17.03.2
+
+# vars/RedHat.yml has Package version defined
+docker_version_key: Version
+
+docker_state: started
+
+# By default no mirror registry
+use_mirror_registry: false
+
+# Default docker command
+docker_cmd: docker
+
+# Bridge IP CIDR
+docker_bridge_ip_cidr: "169.254.0.1/16"
+
+# Configure Docker storage
+docker_storage_setup: true
+
+# docker_storage_driver - select docker storage driver
+# Only applicable/used when docker_storage_setup is enabled
+# Values in order of preference: overlay2, overlay, devicemapper
+# - devicemapper for production requires docker_dev_mapper_device
+#  to be configured and secondary storage drive added to hosts. Refer Erikube wiki.
+docker_storage_driver: "overlay2"
+docker_storage_driver_options:
+  storage-opts: []
+
+# By default devmapper is used and docker_volume_group should specify an
+# Only applicable/used when docker_storage_setup is enabled
+#  existing volume group where the LVM thin pool will be created
+docker_volume_group: "docker-vg"
+
+# Set the external storage block device used by docker for container storage.
+# Only applicable/used when docker_storage_setup is enabled
+#  and docker_storage_driver set to device_mapper.
+# Must be configured in inventory file. Default is set to empty
+# on purpose. Installation will fail when not configured.
+docker_dev_mapper_device: ""
+
+# By default the docker log driver is configured to be json-file. This value was
+# previously 'journald' by default
+docker_log_driver: "json-file"
+
+docker_default_cgroup_driver: "systemd"
+
+# docker_jsonfile_log_options defines default log driver options for the
+# default json-file log driver. This default is only used when docker_log_driver
+# is configured as `json-file` and docker_log_options is not defined.
+# If a different log driver is to be used, then docker_log_options should be defined
+# with the appropriate parameters.
+
+docker_jsonfile_log_options:
+  max-size: "50m"
+  max-file: "5"
+
+# `docker_config_generic` will be combined with OS specific defaults
+# ( `docker_config_os_specific` ) to form `docker_config`. `docker_config` is
+# used to generate /etc/docker/daemon.json, the recommended configuration file
+# for docker.
+docker_config_generic:
+  bip: "{{ docker_bridge_ip_cidr }}"
+  insecure-registries: "[ {{ insecure_registry_url if (insecure_registry_url is defined) and (insecure_registry_url|length > 0) else None }} ]"
+  registry-mirrors: "[ {{ docker_registry_url if use_mirror_registry else None }} ]"
+  log-driver: "{{ docker_log_driver }}"
+  log-opts: "{{ docker_jsonfile_log_options if docker_log_driver == 'json-file' else docker_log_options }}"
+  log-level: "warn"
+  live-restore: true
+  exec-opts:
+    - "native.cgroupdriver={{ docker_default_cgroup_driver }}"
+
+# `docker_config` is used to generate /etc/docker/daemon.json, the recommended
+# configuration file for docker. See:
+# https://docs.docker.com/v1.13/engine/reference/commandline/dockerd/#/linux-configuration-file
+docker_config: "{{ docker_config_os_specific | default({}) | combine(docker_config_generic) }}"
+
+# A base list of packages that we want to purge.  We don't know what version of
+# docker might be installed, so we try to uninstall all of them.
+docker_base_purge_packages:
+  - docker
+  - docker-client
+  - docker-client-latest
+  - docker-common
+  - docker-latest
+  - docker-latest-logrotate
+  - docker-logrotate
+  - docker-selinux
+  - docker-engine-selinux
+  - docker-engine
+  - docker-ce
+  - docker-ce-cli
+  - docker-ce-selinux
+  - docker.io
+
+# To reduce the effects of repo instability from time to time while docker
+# packages are being installed, set the following variables to allow package
+# installation to retry operation at desired interval.
+docker_install_retries: 3
+docker_install_retry_delay: 5
+
+# default sleep value after container restart
+# can be increased per container restart if container
+# requires more time for stabilizing
+docker_sleep_after_restart: 1

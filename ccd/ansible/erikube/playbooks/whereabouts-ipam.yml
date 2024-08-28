@@ -1,0 +1,12 @@
+---
+- name: Deploy whereabouts IPAM plugin
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+  - include_vars: ../../common/container-list.json
+  vars:
+    image_whereabouts_ipam: "{{ kube_image_prefix }}{{ containers.erikube.whereabouts }}"
+
+  roles:
+    - role: whereabouts-ipam
+      when: whereabouts_ipam_enabled | default('false') | bool

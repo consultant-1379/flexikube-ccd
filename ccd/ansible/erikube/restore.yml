@@ -1,0 +1,32 @@
+---
+- import_playbook: playbooks/ansible-check.yml
+
+- name: Gather facts as non root
+  hosts: all
+  gather_facts: yes
+
+- name: Restore cluster data
+  hosts: etcd, master, worker, ingress_lb
+  become: yes
+  any_errors_fatal: true
+  vars:
+    - master_hosts: "{{ groups['master'] }}"
+    - etcd_hosts: "{{ groups['etcd'] }}"
+    - kube_hosts: "{{ master_hosts + groups['worker'] }}"
+    - lb_host: "{{ groups['ingress_lb'] }}"
+  tasks:
+  - name: Check {{ backup_file_path }}
+    run_once: true
+    become: no
+    local_action: stat path={{ backup_file_path }}
+    register: backup_file
+
+  - name: Fail when backup file is invalid
+    fail:
+      msg: Backup {{ backup_file_path }} doesn't exist or is invalid
+    run_once: true
+    when: backup_file.stat.isreg is not defined or not backup_file.stat.exists
+
+  - name: Run restore role
+    include_role:
+      name: roles/restore

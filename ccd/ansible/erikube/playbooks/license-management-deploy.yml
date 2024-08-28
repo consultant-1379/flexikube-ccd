@@ -1,0 +1,4 @@
+---
+- import_playbook: adp-asih-deploy.yml
+- import_playbook: adp-lm-deploy.yml
+- import_playbook: ccd-license-consumer-deploy.yml

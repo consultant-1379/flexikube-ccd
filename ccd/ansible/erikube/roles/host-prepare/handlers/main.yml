@@ -1,0 +1,10 @@
+---
+- name: kill dhclient
+  command: pkill -f dhclient
+  ignore_errors: True
+
+- name: start network service
+  service:
+    name: "{{ network_service_name }}"
+    state: restarted
+    enabled: True

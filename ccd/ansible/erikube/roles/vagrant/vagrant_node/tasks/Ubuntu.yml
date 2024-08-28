@@ -1,0 +1,24 @@
+---
+- name: Remove OS specific packages
+  package:
+    name: "{{ pkg }}"
+    state: absent
+    update_cache: yes
+  with_items:
+    - unattended-upgrades
+  loop_control:
+    loop_var: pkg
+
+- name: Disable and stop apt-daily services
+  systemd:
+    name: "{{ service }}"
+    state: stopped
+    enabled: False
+    daemon-reload: yes
+  with_items:
+    - apt-daily.timer
+    - apt-daily-upgrade.timer
+    - apt-daily
+    - apt-daily-upgrade
+  loop_control:
+    loop_var: service

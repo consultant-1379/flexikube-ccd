@@ -1,0 +1,4 @@
+---
+container_registry_tmp_dir: "/tmp/container_registry"
+container_registry_ssl_subj: "/CN={{ cr_hostname }}"
+container_registry_custom_user_id: "admin"

@@ -1,0 +1,13 @@
+---
+
+# For backward compatabilities, try to use image defined in erikube_ingressctrl_image and
+# erikube_ingressdefaultbackend_image as last resort default.
+
+- block:
+  - include_tasks: "{{ ingressctrl_action }}.yml"
+    vars:
+      image_erikube_ingressctrl: "{{ nginx_ingressctrl_image | default(controller_image, true) | default(erikube_ingressctrl_image, true) }}"
+      image_erikube_ingressdefaultbackend: "{{ nginx_defaultbackend_image | default(defaultbackend_image, true) | default(erikube_ingressdefaultbackend_image, true) }}"
+    when:
+      - exclude_nginx is undefined or not exclude_nginx
+  become: yes

@@ -1,0 +1,47 @@
+# {{ ansible_managed }}
+
+global_defs {
+    enable_script_security
+    script_user {{ file_default_owner | default('root') }} {{ file_default_group | default('root') }}
+
+    # minimum time interval for refreshing gratuitous ARPs while MASTER
+    # secs, default 10 (0 for no refreshing)
+    vrrp_garp_master_refresh {{ keepalived_garp_interval | default(10) }}
+
+    # number of gratuitous ARP messages to send at a time while MASTER
+    vrrp_garp_master_refresh_repeat {{ keepalived_garp_repeat | default(2) }}
+}
+
+vrrp_script chk_service {
+    script "{{ systemctl_bin }} is-active {{ kube_lb_container }}"   # check the LB service
+    interval 2                                  # every 2 seconds
+    weight 2                                    # add 2 points if OK
+}
+
+vrrp_instance k8s_api_vip {
+    state {{ keepalived_vrrp_state }}
+    interface {{ keepalived_iface | default(kubernetes_interface)}}
+    virtual_router_id {{ keepalived_virtual_router_id }}
+{% if keepalived_vrrp_state.lower() == "master" %}
+    priority {{ keepalived_master_priority | default(101) }}
+{% else %}
+    priority {{ keepalived_backup_priority | default(100) }}
+{% endif %}
+    advert_int {{ keepalived_advert_int | default(1) }}
+    authentication {
+        auth_type PASS
+        auth_pass {{ keepalived_auth_pass | default(kube_apiserver_ip | hash("sha1")) }}
+    }
+    virtual_ipaddress {
+        {{ kube_apiserver_ip }}
+    }
+    track_script {
+        chk_service
+    }
+    unicast_src_ip {{ keepalived_unicast_src_ip }}
+    unicast_peer {
+{% for peer in keepalived_unicast_peers %}
+        {{ hostvars[peer].k8s_ip_address }}
+{% endfor %}
+    }
+}

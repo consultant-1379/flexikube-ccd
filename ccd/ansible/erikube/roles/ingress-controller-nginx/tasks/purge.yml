@@ -1,0 +1,32 @@
+---
+
+- name: Purge all ingress controller resources
+  command: "{{ kubectl }} -n {{ ingressctrl_namespace }} delete {{ item }} --ignore-not-found"
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+  with_items:
+    - "ing/ingress-nginx-ingress"
+    - "svc/ingress-nginx"
+    - "svc/default-http-backend"
+    - "deploy/nginx-ingress-controller"
+    - "deploy/default-http-backend"
+    - "sa/nginx-ingress-serviceaccount"
+    - "clusterrole/nginx-ingress-clusterrole"
+    - "role/nginx-ingress-role"
+    - "rolebinding/nginx-ingress-nisa-binding"
+    - "clusterrolebinding/nginx-ingress-clusterrole-nisa-binding"
+    - "cm/nginx-configuration"
+    - "cm/tcp-services"
+    - "cm/udp-services"
+    - "cm/ingress-controller-leader"
+    - "secret/tls-certificate"
+    - "secret/ingress-controller-default-tls"
+
+- name: Purge non-namespaced default IngressClass
+  command: "{{ kubectl }} delete ingressclasses/nginx --ignore-not-found"
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0

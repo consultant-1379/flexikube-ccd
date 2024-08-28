@@ -1,0 +1,29 @@
+---
+docker_pkg_name: docker
+
+docker_packages:
+  - "{{ docker_pkg_name }}"
+  - python3-docker
+
+# docker_purge_packages includes dependencies installed by docker, and doesn't
+# match a specific version.
+docker_purge_packages:
+  - "{{ docker_pkg_name }}"
+  - python3-docker
+  - containerd
+  - docker-libnetwork
+  - docker-runc
+  - runc
+
+ca_certs_path: /etc/pki/trust/anchors/
+ca_cert_update_cmd: update-ca-certificates
+
+# docker_config_os_specific is merged with docker_config_generic to form
+# a default value for `docker_config`.
+docker_config_os_specific:
+  add-runtime: "docker-runc=/usr/libexec/docker/docker-runc-current"
+#  default-runtime: "/usr/bin/docker-runc"
+#  runtimes:
+#    docker-runc:
+#      path: "/usr/bin/docker-runc"
+  storage-driver: "{{ docker_storage_driver }}"

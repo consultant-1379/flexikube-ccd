@@ -1,0 +1,91 @@
+---
+- name: Register private_interface
+  stat:
+    path: /etc/sysconfig/network-scripts/ifcfg-{{ private_interface }}
+  register: private_int
+
+- name: Register public_interface
+  stat:
+    path: /etc/sysconfig/network-scripts/ifcfg-{{ public_interface | default('none') }}
+  register: public_int
+
+- name: Register vagrant_interface
+  stat:
+    path: /etc/sysconfig/network-scripts/ifcfg-{{ vagrant_interface }}
+  register: vagrant_int
+
+- block:
+  - name: Set ONBOOT=yes 
+    lineinfile:
+      path: /etc/sysconfig/network-scripts/ifcfg-{{ private_interface }}
+      regexp: ^ONBOOT=.*
+      line: ONBOOT=yes
+  - name: Set DEFROUTE=yes 
+    lineinfile:
+      path: /etc/sysconfig/network-scripts/ifcfg-{{ private_interface }}
+      regexp: ^DEFROUTE=.*
+      line: DEFROUTE=yes
+  - name: Set Gateway
+    lineinfile:
+      path: /etc/sysconfig/network-scripts/ifcfg-{{ private_interface }}
+      regexp: ^GATEWAY=.*
+      line: GATEWAY={{ vagrant_gw }}
+  - name: Set DNS
+    lineinfile:
+      path: /etc/sysconfig/network-scripts/ifcfg-{{ private_interface }}
+      regexp: ^DNS1=.*
+      line: DNS1={{ vagrant_gw }}
+  - name: Enable DNS configuration update
+    lineinfile:
+      path: /etc/sysconfig/network-scripts/ifcfg-{{ private_interface }}
+      regexp: ^PEERDNS=.*
+      line: PEERDNS=yes
+  - name: Remove nameservers from resolv.conf
+    lineinfile:
+      path: /etc/resolv.conf
+      regexp: '^nameserver.*'
+      state: absent
+  - name: Bounce private device
+    shell: ifdown {{ private_interface }}; ifup {{ private_interface }}
+  when:
+    - vagrant_gw != 'none'
+    - hostvars[inventory_hostname]['ansible_%s'|format(private_interface)].ipv4.address != vagrant_gw
+    - private_int.stat.exists and private_int.stat.isreg
+
+- block:
+  - name: Set PERSISTENT_DHCLENT='yes'
+    lineinfile:
+      path: /etc/sysconfig/network-scripts/ifcfg-{{ public_interface }}
+      regexp: ^PERSISTENT_DHCLIENT=.*
+      line: PERSISTENT_DHCLIENT=yes
+  - name: Bounce public device
+    shell: ifdown {{ public_interface }}; ifup {{ public_interface }}
+  when: public_int.stat.exists and public_int.stat.isreg
+
+- block:
+  - name: Turn off vagrant device interface
+    shell: ifdown {{ vagrant_interface }}
+  - name: Remove vagrant interface
+    file:
+      path: /etc/sysconfig/network-scripts/ifcfg-{{ vagrant_interface }}
+      state: absent
+  when:
+    - vagrant_gw != 'none'
+    - vagrant_int.stat.exists and vagrant_int.stat.isreg
+
+- block:
+  - name: Add cluster IP route to private interface
+    lineinfile:
+      path: /etc/sysconfig/network-scripts/route-{{ private_interface }}
+      create: yes
+      regexp: ^ADDRESS0=.*
+      line: ADDRESS0=10.96.0.0
+  - name: Add cluster IP mask to private interface
+    lineinfile:
+      path: /etc/sysconfig/network-scripts/route-{{ private_interface }}
+      create: yes
+      regexp: ^NETMASK0=.*
+      line: NETMASK0=255.240.0.0
+  - name: Bounce private device
+    shell: ifdown {{ private_interface }}; ifup {{ private_interface }}
+  when: vagrant_gw == 'none'

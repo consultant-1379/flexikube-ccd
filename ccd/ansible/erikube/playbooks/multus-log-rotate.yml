@@ -1,0 +1,19 @@
+---
+- name: Configure log rotation for multus-cni
+  hosts: [master, worker]
+  become: yes
+  tasks:
+    - name: Generate the log rotation file in logrotate.d directory
+      copy:
+        dest: /etc/logrotate.d/multus.logrotate
+        content: |
+          /var/log/multus.log
+          {
+              size 10M
+              start 1
+              missingok
+              rotate 20
+              compress
+              sharedscripts
+              copytruncate
+          }

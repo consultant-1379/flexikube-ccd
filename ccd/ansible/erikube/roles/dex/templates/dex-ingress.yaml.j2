@@ -1,0 +1,38 @@
+---
+kind: Ingress
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: dex
+  annotations:
+{% if dex_issuer_url.startswith('https://') %}
+{% if ingress_class is defined and ingress_class == "nginx" %}
+    nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+{% else %}
+    ingress.kubernetes.io/ssl-passthrough: "true"
+{% endif %}
+{% endif %}
+spec:
+  ingressClassName: nginx
+{% if dex_issuer_url.startswith('https://') %}
+  tls:
+  - hosts:
+    - {{ dex_ingress_host }}
+    secretName: dex-tls
+{% endif %}
+  rules:
+  - host: {{ dex_ingress_host }}
+    http:
+      paths:
+      - path: /
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: dex
+{% if dex_issuer_url.startswith('https://') %}
+            port:
+              number: 443
+{% else %}
+            port:
+              number: 80
+{% endif %}

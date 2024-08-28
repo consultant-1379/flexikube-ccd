@@ -1,0 +1,35 @@
+---
+# Dictionaries holding the deltas to the kubeadm configset:
+
+upgrade_cfgs:
+  kubernetesVersion: "v{{ opt_kubernetes_version }}"
+  # NB. bind-address must be set explicitly to current host since
+  # stored configset has data from the last host which ran kubeadm, which will
+  # be incorrect during upgrade of multi-master clusters.
+
+  localAPIEndpoint:
+    advertiseAddress: "{{ kube_apiserver_bind_address }}"
+
+  apiServer:
+    extraArgs:
+      bind-address: "{{ kube_apiserver_bind_address }}"
+      enable-admission-plugins: "{{ kube_admission_control_plugins | join(',') }}"
+      runtime-config: "apps/v1=true,apps/v1/daemonsets=true,apps/v1/deployments=true,apps/v1/replicasets=true,networking.k8s.io/v1/networkpolicies=true"
+      profiling: "{{ kube_profiling }}"
+      tls-sni-cert-key: "{{ kube_cert_dir }}/kube_api.crt,{{ kube_cert_dir }}/kube_api.key"
+      tls-cipher-suites: "{{ kube_tls_cipher_suites | join(',') }}"
+
+  controllerManager:
+    extraArgs:
+      profiling: "{{ kube_profiling }}"
+      cluster-signing-duration: "{{ kube_manager_cluster_signing_duration }}"
+
+  scheduler:
+    extraArgs:
+      profiling: "{{ kube_profiling }}"
+
+  # Required for upgrading from 2.1.0 to 2.2.0 - can be removed in 2.3.0
+  controlPlaneEndpoint: "{{ kube_apiserver_fqdn }}:{{ kube_apiserver_port }}"
+
+  dns:
+    imageTag: "{{ containers.kubernetes.coredns.split(':')[1] }}"

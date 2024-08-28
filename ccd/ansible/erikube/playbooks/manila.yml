@@ -1,0 +1,22 @@
+---
+- name: Deploy Manila
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+  - include_vars: ../../common/container-list.json
+  vars:
+    manila_csi_plugin_image: "{{ kube_image_prefix }}{{ containers.erikube.manila_csi_plugin }}"
+    csi_attacher_image: "{{ kube_image_prefix }}{{ containers.erikube.csi_attacher_cinder }}"
+    driver_registrar_image: "{{ kube_image_prefix }}{{ containers.erikube.csi_node_driver_registrar_cinder }}"
+    csi_provisioner_image: "{{ kube_image_prefix }}{{ containers.erikube.csi_provisioner_cinder }}"
+    csi_snapshotter_image: "{{kube_image_prefix}}{{ containers.erikube.csi_snapshotter_cinder }}"
+    csi_resizer_image: "{{kube_image_prefix}}{{ containers.erikube.csi_resizer_cinder }}"
+    csi_livenessprobe_image: "{{kube_image_prefix}}{{ containers.erikube.csi_livenessprobe_cinder }}"
+    csi_nfs_image: "{{ kube_image_prefix }}{{ containers.erikube.csi_driver_nfs }}"
+    csi_nfs_livenessprobe_image: "{{kube_image_prefix}}{{ containers.erikube.csi_livenessprobe_nsf }}"
+    csi_nsf_node_driver_registrar_image: "{{kube_image_prefix}}{{ containers.erikube.csi_node_driver_registrar_nsf }}"
+  roles:
+    - role: erikube-defaults
+      when: openstack_enable_manila_driver | default(false) | bool
+    - role: manila
+      when: openstack_enable_manila_driver | default(false) | bool

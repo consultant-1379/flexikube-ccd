@@ -1,0 +1,7 @@
+---
+- name: Remove containerd config
+  become: yes
+  file:
+    path: /etc/containerd
+    state: absent
+  ignore_errors: true

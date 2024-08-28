@@ -1,0 +1,39 @@
+
+- name: Node Problem Detector
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+  vars:
+    - kube_image_prefix: "{{ docker_registry_host | default(default_registry) }}/"
+    - tarball_name_node_problem: "{{ helm_charts.node_problem_detector.name + '-' + helm_charts.node_problem_detector.version + '.tgz' }}"
+    - tarball_name_draino: "{{ helm_charts.draino.name + '-' + helm_charts.draino.version + '.tgz' }}"
+  roles:
+    - erikube-defaults
+    - role: helm-chart-provisioner
+      when: node_problem_detector_enabled | default(false) | bool
+      vars:
+        - chart_name: "node-problem-detector"
+        - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '1200s' }}"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name_node_problem }}"
+        - state: update-installed
+        - kube_namespace: kube-system
+        - values:
+            namespace: "kube-system"
+            image: "{{ kube_image_prefix }}{{ containers.erikube.node_problem_detector }}"
+            imagePullSecrets: "local-registry-secret"
+    - role: helm-chart-provisioner
+      when: node_problem_detector_enabled | default(false) | bool
+      vars:
+        - chart_name: "draino"
+        - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '1200s' }}"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name_draino }}"
+        - state: update-installed
+        - kube_namespace: kube-system
+        - values:
+            namespace: "kube-system"
+            max_grace_period: "{{ draino_max_grace_period | default('8m0s') }}"
+            eviction_headroom: "{{ draino_eviction_headroom | default('30s') }}"
+            drain_buffer: "{{ draino_drain_buffer | default('10m0s') }}"
+            image: "{{ kube_image_prefix }}{{ containers.erikube.draino }}"
+            imagePullSecrets: "local-registry-secret"

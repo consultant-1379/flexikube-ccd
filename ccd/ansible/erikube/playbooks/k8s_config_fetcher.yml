@@ -1,0 +1,81 @@
+- name: Gather facts as non root
+  hosts: all
+  gather_facts: yes
+
+- name: Fetch K8S configuration files from the 1st master
+  hosts: master[0]
+  become: yes
+  roles:
+  - erikube-defaults
+  tasks:
+  - name: wait till admin.conf file exists
+    stat:
+      path: /etc/kubernetes/admin.conf
+    register: config_file
+    until: config_file.stat.exists == true
+    retries: 100
+    delay: 10
+
+  - name: Copy kube config to user's home directory
+    fetch:
+      src: /etc/kubernetes/admin.conf
+      dest: "{{ ansible_user_dir}}/.kube/config"
+      flat: yes
+
+  - name: Update permissions kube config file
+    file:
+      path: "{{ ansible_user_dir}}/.kube/config"
+      owner: "{{ ansible_user_id }}"
+      group: "{{ ansible_user_id }}"
+      mode: 0600
+    delegate_to: 127.0.0.1
+
+  - name: Read kubelet config file
+    shell: cat /var/lib/kubelet/config.yaml
+    register: result
+
+  - name: Get cluster DNSs
+    set_fact:
+      k8s_dns_ip: "{{ result.stdout | b64encode | b64decode | from_yaml | json_query('clusterDNS') }}"
+
+  - name: Get first cluster DNS
+    set_fact:
+      k8s_dns_ip: "{{ k8s_dns_ip[0] }}"
+
+  - name: Attempt to change ownership on .kube directory
+    file:
+      path: "{{ ansible_user_dir}}/.kube"
+      state: directory
+      recurse: yes
+      owner: "{{ ansible_user_id }}"
+      group: "{{ ansible_user_id }}"
+    delegate_to: 127.0.0.1
+
+  - name: Fetch configuration file for kubeadm
+    fetch:
+      src: /etc/kubernetes/admin.conf
+      dest: /etc/kubernetes/admin.conf
+      flat: yes
+
+  - name: Fetch kubeadm config file
+    fetch:
+      src: /etc/kubernetes/kubeadm-config.yaml
+      dest: /etc/kubernetes/kubeadm-config.yaml
+      flat: yes
+
+  - name: Add nodelocal-api.eccd.local to IP translation for API server locally
+    lineinfile:
+      path: /etc/hosts
+      regexp: "^{{ kube_apiserver_ip }}"
+      line: "{{ kube_apiserver_ip }}  nodelocal-api.eccd.local"
+      state: present
+    when: kube_apiserver_fqdn == "nodelocal-api.eccd.local"
+    become: true
+    delegate_to: 127.0.0.1
+
+  - name: Copy the cluster DNS IP address to local machine
+    copy:
+      force: yes
+      content: "{{ k8s_dns_ip }}"
+      dest: "/tmp/cluster_dns_ip.txt"
+    delegate_to: 127.0.0.1

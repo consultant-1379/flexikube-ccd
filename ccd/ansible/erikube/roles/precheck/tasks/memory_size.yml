@@ -1,0 +1,18 @@
+---
+- name: Check master nodes memory requirement
+  assert:
+    that: "(ansible_memtotal_mb | int) / 1024 >= master_min_ram | int"
+    msg: "Not enough memory in '{{ ansible_hostname }}'. Require {{ master_min_ram }}GB, but only {{ (ansible_memtotal_mb | int) / 1024 }}GB available"
+  when: ansible_hostname in master_hosts
+
+- name: Check worker nodes memory requirement
+  assert:
+    that: "(ansible_memtotal_mb | int) / 1024 >= worker_min_ram | int"
+    msg: "Not enough memory in '{{ ansible_hostname }}'. Require {{ worker_min_ram }}GB, but only {{ (ansible_memtotal_mb | int) / 1024 }}GB available"
+  when: ansible_hostname in worker_hosts
+
+- name: Check etcd nodes memory requirement
+  assert:
+    that: "(ansible_memtotal_mb | int) / 1024 >= etcd_min_ram | int"
+    msg: "Not enough memory in '{{ ansible_hostname }}'. Require {{ etcd_min_ram }}GB, but only {{ (ansible_memtotal_mb | int) / 1024 }}GB available"
+  when: ansible_hostname in etcd_hosts

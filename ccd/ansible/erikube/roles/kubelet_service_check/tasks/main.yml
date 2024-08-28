@@ -1,0 +1,5 @@
+---
+
+- name: Create and execute the cronjob to check kubelet service
+  script: check_kubelet_service.sh
+  become: yes

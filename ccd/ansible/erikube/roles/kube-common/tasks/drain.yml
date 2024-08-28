@@ -1,0 +1,16 @@
+---
+- name: Drain the node
+  delegate_to: "{{ master_node }}"
+  command: "{{ kubectl }} drain {{ ansible_nodename }} --delete-local-data --force --ignore-daemonsets --timeout={{ kube_node_drain_timeout }}s"
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (result.rc == 0 or "unable to drain node" in result.stderr or "Error from server" in result.stderr)
+
+- name: Remove the node from kubernetes cluster
+  delegate_to: "{{ master_node }}"
+  command: "{{ kubectl }} delete node {{ ansible_nodename }}"
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (result.rc == 0 or "not found" in result.stderr)

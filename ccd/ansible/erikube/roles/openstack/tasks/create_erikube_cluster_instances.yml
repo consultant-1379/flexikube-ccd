@@ -1,0 +1,155 @@
+---
+
+- name: Delete old Erikube instance if it is aleady exist
+  os_server:
+     state: absent
+     auth:
+       auth_url: "{{ os_auth_url }}"
+       username: "{{ os_username }}"
+       password: "{{ os_password }}"
+       project_name: "{{ os_project_name }}"
+       user_domain_name: "{{ os_user_domain_name }}"
+       project_domain_name: "{{ os_user_domain_name }}"
+     name: "{{ item.name }}"
+     delete_fip: yes
+     terminate_volume: yes
+     wait: yes
+  with_items: "{{ erikube_cluster }}"
+
+
+- name: Create network port for HA master nodes
+  block:
+  - name: Delete existing port if avaliable
+    os_port:
+      auth:
+        auth_url: "{{ os_auth_url }}"
+        username: "{{ os_username }}"
+        password: "{{ os_password }}"
+        project_name: "{{ os_project_name }}"
+        user_domain_name: "{{ os_user_domain_name }}"
+        project_domain_name: "{{ os_user_domain_name }}"
+      name: "{{ item.name }}-pair_port"
+      state: absent
+    with_items: "{{ erikube_cluster }}"
+    when: "'master' in item['groups']"
+
+  - name: Create port for HA master nodes
+    os_port:
+      auth:
+        auth_url: "{{ os_auth_url }}"
+        username: "{{ os_username }}"
+        password: "{{ os_password }}"
+        project_name: "{{ os_project_name }}"
+        user_domain_name: "{{ os_user_domain_name }}"
+        project_domain_name: "{{ os_user_domain_name }}"
+      name: "{{ item.name }}-pair_port"
+      network: "{{ os_internal_network_name }}"
+      allowed_address_pairs:
+        - ip_address:  "{{kube_apiserver_ip }}/24"
+      state: present
+    with_items: "{{ erikube_cluster }}"
+    when: "'master' in item['groups']"
+
+  when: kube_api_vip_enabled | default(false) | bool
+
+- name: Create a set of instances for HA master nodes with internal IP only
+  os_server:
+    state: present
+    auth:
+      auth_url: "{{ os_auth_url }}"
+      username: "{{ os_username }}"
+      password: "{{ os_password }}"
+      project_name: "{{ os_project_name }}"
+      user_domain_name: "{{ os_user_domain_name }}"
+      project_domain_name: "{{ os_user_domain_name }}"
+    name: "{{ item.name }}"
+    image: "{{ os_vm_image }}"
+    key_name: "{{ os_ssh_key_name }}"
+    flavor: "{{ os_flavor }}"
+    nics:
+     - net-name: "{{ os_management_network_name }}"
+     - port-name: "{{ item.name }}-pair_port"
+    security_groups: "{{ os_security_groups }}"
+    auto_ip: false
+    wait: no
+    meta:
+      hostname: "{{ item.name }}"
+      groups: "{{ item.groups }}"
+    userdata: |
+      #cloud-config
+      runcmd:
+       - echo -e "BOOTPROTO=dhcp\nDEVICE=eth1\nONBOOT=yes\nTYPE=Ethernet\nUSERCTL=no" >> /etc/sysconfig/network-scripts/ifcfg-eth1
+       - ifup eth1
+       - mkdir /mnt/disks
+       - mkdir /mnt/disks/vol
+       - mount -t tmpfs vol /mnt/disks/vol
+  with_items: "{{ erikube_cluster }}"
+  when: kube_api_vip_enabled | default(false) | bool and 'master' in item['groups']
+
+- name: Create a set of instances for non-HA master nodes with internal IP only
+  os_server:
+    state: present
+    auth:
+      auth_url: "{{ os_auth_url }}"
+      username: "{{ os_username }}"
+      password: "{{ os_password }}"
+      project_name: "{{ os_project_name }}"
+      user_domain_name: "{{ os_user_domain_name }}"
+      project_domain_name: "{{ os_user_domain_name }}"
+    name: "{{ item.name }}"
+    image: "{{ os_vm_image }}"
+    key_name: "{{ os_ssh_key_name }}"
+    flavor: "{{ os_flavor }}"
+    nics:
+     - net-name: "{{ os_management_network_name }}"
+     - net-name: "{{ os_internal_network_name }}"
+    security_groups: "{{ os_security_groups }}"
+    auto_ip: false
+    wait: no
+    meta:
+      hostname: "{{ item.name }}"
+      groups: "{{ item.groups }}"
+    userdata: |
+      #cloud-config
+      runcmd:
+       - echo -e "BOOTPROTO=dhcp\nDEVICE=eth1\nONBOOT=yes\nTYPE=Ethernet\nUSERCTL=no" >> /etc/sysconfig/network-scripts/ifcfg-eth1
+       - ifup eth1
+       - mkdir /mnt/disks
+       - mkdir /mnt/disks/vol
+       - mount -t tmpfs vol /mnt/disks/vol
+  with_items: "{{ erikube_cluster }}"
+  when: not(kube_api_vip_enabled | default(false) | bool) and 'master' in item['groups']
+
+- name: Create a set of instances for worker nodes with internal IP only
+  os_server:
+    state: present
+    auth:
+      auth_url: "{{ os_auth_url }}"
+      username: "{{ os_username }}"
+      password: "{{ os_password }}"
+      project_name: "{{ os_project_name }}"
+      user_domain_name: "{{ os_user_domain_name }}"
+      project_domain_name: "{{ os_user_domain_name }}"
+    name: "{{ item.name }}"
+    image: "{{ os_vm_image }}"
+    key_name: "{{ os_ssh_key_name }}"
+    flavor: "{{ os_flavor }}"
+    nics:
+     - net-name: "{{ os_management_network_name }}"
+     - net-name: "{{ os_internal_network_name }}"
+    security_groups: "{{ os_security_groups }}"
+    auto_ip: false
+    wait: no
+    meta:
+      hostname: "{{ item.name }}"
+      groups: "{{ item.groups }}"
+    userdata: |
+      #cloud-config
+      runcmd:
+       - echo -e "BOOTPROTO=dhcp\nDEVICE=eth1\nONBOOT=yes\nTYPE=Ethernet\nUSERCTL=no" >> /etc/sysconfig/network-scripts/ifcfg-eth1
+       - ifup eth1
+       - mkdir /mnt/disks
+       - mkdir /mnt/disks/vol
+       - mount -t tmpfs vol /mnt/disks/vol
+  with_items: "{{ erikube_cluster }}"
+  when: "'master' not in item['groups']"

@@ -1,0 +1,9 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: {{ ecfe_configmap_name_space }}
+  name: {{ ecfe_configmap_name }}
+data:
+  config: |
+{{ ecfe_config_map_raw | to_json | from_json | to_nice_yaml | indent(4, true) }}

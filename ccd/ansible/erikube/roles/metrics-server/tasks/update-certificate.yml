@@ -1,0 +1,82 @@
+- name: Create private key
+  command: "openssl genrsa -out {{ mktemp.stdout }}/metrics_server.key"
+
+- name: Prepare openssl.conf for metrics server certificate
+  template:
+    src: "roles/metrics-server/templates/openssl.conf.j2"
+    dest: "{{ mktemp.stdout }}/openssl.conf"
+
+- name: Create CSR
+  command: "openssl req -new -key {{ mktemp.stdout }}/metrics_server.key -config {{ mktemp.stdout }}/openssl.conf -subj '/CN=Kubernetes' -out {{ mktemp.stdout }}/metrics_server.csr"
+
+- name: Copy openssl.conf file as ssl-extensions-x509.cnf
+  command: "cp {{ mktemp.stdout }}/openssl.conf {{ mktemp.stdout }}/ssl-extensions-x509.cnf"
+
+- name: Fix ssl-extensions-x509.cnf content
+  command: "sed -i 's/v3_req/v3_ca/g' {{ mktemp.stdout }}/ssl-extensions-x509.cnf"
+
+- name: Create Self-Signed certificate for metrics server
+  command: "openssl x509 -req -in {{ mktemp.stdout }}/metrics_server.csr -CA /etc/kubernetes/pki/ca.crt -CAkey /etc/kubernetes/pki/ca.key -CAcreateserial -out {{ mktemp.stdout }}/metrics_server.crt -days 3650 -sha256 -extensions v3_ca -extfile {{ mktemp.stdout }}/ssl-extensions-x509.cnf"
+
+- name: Check for existing secret
+  command: "{{ kubectl }} -n kube-system get secret metrics-server-tls -o yaml"
+  register: get_secret
+  failed_when: false
+  changed_when: false
+
+- name: Reconfigure metrics-server-tls in case if exist
+  block:
+
+  - name: Slurp metrics server crt
+    slurp:
+      src: "{{ mktemp.stdout }}/metrics_server.crt"
+    register: metrics_server_crt_base64
+    run_once: true
+
+  - name: Slurp metrics server key
+    slurp:
+      src: "{{ mktemp.stdout }}/metrics_server.key"
+    register: metrics_server_key_base64
+    run_once: true
+
+  - name: Create secret yaml for updating purpose
+    copy:
+      content: "{{ get_secret.stdout }}"
+      dest: "{{ mktemp.stdout }}/secret.yaml"
+
+  - name: Check secret yaml
+    command: "cat {{ mktemp.stdout }}/secret.yaml"
+    register: cat
+
+  - name: Change the content of metrics_server.crt
+    lineinfile:
+      path: "{{ mktemp.stdout }}/secret.yaml"
+      regexp: '^(.*)  tls.crt:(.*)$'
+      line: '  tls.crt: {{ metrics_server_crt_base64.content }}'
+      backrefs: yes
+
+  - name: Change the content of tls.key
+    lineinfile:
+      path: "{{ mktemp.stdout }}/secret.yaml"
+      regexp: '^(.*)  tls.key:(.*)$'
+      line: '  tls.key: {{ metrics_server_key_base64.content }}'
+      backrefs: yes
+
+  - name: update the metrics-server-tls secret
+    command: "{{ kubectl }} apply -f {{ mktemp.stdout }}/secret.yaml"
+
+  - name: Restart metrics server
+    command: "{{ kubectl }} rollout restart deployment metrics-server -n kube-system"
+
+  - name: Wait for metrics server to be Ready
+    shell: "{{ kubectl }} -n kube-system get pod -A -l app=metrics-server --no-headers | grep -v Running | wc -l"
+    register: check_pods_non_running_state
+    until: check_pods_non_running_state.stdout.find("0") != -1
+    retries: 45
+    delay: 10
+
+  when: (get_secret.rc == 0 and "NotFound" not in get_secret.stderr)
+
+- name: Create TLS secret with new certificate files
+  command: "{{ kubectl }} create secret tls metrics-server-tls --cert {{ mktemp.stdout }}/metrics_server.crt --key {{ mktemp.stdout }}/metrics_server.key -n kube-system"
+  when: (get_secret.rc == 1 and "NotFound" in get_secret.stderr)

@@ -1,0 +1,34 @@
+---
+# deploy k8s master
+#
+
+# kube-master subtasks are not fully idompotent and shouldn't be run during upgrade.
+- include_tasks: kube-master.yml
+  when: (upgrade_in_progress is not defined) or (upgrade_in_progress is defined and not upgrade_in_progress)
+
+- block:
+  - name: Allow scheduling of pods to masters (if requested)
+    shell: "{{ kubectl }} taint nodes --selector='node-role.kubernetes.io/control-plane' node-role.kubernetes.io/control-plane:NoSchedule-"
+    become: yes
+    register: kubectl_result
+    failed_when: kubectl_result.rc != 0 and "not found" not in kubectl_result.stderr
+    changed_when: kubectl_result.rc == 0
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: kubectl_result.rc == 0
+    when: use_master_for_workloads | default(false) | bool
+
+  - block:
+    - name: Deploy ingress for kube-apiserver
+      include_role:
+        name: kube-api-ingress
+        tasks_from: deploy
+    when:
+      - deploy_kube_api_ingress | default(true) | bool
+      - kube_api_ingress_host is defined
+      - default_ingress_controller == "nginx"
+
+  when: inventory_hostname == first_master
+
+- include_tasks: kube-autoscale.yml
+  when: cloud_provider | default('') == 'aws'

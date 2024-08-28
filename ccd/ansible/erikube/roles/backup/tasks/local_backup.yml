@@ -1,0 +1,112 @@
+---
+- name: List files to backup
+  debug:
+    var: backup_files
+
+- block:
+  - name: Create {{ backups_folder_path }} directory
+    become: no
+    run_once: true
+    local_action:
+      module: file
+      path: "{{ backups_folder_path }}"
+      state: directory
+      mode: 0700
+
+  - name: Create temporary directory for backups
+    become: no
+    run_once: true
+    local_action: command mktemp -td erikube-backup-ansible-XXXXXX
+    register: tempdir
+    changed_when: False
+
+  - name: Backup node files
+    command: tar -czvf /tmp/{{ ansible_hostname }}.tgz {{ backup_files | join(' ') }}
+
+  - name: Backup kubernetes binaries
+    shell: "tar -czvf /tmp/k8s-bins.tgz /usr/local/bin/{kubelet,kubectl,kubeadm}"
+    args:
+      executable: /bin/bash
+    when: inventory_hostname == kube_hosts[0]
+
+  - name: Backup etcd binaries
+    run_once: true
+    command: tar -czvf /tmp/etcd-bins.tgz /usr/local/bin/etcdctl
+    when: inventory_hostname == etcd_hosts[0]
+
+  - name: Copy k8s-bins.tgz to local temporary folder
+    fetch:
+      src: /tmp/k8s-bins.tgz
+      dest: "{{ tempdir.stdout }}/"
+      flat: yes
+    when: inventory_hostname == kube_hosts[0]
+
+  - name: Copy etcd-bins.tgz to local temporary folder
+    fetch:
+      src: /tmp/etcd-bins.tgz
+      dest: "{{ tempdir.stdout }}/"
+      flat: yes
+    when: inventory_hostname == etcd_hosts[0]
+
+  - name: Copy node backup to local temporary folder
+    fetch:
+      src: /tmp/{{ ansible_hostname }}.tgz
+      dest: "{{ tempdir.stdout }}/"
+      flat: yes
+
+  - name: Copy etcd snapshot to local temporary folder
+    synchronize:
+      mode: pull
+      src: "/tmp/{{ etcd_snapshot_name }}"
+      dest: "{{ tempdir.stdout }}/"
+    when: inventory_hostname == etcd_snapshot_host
+
+  - set_fact:
+      backup_file_name: "erikube-{{ lookup('pipe', 'date +%Y%m%d%H%M') }}.tgz"
+    run_once: true
+    when: backup_file_name is not defined
+
+  - name: Create a tarball with all backups
+    become: no
+    run_once: true
+    local_action: command tar -czvf {{ backups_folder_path }}/{{ backup_file_name }} -C {{ tempdir.stdout }} .
+  always:
+    - name: Delete etcd snapshot
+      file:
+        path: /tmp/{{ etcd_snapshot_name }}
+        state: absent
+      changed_when: False
+      when: inventory_hostname == etcd_snapshot_host
+
+    - name: Delete node backup
+      file:
+        path: /tmp/{{ ansible_hostname }}.tgz
+        state: absent
+      changed_when: False
+
+    - name: Delete /tmp/k8s-bins.tgz
+      file:
+        path: /tmp/k8s-bins.tgz
+        state: absent
+      changed_when: False
+      when: inventory_hostname == kube_hosts[0]
+
+    - name: Delete /tmp/etcd-bins.tgz
+      file:
+        path: /tmp/etcd-bins.tgz
+        state: absent
+      changed_when: False
+      when: inventory_hostname == kube_hosts[0]
+
+    - name: Delete temp directory
+      become: no
+      run_once: true
+      local_action:
+        module: file
+        name: "{{ tempdir.stdout }}"
+        state: absent
+      changed_when: False
+
+- debug:
+    msg: Backup was saved to {{ backups_folder_path }}/{{ backup_file_name }}
+  run_once: True

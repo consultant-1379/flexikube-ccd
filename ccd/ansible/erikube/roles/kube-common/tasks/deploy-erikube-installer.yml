@@ -1,0 +1,135 @@
+- name: Enable External cloud provider
+  set_fact:
+    cloud_provider: "external"
+  become: yes
+  when: (openstack_enable_cloud_provider | default('false') | bool) or
+        (vsphere_enable_cloud_provider | default('false') | bool) or
+        (azure_enable_cloud_provider | default('false') | bool)
+
+- name: Add cloud provider parameter to kubelet.service
+  set_fact:
+    kubelet_extra_options: "{{ kubelet_extra_options }} --cloud-provider={{ cloud_provider }}"
+  become: yes
+  when: (cloud_provider | default("")) != ""
+
+- name: Add taint and label to master nodes
+  set_fact:
+    kubelet_extra_options: "{{ kubelet_extra_options }} --register-with-taints=node-role.kubernetes.io/control-plane=:NoSchedule "
+  when: inventory_hostname in groups['master']
+
+# Set max pod options
+- name: Add --max-pods={{ max_pods }} to Kubelet
+  set_fact:
+    kubelet_extra_options: "{{ kubelet_extra_options }} --max-pods={{ max_pods }}"
+  when:
+    - max_pods is defined
+
+- name: Add label to worker nodes
+  set_fact:
+    kubelet_extra_options: "{{ kubelet_extra_options }} "
+  when: (groups['worker'] is defined and inventory_hostname in groups['worker']) or
+        (groups['add_worker'] is defined and inventory_hostname in groups['add_worker'])
+
+- name: Add --node-ip={{ k8s_ip_address }} to Kubelet (IPv6)
+  set_fact:
+    kubelet_extra_options: "{{ kubelet_extra_options }} --node-ip={{ k8s_ip_address }}"
+  when:
+    - k8s_ip_version == 'ipv6'
+    - k8s_ip_address is defined
+
+- name: Add --node-ip="::" to Kubelet (Dualstack default ipv6)
+  set_fact:
+    kubelet_extra_options: "{{ kubelet_extra_options }} --node-ip=::"
+  when:
+    - (cloud_provider | default("")) != ""
+    - default_dualstack_ip_family == 'ipv6'
+    - k8s_ip_version == 'dualstack'
+
+- name: Add --node-ip="0.0.0.0" to Kubelet (Dualstack default ipv4)
+  set_fact:
+    kubelet_extra_options: "{{ kubelet_extra_options }} --node-ip=0.0.0.0"
+  when:
+    - (cloud_provider | default("")) != ""
+    - default_dualstack_ip_family == 'ipv4'
+    - k8s_ip_version == 'dualstack'
+
+- name: Set --node-ip to Kubelet (Dualstack default ipv4) no cloud-provider
+  set_fact:
+    kubelet_extra_options: "{{ kubelet_extra_options }} --node-ip={{ k8s_ip_address_ipv4 }},{{ k8s_ip_address_ipv6 }}"
+  when:
+    - (cloud_provider | default("")) == ""
+    - "'--node-ip=' not in kubelet_extra_options"
+    - default_dualstack_ip_family == 'ipv4'
+    - k8s_ip_version == 'dualstack'
+
+- name: Set --node-ip to Kubelet (Dualstack default ipv6) no cloud-provider
+  set_fact:
+    kubelet_extra_options: "{{ kubelet_extra_options }} --node-ip={{ k8s_ip_address_ipv6 }},{{ k8s_ip_address_ipv4 }}"
+  when:
+    - (cloud_provider | default("")) == ""
+    - "'--node-ip=' not in kubelet_extra_options"
+    - default_dualstack_ip_family == 'ipv6'
+    - k8s_ip_version == 'dualstack'
+
+- name: Set kubelet options
+  set_fact:
+    installer_kubelet_env_string: >-
+      --env K_BOOT_CONFIG={{ kubelet_boot_config }}
+      --env K_CONFIG={{ kubelet_config }}
+      --env K_MANIFEST={{ kubelet_manifest }}
+      --env K_ALLOW_PRIVILEGED={{ kubelet_allow_privileged }}
+      --env K_CERTIFICATES={{ kubelet_certificates }}
+
+- name: Add extra options if there are any
+  set_fact:
+    installer_kubelet_env_string: "{{ installer_kubelet_env_string }} --env K_EXTRA_OPT='{{ kubelet_extra_options }}'"
+  when: kubelet_extra_options != ""
+
+- name: Deploy erikube/installer
+  become: yes
+  shell: "{{ docker_cmd }} run --rm -e PAUSE_IMAGE={{ erikube_pause_image }} {{ installer_kubelet_env_string }} -v /var/run/docker.sock:/var/run/docker.sock:rw -v /usr/local:/target {{ erikube_installer_image }} install"
+  register: output
+
+- debug:
+    msg: "installer run gave {{ output }}"
+    verbosity: 2
+
+- name: Wait until erikube_setup is present before continuing
+  wait_for:
+    path: /usr/local/lib/erikube_setup
+    timeout: 30
+
+# requires on top level: import_playbook: playbooks/get-container-list.yml
+- name: Install container-list.json
+  copy:
+    src: ../../../../common/container-list.json
+    dest: /usr/local/lib/erikube_setup/image-list.json
+  become: yes
+
+- name: Modify kubelet service configuration with correct cgroup driver for containerd
+  become: yes
+  replace:
+    path: /usr/local/lib/systemd/system/kubelet.service
+    regexp: 'cgroup-driver=(\w+)'
+    replace: 'cgroup-driver={{ containerd_default_cgroup_driver }}'
+  when: not image_based_deployment | default(false) | bool
+
+# TODO: This is a quick hack, the real fix will be to modify erikube installer
+- name: Move kubelet service to /usr/lib/systemd/system
+  copy:
+    src: /usr/local/lib/systemd/system/kubelet.service
+    dest: /usr/lib/systemd/system/kubelet.service
+    remote_src: yes
+  become: yes
+  when:
+    - ansible_distribution == 'SLES'
+    - not image_based_deployment | default(false) | bool
+
+- name: Remove old kubelet.service files
+  file:
+    path: /usr/local/lib/systemd/system/kubelet.service
+    state: absent
+  become: yes
+  when:
+    - ansible_distribution == 'SLES'
+    - not image_based_deployment | default(false) | bool

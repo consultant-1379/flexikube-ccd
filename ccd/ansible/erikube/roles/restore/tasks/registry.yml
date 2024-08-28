@@ -1,0 +1,50 @@
+- assert:
+    that:
+      - backup_dir is defined
+      - kubectl is defined
+      - registry_username is defined
+      - registry_password is defined
+      - registry_address is defined
+
+- name: Check needed binaries are found from host
+  block:
+    - name: Check kubectl exists
+      shell: "{{ kubectl }} >/dev/null 2>&1"
+
+    - name: Check skopeo exists
+      shell: skopeo --version >/dev/null 2>&1
+
+    - name: Check curl exists
+      shell: curl --help >/dev/null 2>&1
+
+    - name: Check curl exists
+      shell: jq --help >/dev/null 2>&1
+
+- name: Copy images to registry
+  block:
+    - name: Create temp directory
+      command: mktemp -d {{ backup_dir }}/container-images-XXXXXX
+      register: tmpcontainerdir
+
+    - name: Unarchive containers
+      unarchive:
+        src: "{{ backup_dir }}/containers.tar"
+        dest: "{{ tmpcontainerdir.stdout }}/"
+
+    - name: Upload images to registry
+      shell: |
+          cd "{{ tmpcontainerdir.stdout }}"
+          for image in $( find . -type f -follow -print | xargs ls | sed 's/\.\///g' ); do
+            rep_image=$(echo ${image} | sed 's/\(.*\)_/\1:/' |  sed 's/\.tar//g')
+            skopeo copy --dest-creds='{{ registry_username }}:{{ registry_password }}' \
+              docker-archive:{{ tmpcontainerdir.stdout }}/${image} \
+              docker://{{ registry_address }}/${rep_image}
+            skopeo inspect --creds='{{ registry_username }}:{{ registry_password }}' \
+              docker://{{ registry_address }}/${rep_image}
+          done
+      no_log: yes
+
+    - name: Delete temp directory
+      file:
+        name: "{{ tmpcontainerdir.stdout }}"
+        state: absent

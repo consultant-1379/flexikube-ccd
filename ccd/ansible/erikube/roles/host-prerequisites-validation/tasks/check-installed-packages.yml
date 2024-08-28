@@ -1,0 +1,37 @@
+---
+- name: Checking if packages are installed in the Ubuntu node
+  block:
+    - name: Package checking for Debian
+      command: dpkg-query -l "{{item}}"
+      loop: "{{host_prepare_packages | default([])}}"
+      register: debian_pkg_check
+      ignore_errors: True
+      failed_when: false
+
+    - name: Displaying packages which are currently not installed
+      assert:
+        that: item.rc == 0
+        fail_msg: "Please install the {{item.item}} package in {{ansible_hostname}}"
+        quiet: true
+      loop: "{{debian_pkg_check.results}}"
+      loop_control:
+        label: "{{item.item}}"
+  when: ansible_os_family == "Debian"
+
+- name: Checking if packages are installed in the CentOS or SLES node
+  block:
+    - name: Package checking for RedHat
+      command: rpm -q "{{item}}"
+      loop: "{{host_prepare_packages | default([])}}"
+      register: redhat_pkg_check
+      ignore_errors: True
+
+    - name: Displaying packages which are currently not installed
+      assert:
+        that: item.rc == 0
+        fail_msg: "Please install the {{item.item}} package in {{ansible_hostname}}"
+        quiet: true
+      loop: "{{redhat_pkg_check.results}}"
+      loop_control:
+        label: "{{item.item}}"
+  when: ansible_os_family == "RedHat" or ansible_os_family == "Suse"

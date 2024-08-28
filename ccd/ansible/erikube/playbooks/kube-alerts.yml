@@ -1,0 +1,73 @@
+---
+- name: "Check for active alerts in the system"
+  hosts: "{{ groups.reachable_master[0] | d(groups.master[0]) }}"
+  roles:
+  - erikube-defaults
+  vars:
+    no_alert: 'Failed to retrieve alerts'
+    pass_msg: 'Check for active alerts in the system [PASS]'
+    fail_msg: 'Check for active alerts in the system [FAIL]'
+    alert_dict: {}
+    ignore_alert_list: "{{ ignore_alarm_list | default('') }}"
+    final_alert_list: []
+    retrieve_alerts: 0
+    retry_count: 0
+
+  tasks:
+    - block:
+      - name: Get Alert Manager pod-name and node-ip
+        shell: "{{ kubectl }} get pods -o wide -n monitoring -l app.kubernetes.io/name=eric-pm-alertmanager -o json"
+        register: output
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: (output.rc == 0 or "not found" in output.stderr)
+        failed_when: >
+          (output is not defined) or
+          (output.stderr != "") or
+          (output.rc != 0)
+        become: true
+
+      - name: Extract Alert Manager pod-name and node-ip
+        set_fact:
+          am_pod_name: "{{ output.stdout | from_json | json_query('items[0].metadata.name') }}"
+          am_address: "{{ output.stdout | from_json | json_query('items[0].status.podIP') }}"
+
+      - name: Init num_retries if undefined
+        set_fact:
+          num_retries: 1
+        when: num_retries is undefined
+
+      - name: Limit retries to 3
+        set_fact:
+          num_retries: 3
+        when: num_retries > 3
+
+      # Ansible does not support looping over blocks or include_role -> code repetition
+      - name: Get Active alerts - 1st attempt
+        include_role:
+          name: kube-alerts
+          tasks_from: get_alert_list
+        when: retry_count | int < num_retries and (retry_count == 0 or final_alert_list[0] is defined) 
+
+      - name: Get Active alerts - 2nd attempt
+        include_role:
+          name: kube-alerts
+          tasks_from: get_alert_list
+        when: retry_count | int < num_retries and (retry_count == 0 or final_alert_list[0] is defined)
+
+      - name: Get Active alerts - 3rd attempt
+        include_role:
+          name: kube-alerts
+          tasks_from: get_alert_list
+        when: retry_count | int < num_retries and (retry_count == 0 or final_alert_list[0] is defined)
+
+      - name: "Checking alert list"
+        set_fact:
+          health_checks_list: "{{ health_checks_list + [pass_msg] }}"
+        failed_when: final_alert_list[0] is defined
+      rescue:
+      - set_fact:
+          health_checks_list: "{{ health_checks_list + [fail_msg] + ['{{ final_alert_list | sort }}']
+                                  if retrieve_alerts == 1 else
+                                  health_checks_list + [fail_msg] + [[no_alert]]
+                               }}"

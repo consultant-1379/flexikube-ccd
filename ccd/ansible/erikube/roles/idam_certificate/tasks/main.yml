@@ -1,0 +1,27 @@
+---
+- name: check that correct method has been used to provide user cert
+  fail: msg="Must use variable dex_cert_content in IBD deployment"
+  when: dex_cert_file is defined and (image_based_deployment | default(false) | bool)
+
+- name: check that only one method of providing user cert has been used
+  fail: msg="Define either dex_cert_content or dex_cert_file, not both"
+  when: dex_cert_file is defined and dex_cert_content is defined
+
+- name: check that key is defined if cert is defined
+  fail: msg="Must define dex_key_file if dex_cert_file is defined"
+  when: dex_cert_file is defined and dex_key_file is undefined
+
+- name: check that cert is defined if key is defined
+  fail: msg="Must define dex_cert_file if dex_key_file is defined"
+  when: dex_key_file is defined and dex_cert_file is undefined
+
+- name: check that key is defined if cert is defined
+  fail: msg="Must define dex_key_content if dex_cert_content is defined"
+  when: dex_cert_content is defined and dex_key_content is undefined
+
+- name: check that cert is defined if key is defined
+  fail: msg="Must define dex_cert_file if dex_key_file is defined"
+  when: dex_key_content is defined and dex_cert_content is undefined
+
+- block:
+    - include_tasks: "{{ idam_certificate_action }}.yml"

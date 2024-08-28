@@ -1,0 +1,256 @@
+---
+- name: Deploy Document Database PG for License Manager
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - name: Check Mandatory variables
+      assert:
+        that:
+          - (ccd_licensing_nels_host is defined) and (ccd_licensing_nels_host|length > 0)
+        fail_msg: "Mandatory Ansible variable ccd_licensing_nels_host is not set"
+    - include_vars: ../../common/container-list.json
+    - name: "Set Document Database nodeSelector to {}"
+      set_fact:
+        adp_license_manager_nodeselector: {}
+    - name: "Set documentdb nodeSelector if infra_node_pool_name is defined"
+      set_fact:
+        adp_license_manager_nodeselector:
+          node-pool: "{{ infra_node_pool_name }}"
+      when: infra_node_pool_name is defined
+    - name: "Set custom documentdb config if defined"
+      set_fact:
+        pg_config: "{{ adp_lm_documentdb_config }}"
+      when: adp_lm_documentdb_config is defined
+    # remove after using ADP postgresql pod
+    - name: "Set documentdb nodeSelector to {}"
+      set_fact:
+        documentdb_nodeselector: {}
+    - name: "Set documentdb_nodeSelector if infra_node_pool_name is defined"
+      set_fact:
+        documentdb_nodeselector:
+          node-pool: "{{ infra_node_pool_name }}"
+      when: infra_node_pool_name is defined
+
+  vars:
+    - kube_image_prefix: "{{ docker_registry_host | default(default_registry) }}/"
+    - tarball_name: "{{ helm_charts.eric_data_document_database_pg.tarball }}"
+    - storage_class: "{{ adp_lm_pg_storage_class | default('network-block') }}"
+    - storage_size: "{{ adp_lm_pg_storage_size | default('4Gi') }}"
+    - pg_namespace: kube-system
+    - pg_config:
+        pg-user: licenseuser
+        documentdb-password: "{{ lookup('password', '/dev/null length=15 chars=ascii_letters') }}"
+        super-pwd: "{{ lookup('password', '/dev/null length=15 chars=ascii_letters') }}"
+        metrics-pwd: "{{ lookup('password', '/dev/null length=15 chars=ascii_letters') }}"
+        replica-user: licenseuserreplica
+        replica-pwd: "{{ lookup('password', '/dev/null length=15 chars=ascii_letters') }}"
+    - pg_secret: documentdb-config
+    - lm_db_ha_disabled : "{{ licensemanager_db_ha_disabled | default(false) | bool }}"
+    - lm_db_replica_count: "{{ 1 if lm_db_ha_disabled == true else 2 }}"
+  roles:
+    - erikube-defaults
+
+    - role: adp-documentdb-config
+
+    - role: helm-chart-provisioner
+      vars:
+        - chart_name: eric-data-document-database-pg
+        - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '1200s' }}"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - state: installed
+        - kube_namespace: "{{ pg_namespace }}"
+        - values:
+            global:
+              internalIPFamily: "{{ internal_ip_family | default(omit) }}"
+              registry:
+                url: "{{ kube_image_prefix | regex_replace('\\/$', '') }}"
+              security:
+                tls:
+                  enabled: false
+            imageCredentials:
+              repoPath: ""
+              pullSecret: "local-registry-secret"
+            metrics:
+              enabled: false
+            highAvailability:
+              replicaCount: "{{ lm_db_replica_count }}"
+            podDisruptionBudget:
+              maxUnavailable: "{{ lm_db_replica_count }}"
+              minAvailable: 0
+            postgresDatabase: licensemanager_db
+            persistentVolumeClaim:
+              storageClassName: "{{ storage_class }}"
+              size: "{{ storage_size }}"
+            credentials:
+              kubernetesSecretName: "{{ pg_secret }}"
+              keyForUserId: pg-user
+              keyForUserPw: documentdb-password
+            appArmorProfile:
+              type: runtime/default
+            seccompProfile:
+              type: RuntimeDefault
+            nodeSelector: "{{ documentdb_nodeselector }}"
+            security:
+              tls:
+                brAgent:
+                  enabled: false
+            postgresConfig:
+              huge_pages: "off"
+        - productInfo:
+            images:
+              pg13:
+                name: "{{ containers.erikube.eric_data_document_database_pg13.split(':')[0] }}"
+                tag: "{{ containers.erikube.eric_data_document_database_pg13.split(':')[1] }}"
+                repoPath: ""
+              kubeclient:
+                name: "{{ containers.erikube.eric_data_document_database_kube_client.split(':')[0] }}"
+                tag: "{{ containers.erikube.eric_data_document_database_kube_client.split(':')[1] }}"
+                repoPath: ""
+              hooklauncher:
+                name: "{{ containers.erikube.eric_data_document_database_hook_launcher.split(':')[0] }}"
+                tag: "{{ containers.erikube.eric_data_document_database_hook_launcher.split(':')[1] }}"
+                repoPath: ""
+
+- name: Deploy ADP License Manager
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+
+    - include_vars: ../../common/container-list.json
+    - name: Check Mandatory variables
+      assert:
+        that:
+          - (ccd_licensing_nels_host is defined) and (ccd_licensing_nels_host|length > 0)
+        fail_msg: "Mandatory Ansible variable ccd_licensing_nels_host is not set"
+    - name: "Set adp_license_manager_nodeSelector to {}"
+      set_fact:
+        adp_license_manager_nodeselector: {}
+    - name: "Set adp_license_manager_nodeSelector if infra_node_pool_name is defined"
+      set_fact:
+        adp_license_manager_nodeselector:
+          node-pool: "{{ infra_node_pool_name }}"
+      when: infra_node_pool_name is defined
+  vars:
+    - tarball_name: "{{ helm_charts.eric_lm_combined_server.tarball }}"
+    - adp_lm_db_secret_name: "{{ ccd_licensing_db_secret_name | default('documentdb-config') }}"
+    - adp_lm_db_user_key: "pg-user"
+    - adp_lm_db_password_key: "{{ ccd_licensing_db_password_key | default('documentdb-password') }}"
+    - adp_lm_license_domains: "{{ ccd_licensing_domains | default('') }}"
+    - adp_lm_nels_port: "{{ ccd_licensing_nels_port | default(9095) }}"
+    - adp_lm_ch_livenessprobe_initialdelayseconds: "{{ ccd_licensing_ch_livenessprobe_initialdelayseconds | default(35) }}"
+    - adp_lm_ch_replicas: "{{ ccd_licensing_ch_replicas | default(1) }}"
+    - adp_lm_ch_cpu_limit: "{{ ccd_licensing_ch_cpu_limit | default('1000m') }}"
+    - adp_lm_ch_mem_limit: "{{ ccd_licensing_ch_mem_limit | default('1024Mi') }}"
+    - adp_lm_ch_cpu_req: "{{ ccd_licensing_ch_cpu_req | default('100m') }}"
+    - adp_lm_ch_mem_req: "{{ ccd_licensing_ch_mem_req | default('512Mi') }}"
+    - adp_lm_sc_cpu_limit: "{{ ccd_licensing_sc_cpu_limit | default('1000m') }}"
+    - adp_lm_sc_mem_limit: "{{ ccd_licensing_sc_mem_limit | default('1024Mi') }}"
+    - adp_lm_sc_cpu_req: "{{ ccd_licensing_sc_cpu_req | default('100m') }}"
+    - adp_lm_sc_mem_req: "{{ ccd_licensing_sc_mem_req | default('512Mi') }}"
+    - adp_lm_db_migration_cpu_limit: "{{ ccd_licensing_db_migration_cpu_limit | default('2000m') }}"
+    - adp_lm_db_migration_mem_limit: "{{ ccd_licensing_db_migration_mem_limit | default('2048Mi') }}"
+    - adp_lm_db_migration_cpu_req: "{{ ccd_licensing_db_migration_cpu_req | default('500m') }}"
+    - adp_lm_db_migration_mem_req: "{{ ccd_licensing_db_migration_mem_req | default('128Mi') }}"
+
+  tasks:
+
+    - import_role:
+        name: erikube-defaults
+
+    - import_role:
+        name: helm-chart-provisioner
+      vars:
+        - chart_name: eric-lm-combined-server
+        - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '600s' }}"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - state: installed
+        - kube_namespace: kube-system
+        - productInfo:
+            images:
+              databaseMigration:
+                name: "{{ containers.erikube.adp_lm_db_migration.split(':')[0] }}"
+                tag: "{{ containers.erikube.adp_lm_db_migration.split(':')[1] }}"
+              lch:
+                name: "{{ containers.erikube.adp_lm_consumer_handler.split(':')[0] }}"
+                tag: "{{ containers.erikube.adp_lm_consumer_handler.split(':')[1] }}"
+              lsc:
+                name: "{{ containers.erikube.adp_lm_server_client.split(':')[0] }}"
+                tag: "{{ containers.erikube.adp_lm_server_client.split(':')[1] }}"
+              hooklauncher:
+                name: "{{ containers.erikube.adp_lm_hook_launcher.split(':')[0] }}"
+                tag: "{{ containers.erikube.adp_lm_hook_launcher.split(':')[1] }}"
+        - values:
+            global:
+              registry:
+                # Remove the hardcoded / from the default prefix
+                  url: "{{ kube_image_prefix | regex_replace('\\/$', '') }}"
+              security:
+                tls:
+                  enabled: false
+              nodeSelector: "{{ adp_license_manager_nodeselector }}"
+              ericsson:
+                licensing:
+                  licenseDomains: "{{ adp_lm_license_domains }}"
+            imageCredentials:
+              repoPath: ""
+              pullSecret: "local-registry-secret"
+            probes:
+              eric-lm-license-consumer-handler:
+                livenessProbe:
+                  initialDelaySeconds: "{{ adp_lm_ch_livenessprobe_initialdelayseconds }}"
+            licenseConsumerHandler:
+              replicaCount: "{{ adp_lm_ch_replicas }}"
+              podDisruptionBudget:
+                minAvailable: 0
+            seccompProfile:
+              eric-lm-license-consumer-handler:
+                type: RuntimeDefault
+              eric-lm-license-server-client:
+                type: RuntimeDefault
+              eric-lm-database-migration:
+                type: RuntimeDefault
+            appArmorProfile:
+              eric-lm-license-consumer-handler:
+                type: runtime/default
+              eric-lm-license-server-client:
+                type: runtime/default
+              eric-lm-database-migration:
+                type: runtime/default
+            resources:
+              eric-lm-license-consumer-handler:
+                limits:
+                  cpu: "{{ adp_lm_ch_cpu_limit }}"
+                  memory: "{{ adp_lm_ch_mem_limit }}"
+                requests:
+                  cpu: "{{ adp_lm_ch_cpu_req }}"
+                  memory: "{{ adp_lm_ch_mem_req }}"
+              eric-lm-license-server-client:
+                limits:
+                  cpu: "{{ adp_lm_sc_cpu_limit }}"
+                  memory: "{{ adp_lm_sc_mem_limit }}"
+                requests:
+                  cpu: "{{ adp_lm_sc_cpu_req }}"
+                  memory: "{{ adp_lm_sc_mem_req }}"
+              eric-lm-database-migration:
+                limits:
+                  cpu: "{{ adp_lm_db_migration_cpu_limit }}"
+                  memory: "{{ adp_lm_db_migration_mem_limit }}"
+                requests:
+                  cpu: "{{ adp_lm_db_migration_cpu_req }}"
+                  memory: "{{ adp_lm_db_migration_mem_req }}"
+            licenseServerClient:
+            # Fix adp license manager staging
+              asih:
+                host: "eric-app-sys-info-handler.kube-system.svc.{{ kubelet_domain }}"
+                port: 8080
+                tls: false
+              licenseServer:
+                thrift:
+                  host: "{{ ccd_licensing_nels_host }}"
+                  port: "{{ adp_lm_nels_port }}"
+            database:
+              credentials:
+                secretName: "{{ adp_lm_db_secret_name }}"
+                userKey: "{{ adp_lm_db_user_key }}"
+                passwordKey: "{{ adp_lm_db_password_key }}"
+              host: eric-data-document-database-pg

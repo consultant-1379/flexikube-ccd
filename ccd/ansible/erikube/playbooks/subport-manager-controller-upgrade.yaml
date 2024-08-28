@@ -1,0 +1,15 @@
+
+- name: Upgrade Subport Manager and Subport Controller
+
+  hosts: master[0]
+  become: yes
+  roles:
+    - role: erikube-defaults
+    - role: subport-manager-controller
+      when:
+      - openstack_auth_url is defined
+      - openstack_username is defined
+      - openstack_user_password is defined
+      - openstack_project_name is defined
+      - openstack_domain_name is defined
+      - subport_handling | default('true') | bool

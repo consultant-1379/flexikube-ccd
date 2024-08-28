@@ -1,0 +1,16 @@
+---
+- name: Gather master hosts facts
+  hosts: master
+  gather_facts: yes
+
+- name: Deploy ingress loadbalancer
+  hosts: ingress_lb
+  become: yes
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+  vars:
+    - ingress_action: deploy
+    - kube_image_prefix: "{{ docker_registry_host | default(default_registry) }}/"
+    - ingress_lb_image: "{{ kube_image_prefix }}{{ containers.erikube.ingress }}"
+  roles:
+    - ingress-lb

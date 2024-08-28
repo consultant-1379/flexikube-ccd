@@ -1,0 +1,10 @@
+---
+- name: Create namespace {{ victoria_metrics_namespace }}
+  command: "{{ kubectl }} create namespace {{ victoria_metrics_namespace }}"
+  register: ns_create
+  failed_when: ns_create.rc != 0 and not ns_create.stderr.find("already exists") != -1
+  changed_when: ns_create.rc == 0
+  become: true
+
+- include_tasks: etcd-certs.yml
+

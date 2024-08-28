@@ -1,0 +1,472 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: csi-cinder-controller-sa
+  namespace: kube-system
+  annotations:
+    container.apparmor.security.beta.kubernetes.io/csi-attacher: "runtime/default"
+    container.apparmor.security.beta.kubernetes.io/csi-provisioner: "runtime/default"
+    container.apparmor.security.beta.kubernetes.io/csi-snapshotter: "runtime/default"
+    container.apparmor.security.beta.kubernetes.io/csi-resizer: "runtime/default"
+    container.apparmor.security.beta.kubernetes.io/liveness-probe: "runtime/default"
+    container.apparmor.security.beta.kubernetes.io/cinder-csi-plugin: "runtime/default"
+---
+# external attacher
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-attacher-role
+rules:
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: [ "get", "list", "watch", "create", "update", "delete" ]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["volumeattachments"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["csinodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["volumeattachments/status"]
+    verbs: ["patch"]
+
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-attacher-binding
+subjects:
+  - kind: ServiceAccount
+    name: csi-cinder-controller-sa
+    namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: csi-attacher-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# external Provisioner
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-provisioner-role
+rules:
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "update"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["csinodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list", "watch", "create", "update", "patch"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots"]
+    verbs: ["get", "list"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotcontents"]
+    verbs: ["get", "list"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "watch", "list", "delete", "update", "create"]
+
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-provisioner-binding
+subjects:
+  - kind: ServiceAccount
+    name: csi-cinder-controller-sa
+    namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: csi-provisioner-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# external snapshotter
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-snapshotter-role
+rules:
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotcontents"]
+    verbs: ["create", "get", "list", "watch", "update", "delete"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots"]
+    verbs: ["get", "list", "watch", "update"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots/status"]
+    verbs: ["update"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["create", "list", "watch", "delete"]
+
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-snapshotter-binding
+subjects:
+  - kind: ServiceAccount
+    name: csi-cinder-controller-sa
+    namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: csi-snapshotter-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# External Resizer
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-resizer-role
+rules:
+
+ # The following rule should be uncommented for plugins that require secrets
+ # for provisioning.
+ # - apiGroups: [""]
+ #   resources: ["secrets"]
+ #   verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims/status"]
+    verbs: ["update", "patch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list", "watch", "create", "update", "patch"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "watch", "list", "delete", "update", "create"]
+
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-resizer-binding
+subjects:
+  - kind: ServiceAccount
+    name: csi-cinder-controller-sa
+    namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: csi-resizer-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  namespace: kube-system
+  name: external-resizer-cfg
+rules:
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "watch", "list", "delete", "update", "create"]
+- apiGroups: [""]
+  resources: ["endpoints"]
+  verbs: ["get", "watch", "list", "delete", "update", "create"]
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-resizer-role-cfg
+  namespace: kube-system
+subjects:
+  - kind: ServiceAccount
+    name: csi-cinder-controller-sa
+    namespace: kube-system
+roleRef:
+  kind: Role
+  name: external-resizer-cfg
+  apiGroup: rbac.authorization.k8s.io
+
+---
+
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: csi-cinder-controllerplugin
+  namespace: kube-system
+  labels:
+    app: csi-cinder-controllerplugin
+spec:
+  replicas: {{ (groups['master'] | length) + (groups['add_master'] | default([]) | length) }}
+  selector:
+    matchLabels:
+      app: csi-cinder-controllerplugin
+  template:
+    metadata:
+      labels:
+        app: csi-cinder-controllerplugin
+    spec:
+      securityContext:
+        runAsUser: 160957
+        runAsNonRoot: true
+        runAsGroup: 160957
+      priorityClassName: system-cluster-critical
+      serviceAccount: csi-cinder-controller-sa
+{% if cinder_csi_host_network | default(false) %}
+      hostNetwork: true
+{% endif %}
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          effect: NoSchedule
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - csi-cinder-controllerplugin
+            topologyKey: "kubernetes.io/hostname"
+      imagePullSecrets:
+        - name: local-registry-secret
+      containers:
+        - name: csi-attacher
+          securityContext:
+            privileged: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            allowPrivilegeEscalation: false
+          image: {{csi_attacher_image}}
+          args:
+            - "--v={{ cinder_csi_loglevel }}"
+            - "--csi-address=$(ADDRESS)"
+            - "--timeout={{ cinder_csi_timeout }}"
+            - "--retry-interval-start={{ cinder_csi_retry_interval_start }}"
+            - "--retry-interval-max={{ cinder_csi_retry_interval_max }}"
+            - "--leader-election={{cinder_csi_leader_election}}"
+            - "--leader-election-lease-duration={{cinder_csi_leader_election_lease_duration}}"
+            - "--leader-election-renew-deadline={{cinder_csi_leader_election_renew_deadline}}"
+            - "--kube-api-qps={{cinder_csi_kube_api_qps}}"
+            - "--kube-api-burst={{cinder_csi_kube_api_burst}}"
+          env:
+            - name: ADDRESS
+              value: /var/lib/csi/sockets/pluginproxy/csi.sock
+          imagePullPolicy: "IfNotPresent"
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/csi/sockets/pluginproxy/
+        - name: csi-provisioner
+          securityContext:
+            privileged: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            allowPrivilegeEscalation: false
+          image: {{csi_provisioner_image}}
+          args:
+            - "--csi-address=$(ADDRESS)"
+            - "--extra-create-metadata"
+            - "--volume-name-prefix={{ cinder_volume_name_prefix }}"
+            - "--v={{ cinder_csi_loglevel }}"
+            - "--retry-interval-start={{ cinder_csi_retry_interval_start }}"
+            - "--retry-interval-max={{ cinder_csi_retry_interval_max }}"
+            - "--worker-threads={{ cinder_csi_worker_threads }}"
+            - "--timeout={{ cinder_csi_timeout }}"
+            - "--leader-election={{cinder_csi_leader_election}}"
+            - "--leader-election-lease-duration={{cinder_csi_leader_election_lease_duration}}"
+            - "--leader-election-renew-deadline={{cinder_csi_leader_election_renew_deadline}}"
+            - "--kube-api-qps={{cinder_csi_kube_api_qps}}"
+            - "--kube-api-burst={{cinder_csi_kube_api_burst}}"
+          env:
+            - name: ADDRESS
+              value: /var/lib/csi/sockets/pluginproxy/csi.sock
+          imagePullPolicy: "IfNotPresent"
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/csi/sockets/pluginproxy/
+        - name: csi-snapshotter
+          securityContext:
+            privileged: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            allowPrivilegeEscalation: false
+          image: {{ csi_snapshotter_image }}
+          args:
+            - "--v={{ cinder_csi_loglevel }}"
+            - "--csi-address=$(ADDRESS)"
+            - "--snapshot-name-prefix={{ cinder_csi_snapshot_name_prefix }}"
+            - "--timeout={{ cinder_csi_timeout }}"
+            - "--leader-election={{cinder_csi_leader_election}}"
+            - "--extra-create-metadata"
+            - "--leader-election-lease-duration={{cinder_csi_leader_election_lease_duration}}"
+            - "--leader-election-renew-deadline={{cinder_csi_leader_election_renew_deadline}}"
+          env:
+            - name: ADDRESS
+              value: /var/lib/csi/sockets/pluginproxy/csi.sock
+          imagePullPolicy: "IfNotPresent"
+          volumeMounts:
+            - mountPath: /var/lib/csi/sockets/pluginproxy/
+              name: socket-dir
+        - name: csi-resizer
+          securityContext:
+            privileged: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            allowPrivilegeEscalation: false
+          image: {{ csi_resizer_image }}
+          args:
+            - "--v={{ cinder_csi_loglevel }}"
+            - "--csi-address=$(ADDRESS)"
+            - "--workers={{ cinder_csi_resizer_workers }}"
+            - "--timeout={{ cinder_csi_timeout }}"
+            - "--leader-election={{cinder_csi_leader_election}}"
+            - "--handle-volume-inuse-error=false"
+            - "--leader-election-lease-duration={{cinder_csi_leader_election_lease_duration}}"
+            - "--leader-election-renew-deadline={{cinder_csi_leader_election_renew_deadline}}"
+          env:
+            - name: ADDRESS
+              value: /var/lib/csi/sockets/pluginproxy/csi.sock
+          imagePullPolicy: "IfNotPresent"
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/csi/sockets/pluginproxy/
+        - name: liveness-probe
+          securityContext:
+            privileged: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            allowPrivilegeEscalation: false
+          image: {{ csi_livenessprobe_image }}
+          args:
+            - "-v={{ cinder_csi_loglevel }}"
+            - "--csi-address=$(ADDRESS)"
+            - "--health-port=9809"
+          env:
+            - name: ADDRESS
+              value: /var/lib/csi/sockets/pluginproxy/csi.sock
+          imagePullPolicy: "IfNotPresent"
+          volumeMounts:
+            - mountPath: /var/lib/csi/sockets/pluginproxy/
+              name: socket-dir
+        - name: cinder-csi-plugin
+          securityContext:
+            privileged: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            allowPrivilegeEscalation: false
+          image: {{cinder_csi_plugin_image}}
+          args:
+            - /bin/cinder-csi-plugin
+            - "--nodeid=$(NODE_ID)"
+            - "--endpoint=$(CSI_ENDPOINT)"
+            - "--cloud-config=$(CLOUD_CONFIG)"
+            - "--cluster=$(CLUSTER_NAME)"
+            - "--v={{ cinder_csi_loglevel }}"
+          env:
+            - name: NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: CSI_ENDPOINT
+              value: unix://csi/csi.sock
+            - name: CLOUD_CONFIG
+              value: /etc/config/cloud-config
+            - name: CLUSTER_NAME
+              value: kubernetes
+          imagePullPolicy: "IfNotPresent"
+          ports:
+            - containerPort: 9809
+              name: healthz
+              protocol: TCP
+          # The probe
+          livenessProbe:
+            failureThreshold: 5
+            httpGet:
+              path: /healthz
+              port: healthz
+            initialDelaySeconds: 10
+            timeoutSeconds: 10
+            periodSeconds: 60
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+            - name: secret-cinderplugin
+              mountPath: /etc/config
+              readOnly: true
+            - name: devices-dir
+              mountPath: /dev
+{% if openstack_ca_cert != "" %}
+            - name: os-cacert
+              mountPath: "/etc/oscacert"
+              readOnly: true
+{% endif %}
+      volumes:
+        - name: socket-dir
+          emptyDir:
+        - name: secret-cinderplugin
+          secret:
+            secretName: openstack-cloud-config
+        - name: devices-dir
+          hostPath:
+            path: /dev
+            type: Directory
+{% if openstack_ca_cert != "" %}
+        - name: os-cacert
+          secret:
+            secretName: openstack-ca-cert
+{% endif %}

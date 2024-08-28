@@ -1,0 +1,137 @@
+---
+- name: Define k8s master IP address
+  set_fact:
+    kube_apiserver_ip: "{{ hostvars[groups['master'][0]].k8s_ip_address }}"
+  when: kube_apiserver_ip is not defined
+
+- name: Add master hostname to /etc/hosts
+  lineinfile:
+    path: /etc/hosts
+    regexp: "^{{ kube_apiserver_ip }} {{ first_master.replace('*','') }}"
+    line: "{{ kube_apiserver_ip }} {{ first_master.replace('*','') }}"
+    state: present
+
+- name: Create temporary directory for {{ cert_clustername }}/{{ inventory_hostname }}
+  become: no
+  local_action: command mktemp -td {{ cert_clustername }}-{{ inventory_hostname }}-ansible-XXXXXX
+  register: mktemp
+  changed_when: False
+
+- set_fact:
+    tempdir: "{{ mktemp.stdout }}"
+
+- name: Fetch CA certificate from master
+  delegate_to: "{{ kube_client_ca }}"
+  fetch:
+    flat: yes
+    fail_on_missing: yes
+    src: "{{ cert_pki_dir }}/{{ cert_ca_cert }}"
+    dest: "{{ tempdir }}/{{ cert_ca_cert }}"
+
+- name: Create deployment directory {{ cert_deploy_dir }}
+  become: yes
+  file:
+    path: "{{ cert_deploy_dir }}"
+    state: directory
+    mode: 0700
+
+- name: Copy certificates to deployment directory
+  become: yes
+  copy:
+    src: "{{ tempdir }}/{{ cert_ca_cert }}"
+    dest: "{{ cert_deploy_dir }}/{{ cert_ca_cert }}"
+    mode: 0600
+
+- name: Configure RBAC
+  import_tasks: rbac.yml
+  become: yes
+  delegate_to: "{{ kube_client_ca }}"
+
+- name: Retrieve ServiceAccount token
+  delegate_to: "{{ kube_client_ca }}"
+  register: token
+  shell: >
+    {{ kubectl }} get secret $({{ kubectl }} get secrets | grep -E "^{{ serviceaccount }}" | cut -f1 -d ' ') -ojsonpath={.data.token} |
+      base64 --decode
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: token.rc == 0
+  changed_when: False
+
+- name: Print token
+  debug:
+    msg: "{{ token.stdout }}"
+
+- name: Create config-file for kubectl tool
+  become: yes
+  changed_when: False
+  template:
+    src: config-template.j2
+    dest: "{{ cert_deploy_dir }}/{{ cert_conf_file }}"
+    mode: "u+rw,g=,o="
+
+- name: Enable modules for ipvs on LB host
+  modprobe:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - ip_vs
+    - ip_vs_rr
+    - ip_vs_wrr
+    - ip_vs_sh
+    - nf_conntrack
+
+- name: Start ipvsadm service on LB host
+  systemd:
+    name: ipvsadm
+    state: started
+    daemon_reload: yes
+    enabled: yes
+
+- name: Enable connection tracking (conntrack)
+  sysctl:
+    name: "net.ipv4.vs.conntrack"
+    value: 1
+    sysctl_set: yes
+    state: present
+    reload: yes
+
+- name: Log into local registry and force re-authorization
+  docker_login:
+    registry: "{{ kube_image_prefix }}"
+    username: "{{ local_registry_user }}"
+    password: "{{ local_registry_password }}"
+    reauthorize: yes
+  when: local_registry_user is defined and local_registry_user != ""
+
+- name: Pull lb ingress image
+  docker_image:
+    name: "{{ ingress_lb_image }}"
+    pull: true
+  when: local_registry_user is defined and local_registry_user != ""
+
+- name: Generate Erikube LB ingress systemd unit file
+  become: true
+  template:
+    src: "{{ role_path }}/templates/ingress_lb.service.j2"
+    dest: "/etc/systemd/system/{{ ingress_lb_service  }}.service"
+    owner: root
+    group: root
+    mode: '0644'
+    force: true
+
+- name: Start Erikube LB ingress service
+  become: true
+  systemd:
+    name: "{{ ingress_lb_service }}.service"
+    state: restarted
+    daemon_reload: yes
+    enabled: yes
+
+- name: Delete temporary directory {{ tempdir }}
+  become: no
+  local_action:
+    module: file
+    name: "{{ tempdir }}"
+    state: absent
+  changed_when: False

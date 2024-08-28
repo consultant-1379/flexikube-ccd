@@ -1,0 +1,97 @@
+---
+- name: Prepare variables for bootstrap-kubelet.conf file
+  block:
+    - name: Create bootstrap token
+      command: /usr/local/bin/kubeadm token create --ttl 30m
+      register: kube_bootstrap_token_result
+
+    - name: Get cluster server address
+      command: /usr/local/bin/kubectl config view -o=jsonpath={.clusters[0]..cluster.server}
+      become: false
+      register: cluster_address_result
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: (cluster_address_result.rc == 0 or "not found" in cluster_address_result.stderr)
+
+    - name: Get cluster encoded CA
+      command: /usr/local/bin/kubectl config view --flatten -o=jsonpath={.clusters[0].cluster.certificate-authority-data}
+      become: false
+      register: cluster_encoded_ca_result
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: (cluster_encoded_ca_result.rc == 0 or "not found" in cluster_encoded_ca_result.stderr)
+  when: inventory_hostname == first_master
+
+- name: Set facts for prepared variables for all nodes
+  set_fact:
+    kube_bootstrap_token: "{{ hostvars[first_master].kube_bootstrap_token_result.stdout }}"
+    cluster_address: "{{ hostvars[first_master].cluster_address_result.stdout }}"
+    cluster_encoded_ca: "{{ hostvars[first_master].cluster_encoded_ca_result.stdout }}"
+
+- name: Create copy of kubelet.conf for taking it in use later on
+  copy:
+    remote_src: True
+    src: /etc/kubernetes/kubelet.conf
+    dest: /tmp/backup_kubelet.conf
+    mode: preserve
+  become: yes
+
+- name: Create bootstrap config file for kubelet
+  copy:
+    dest: "/etc/kubernetes/bootstrap-kubelet.conf"
+    content: |
+      apiVersion: v1
+      clusters:
+        - cluster:
+            certificate-authority-data: {{ cluster_encoded_ca }}
+            server: {{ cluster_address }}
+          name: kubernetes
+      contexts:
+        - context:
+            cluster: kubernetes
+            user: tls-bootstrap-token-user
+          name: tls-bootstrap-token-user@kubernetes
+      current-context: tls-bootstrap-token-user@kubernetes
+      kind: Config
+      preferences: {}
+      users:
+        - name: tls-bootstrap-token-user
+          user:
+            token: {{ kube_bootstrap_token }}
+
+- name: Remove previous kubelet certs
+  shell: "rm -rf /var/lib/kubelet/pki/* "
+
+- name: Restart kubelet service
+  systemd:
+    name: kubelet
+    state: restarted
+    daemon_reload: yes
+  become: yes
+
+- name: sleep for 5 seconds for avoiding kubelet.conf overwriting in next step
+  pause:
+    seconds: 5
+
+- name: Take original kubelet.conf file back into use
+  copy:
+    remote_src: True
+    src: /tmp/backup_kubelet.conf
+    dest: /etc/kubernetes/kubelet.conf
+    mode: preserve
+  become: yes
+
+- name: Delete temporary kubelet.conf file
+  file:
+    path: "/tmp/backup_kubelet.conf"
+    state: absent
+  become: yes
+
+### As WA to recover faster due 1st restart takes longer to take the new certs into use
+- name: Restart kubelet service
+  systemd:
+    name: kubelet
+    state: restarted
+    daemon_reload: yes
+  become: yes
+

@@ -1,0 +1,22 @@
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority: {{ cert_ca_cert }}
+{% if k8s_ip_version == "ipv6" %}
+    server: https://[{{ kube_apiserver_ip }}]:{{ kube_apiserver_port }}
+{% else %}
+    server: https://{{ kube_apiserver_ip }}:{{ kube_apiserver_port }}
+{% endif %}
+  name: {{ cert_clustername }}
+contexts:
+- context:
+    cluster: {{ cert_clustername }}
+    user: {{ serviceaccount }}
+  name: {{ cert_clustername }}
+current-context: {{ cert_clustername }}
+kind: Config
+preferences: {}
+users:
+- name: {{ serviceaccount }}
+  user:
+    token: {{ token.stdout }}

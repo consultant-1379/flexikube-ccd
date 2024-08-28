@@ -1,0 +1,21 @@
+---
+- name: Restart docker container
+  shell: "docker restart $(docker ps | grep {{ target_docker_container_id_name }} | awk '{print $1}')"
+  register: status_of_docker_container
+  ignore_errors: true
+
+- name: Check that container is running after restart
+  block:
+  - name: get the id of the restarted container
+    shell: "docker ps | grep {{ target_docker_container_id_name }} | awk '{print $1}'"
+    register: restarted_docker_container_id
+  - name: Wait that container is in running status after restart
+    shell: "docker container inspect {{ restarted_docker_container_id.stdout }} | grep Status | grep running | wc -l"
+    register: container_count
+    until: container_count.stdout.find("1") != -1
+    retries: 20
+    delay: 1
+  - name: Sleep for stabilizing container after container restart
+    pause:
+      seconds: "{{ docker_sleep_after_restart }}"
+  when: status_of_docker_container.rc != 1

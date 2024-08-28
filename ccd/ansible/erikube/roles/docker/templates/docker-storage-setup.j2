@@ -1,0 +1,8 @@
+
+STORAGE_DRIVER={{ docker_storage_driver }}
+
+{% if docker_storage_driver == 'devicemapper'  %}
+GROWPART=true
+VG="{{ docker_volume_group }}"
+DEVS="{{ docker_dev_mapper_device }}"
+{% endif %}

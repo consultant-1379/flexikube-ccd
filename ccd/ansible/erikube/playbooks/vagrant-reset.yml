@@ -1,0 +1,6 @@
+---
+- name: Reset vagrant instances
+  hosts:
+    - vagrant_instances
+  roles:
+    - vagrant/vagrant_reset

@@ -1,0 +1,51 @@
+---
+
+- name: Delete old Erikube LoadBalancer instance if it is aleady exist
+  os_server:
+     state: absent
+     auth:
+       auth_url: "{{ os_auth_url }}"
+       username: "{{ os_username }}"
+       password: "{{ os_password }}"
+       project_name: "{{ os_project_name }}"
+       user_domain_name: "{{ os_user_domain_name }}"
+       project_domain_name: "{{ os_user_domain_name }}"
+     name: "{{ item.name }}"
+     delete_fip: yes
+     terminate_volume: yes
+     wait: yes
+  with_items: "{{ erikube_lb }}"
+
+
+- name: Create Erikube loadbalancer instances with both internal and external interfaces
+  os_server:
+    state: present
+    auth:
+      auth_url: "{{ os_auth_url }}"
+      username: "{{ os_username }}"
+      password: "{{ os_password }}"
+      project_name: "{{ os_project_name }}"
+      user_domain_name: "{{ os_user_domain_name }}"
+      project_domain_name: "{{ os_user_domain_name }}"
+    name: "{{ item.name }}"
+    image: "{{ os_vm_image }}"
+    key_name: "{{ os_ssh_key_name }}"
+    flavor: "{{ os_flavor }}"
+    security_groups: "{{ os_security_groups }}"
+    nics:
+     - net-name: "{{ os_management_network_name }}"
+     - net-name: "{{ os_internal_network_name }}"
+     - net-name: "{{ os_external_network_name }}"
+    auto_ip: false
+    wait: no
+    meta:
+      hostname: "{{ item.name }}"
+      groups: "{{ item.groups }}"
+    userdata: |
+      #cloud-config
+      runcmd:
+       - echo -e "BOOTPROTO=dhcp\nDEVICE=eth1\nONBOOT=yes\nTYPE=Ethernet\nUSERCTL=no" >> /etc/sysconfig/network-scripts/ifcfg-eth1
+       - ifup eth1
+       - echo -e "BOOTPROTO=dhcp\nDEVICE=eth2\nONBOOT=yes\nTYPE=Ethernet\nUSERCTL=no\nPEERDNS=no" >> /etc/sysconfig/network-scripts/ifcfg-eth2
+       - ifup eth2
+  with_items: "{{ erikube_lb }}"

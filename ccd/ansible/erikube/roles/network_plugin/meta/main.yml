@@ -1,0 +1,7 @@
+---
+dependencies:
+  - role: erikube-defaults
+  - role: network_plugin/calico
+    when: kube_network_plugin == 'calico'
+  - role: network_plugin/multus
+    when: kube_network_extra_plugin is defined and kube_network_extra_plugin is search("multus")

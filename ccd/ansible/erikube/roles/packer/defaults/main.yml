@@ -1,0 +1,12 @@
+---
+file_default_owner: "root"
+file_default_group: "root"
+file_default_mode: "0755"
+
+ecr_helper_version: "0.3.1"
+ecr_helper_url: "https://amazon-ecr-credential-helper-releases.s3.us-east-2.amazonaws.com/{{ ecr_helper_version }}/linux-amd64/docker-credential-ecr-login"
+
+kube_config_dir: "/etc/kubernetes"
+kube_manifest_dir: "{{ kube_config_dir }}/manifests"
+kube_cert_dir: "{{ kube_config_dir }}/pki"
+erikube_config_dir: "{{ kube_config_dir }}/erikube"

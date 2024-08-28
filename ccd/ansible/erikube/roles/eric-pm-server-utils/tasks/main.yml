@@ -1,0 +1,42 @@
+---
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/eric-pm-server-utils-XXXXXX
+  register: mktemp_pmserver_utils
+  changed_when: False
+
+- name: Get the Kube API Endpoint IP
+  command: "{{ kubectl }} get endpoints kube-api -n kube-system -o jsonpath='{.subsets[0].addresses[0].ip}'"
+  register: kube_api_ip
+  changed_when: False
+  when: kube_api_ingress_host is defined
+
+- name: Get the Kube API Endpoint port
+  command: "{{ kubectl }} get endpoints kube-api -n kube-system -o jsonpath='{.subsets[0].ports[0].port}'"
+  register: kube_api_port
+  changed_when: False
+  when: kube_api_ingress_host is defined
+
+- name: Set deployment type for IBD
+  set_fact:
+    deployment_type: "IMAGE_BASED"
+  when: image_based_deployment is defined and image_based_deployment
+
+- name: Render deployment manifest from template
+  vars:
+    pm_server_utils_kube_api_ip: "{{ kube_api_ip.stdout | default('') }}"
+    pm_server_utils_kube_api_port: "{{ kube_api_port.stdout | default('') }}"
+    pm_server_utils_deployment_type: "{{ deployment_type | default('') }}"
+  template:
+    src: "eric-pm-server-utils.yml.j2"
+    dest: "{{ mktemp_pmserver_utils.stdout }}/eric-pm-server-utils.yml"
+
+- name: Apply deployment manifest
+  shell: "{{ kubectl }} apply -f {{ mktemp_pmserver_utils.stdout }}/eric-pm-server-utils.yml"
+  register: pm_server_utils_return
+  changed_when: '"unchanged" not in pm_server_utils_return.stdout'
+
+- name: Delete temp directory
+  file:
+    name: "{{ mktemp_pmserver_utils.stdout }}"
+    state: absent
+  changed_when: False

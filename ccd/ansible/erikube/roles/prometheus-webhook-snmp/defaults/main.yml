@@ -1,0 +1,16 @@
+---
+
+# Namespace for Prometheus
+prometheus_namespace: monitoring
+
+webhook_listen_port: 9098
+pws:
+  debug: "False"
+
+snmp_translator_host: localhost
+snmp_translator_port: 23162
+snmp_trap_receiver_host: localhost
+snmp_trap_receiver_port: 162
+snmp_trap_receiver_community: public
+snmp_trap_receiver_retries: 5
+snmp_trap_receiver_timeout: 1

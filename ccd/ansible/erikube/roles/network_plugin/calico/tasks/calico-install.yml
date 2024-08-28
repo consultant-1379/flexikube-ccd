@@ -1,0 +1,102 @@
+---
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/erikube-k8s-XXXXXX
+  register: mktemp
+  changed_when: False
+
+- set_fact:
+    k8s_file_loc: "{{ mktemp.stdout }}"
+    etcd_cert_config_dir: "{{ mktemp.stdout }}/certs"
+
+- name: "Check for existing secret {{ calico_secret_name }}"
+  command: "{{ kubectl }} -n kube-system get secret {{ calico_secret_name }}"
+  become: yes
+  register: get_secret
+  until: get_secret.rc == 0 or "NotFound" in get_secret.stderr
+  retries: 10
+  delay: 2
+  changed_when: false
+  failed_when: get_secret.rc != 0 and not "NotFound" in get_secret.stderr
+
+- block:
+  - name: Create client etcd certificates
+    vars:
+      etcd_cert_prefix: "etcd-"
+      etcd_cert_subdir: "calico"
+      etcd_client_cert_cn: "calico"
+    import_role:
+      name: etcd
+      tasks_from: get-client-cert
+
+  - name: Copy etcd key file
+    become: yes
+    copy:
+      src: "{{ etcd_cert_config_dir }}/etcd-client.key"
+      dest: "{{ etcd_cert_config_dir }}/etcd-key"
+      remote_src: true
+      mode: 0600
+
+  - name: Copy etcd cert file
+    become: yes
+    copy:
+      src: "{{ etcd_cert_config_dir }}/etcd-client.crt"
+      dest: "{{ etcd_cert_config_dir }}/etcd-cert"
+      remote_src: true
+      mode: 0644
+
+  - name: Copy etcd ca file
+    become: yes
+    copy:
+      src: "{{ etcd_cert_config_dir }}/etcd-ca.crt"
+      dest: "{{ etcd_cert_config_dir }}/etcd-ca"
+      remote_src: true
+      mode: 0644
+
+  - name: Delete unused files
+    become: yes
+    file:
+      path: "{{ etcd_cert_config_dir }}/{{ item }}"
+      state: absent
+    with_items:
+      - etcd-client.key
+      - etcd-client.crt
+      - etcd-ca.crt
+      - etcd-client.csr
+
+  - name: "Create secret {{ calico_secret_name }} when it does not exist"
+    command: "{{ kubectl }} --namespace kube-system create secret generic {{ calico_secret_name }} --from-file={{ etcd_cert_config_dir }}"
+    become: yes
+    register: result
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: result.rc == 0
+
+  when: get_secret.rc != 0 and "NotFound" in get_secret.stderr
+
+- name: Prepare Calico manifest
+  template:
+    src: "calico.yml.j2"
+    dest: "{{ k8s_file_loc }}/calico.yml"
+
+- name: Deploy Calico
+  command: "{{ kubectl }} apply -f {{ k8s_file_loc }}/calico.yml --validate=false"
+  become: yes
+  register: deploy_calico
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: deploy_calico.rc == 0
+
+- name: Delete temp directory
+  file:
+    name: "{{ mktemp.stdout }}"
+    state: absent
+  become: yes
+  changed_when: False
+
+- include_role:
+    name: version_check
+  vars:
+    namespace: kube-system
+    pod_images_dict:
+      calico-kube-controllers: "{{ calico_kube_controllers_image }}"
+      calico-node: "{{ calico_node_image }}"

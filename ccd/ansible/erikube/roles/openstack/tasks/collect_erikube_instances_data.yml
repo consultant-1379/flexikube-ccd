@@ -1,0 +1,52 @@
+---
+
+- name: Gathering the new instance"s facts
+  os_server_facts:
+    auth:
+      auth_url: "{{ os_auth_url }}"
+      username: "{{ os_username }}"
+      password: "{{ os_password }}"
+      project_name: "{{ os_project_name }}"
+      user_domain_name: "{{ os_user_domain_name }}"
+      project_domain_name: "{{ os_project_domain_name if os_project_domain_name is defined else os_user_domain_name }}"
+    cacert: "{{ os_cacert_location | default('') }}"
+    server: "{{ eccd_node_wildcard }}"
+
+- name: Waiting for the new instance up and run
+  wait_for:
+    host: "{{ item['addresses'][os_internal_network_name][0]['addr'] }}"
+    port: 22
+    search_regex: OpenSSH
+    sleep: 10
+    timeout: 3000
+  with_items: "{{ openstack_servers }}"
+  when: "os_default_internal_ip_prefix in item['addresses'][os_internal_network_name][0]['addr']"
+
+- name: Add the new instances into inventory data
+  add_host:
+    name: "{{ item.name }}"
+    ansible_host: "{{ item['addresses'][os_internal_network_name][0]['addr'] }}"
+    groups: "{{ item.metadata.groups }}"
+  with_items: "{{ openstack_servers }}"
+
+- name: Set Ingress-Lb relative variables
+  set_fact:
+    lb_internal_ip: "{{ item['addresses'][os_internal_network_name][0]['addr'] }}"
+    lb_external_ip: "{{ item['addresses'][os_external_network_name][0]['addr'] }}"
+  with_items: "{{ openstack_servers }}"
+  when: erikube_lb_node_name in item.name
+
+- name: Build hosts file
+  become: yes
+  lineinfile:
+    dest: /etc/hosts
+    regexp: ".*{{ item.name }}$"
+    line: "{{ item['addresses'][os_internal_network_name][0]['addr'] }} {{ item.name }}"
+    state: present
+  when: "os_default_internal_ip_prefix in item['addresses'][os_internal_network_name][0]['addr']"
+  with_items: "{{ openstack_servers }}"
+
+- name: Remove known_host file
+  file:
+    path: "{{ ssh_known_hosts_file }}"
+    state: absent

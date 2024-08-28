@@ -1,0 +1,13 @@
+{% if crictl_runtime == "containerd" %}
+  runtime-endpoint: unix:///run/containerd/containerd.sock
+  image-endpoint: unix:///run/containerd/containerd.sock
+{% elif crictl_version == "crio" %}
+  runtime-endpoint: unix:///run/crio/crio.sock
+  image-endpoint: unix:///run/crio/crio.sock
+{% else %}
+  runtime-endpoint: unix:///var/run/dockershim.sock
+  image-endpoint: unix:///var/run/dockershim.sock
+{% endif %}
+timeout: 15
+debug: true
+pull-image-on-create: false

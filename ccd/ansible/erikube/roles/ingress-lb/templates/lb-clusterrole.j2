@@ -1,0 +1,13 @@
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  annotations:
+    rbac.authorization.kubernetes.io/autoupdate: "true"
+  creationTimestamp: null
+  labels:
+    kubernetes.io/bootstrapping: rbac-defaults
+  name: {{ serviceaccount }}
+rules:
+- apiGroups: ["", "extensions", "networking.k8s.io"]
+  resources: ["services", "endpoints", "ingresses", "nodes"]
+  verbs: ["get", "watch", "list"]

@@ -1,0 +1,61 @@
+{
+  "os_username": "{{ lookup('env','OS_USERNAME') }}",
+  "os_password": "{{ lookup('env','OS_PASSWORD') }}",
+  "os_user_domain_name": "{{ lookup('env','OS_USER_DOMAIN_NAME') }}",
+  "os_auth_url": "{{ lookup('env','OS_AUTH_URL') }}",
+  "os_project_id": "{{ lookup('env','OS_PROJECT_ID') }}",
+  "os_project_name": "{{ lookup('env','OS_PROJECT_NAME') }}",
+  "os_ssh_key_name": "do-NOT-put-underscore-here",
+  "os_vm_image": "use-your-image-id-here",
+  "os_security_groups": [],
+  "os_internal_network_name": "erikube_internal_network",
+  "os_management_network_name": "erikube_mgmt_network",
+  "os_external_network_name": "erikube_external_network",
+  "os_public_key_file": "{{ lookup('env','HOME') + '/.ssh/id_rsa.pub' }}",
+  "os_default_internal_ip_prefix": "10.0.0",
+  "os_flavor": "m1.medium",
+  "setup_chrony": "true",
+  "chrony_config_server": [
+    "ns1.sero.gic.ericsson.se",
+    "ns2.sero.gic.ericsson.se",
+    "ipa.ecap.poc"
+  ],
+  "erikube_hostname_prefix": "ci-os-{{ os_ci_group_number }}",
+  "erikube_cluster": [
+    {
+      "name": "{{ erikube_hostname_prefix }}-master1-{{ os_ssh_key_name }}",
+      "groups": "master, etcd"
+    },
+    {
+      "name": "{{ erikube_hostname_prefix }}-master2-{{ os_ssh_key_name }}",
+      "groups": "master, etcd"
+    },
+    {
+      "name": "{{ erikube_hostname_prefix }}-master3-{{ os_ssh_key_name }}",
+      "groups": "master, etcd"
+    },
+    {
+      "name": "{{ erikube_hostname_prefix }}-node1-{{ os_ssh_key_name }}",
+      "groups": "worker"
+    },
+    {
+      "name": "{{ erikube_hostname_prefix }}-node2-{{ os_ssh_key_name }}",
+      "groups": "worker"
+    },
+    {
+      "name": "{{ erikube_hostname_prefix }}-node3-{{ os_ssh_key_name }}",
+      "groups": "worker"
+    },
+    {
+      "name": "{{ erikube_hostname_prefix }}-node4-{{ os_ssh_key_name }}",
+      "groups": "worker"
+    }
+  ],
+  "kube_apiserver_ip": "10.0.234.234",
+  "kube_api_vip_enabled": true,
+  "kube_node_drain_timeout": "0",
+  "ansible_ssh_user": "centos",
+  "ansible_ssh_private_key_file": "{{ lookup('env','HOME') + '/.ssh/id_rsa' }}",
+  "ansible_extra_vars_file_path": "{{ lookup('env','REPO_DIR') }}/erikube-deployment/ansible/erikube/extra_vars.json",
+  "ssh_known_hosts_file": "{{ lookup('env','HOME') + '/.ssh/known_hosts' }}"
+}

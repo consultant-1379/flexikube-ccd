@@ -1,0 +1,30 @@
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+{% if k8s_ip_version == "ipv4" %}
+clusterDNS:
+- "{{ nodelocalDNS_ipv4 }}"
+{% elif k8s_ip_version == "ipv6" %}
+clusterDNS:
+- "{{ nodelocalDNS_ipv6 }}"
+{% elif k8s_ip_version == "dualstack" %}
+clusterDNS:
+- "{{ kubelet_DNS }}"
+{% endif %}
+cgroupDriver: "{{ containerd_default_cgroup_driver }}"
+containerLogMaxFiles: {{ container_log_max_files }}
+containerLogMaxSize: "{{ container_log_max_size }}"
+kubeletCgroups: /ccd.slice/kubelet.service
+rotateCertificates: {{ kubelet_certificate_rotation }}
+serverTLSBootstrap: {{ kubelet_server_certificate_rotation }}
+{% if kube_feature_gates is defined and kube_feature_gates != "" %}
+featureGates: { {{ kube_feature_gates | replace('=', ': ') | replace(',', ', ') }} }
+{% endif %}
+{% if kubelet_tls_cipher_suites is defined and kubelet_tls_cipher_suites != "" %}
+tlsCipherSuites: [{{ kubelet_tls_cipher_suites | join(',') }}]
+{% endif %}
+imageGCHighThresholdPercent: 80
+imageGCLowThresholdPercent: 75
+{% if enable_seccomp_default == "true" %}
+seccompDefault: true
+{% endif %}

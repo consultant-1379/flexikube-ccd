@@ -1,0 +1,143 @@
+---
+- name: Create temp directory
+  command: mktemp -d /tmp/authclient-XXXXXX
+  register: tempdir
+  changed_when: false
+- set_fact:
+    tempdir: "{{ tempdir.stdout }}"
+
+- set_fact:
+      create_self_signed_cert_authclient: false
+  when: auth_client_cert_file is defined or auth_client_cert_content is defined
+
+- set_fact:
+      create_self_signed_cert_authclient: true
+  when: auth_client_cert_file is undefined and auth_client_cert_content is undefined
+
+- set_fact:
+      kube_config_dir: /etc/kubernetes
+
+- set_fact:
+      kube_cert_dir: "{{ kube_config_dir }}/pki"
+
+- block:
+    - name: Copy TLS certificate
+      copy:
+        src: "{{ auth_client_cert_file }}"
+        dest: "{{ tempdir }}/auth-client.crt"
+    - name: Copy TLS key
+      copy:
+        src: "{{ auth_client_key_file }}"
+        dest: "{{ tempdir }}/auth-client.key"
+  when:
+    - auth_client_cert_file is defined and auth_client_cert_file | length > 0
+    - auth_client_key_file is defined and auth_client_key_file | length > 0
+
+- block:
+    - name: Copy TLS certificate
+      copy:
+        content: "{{ auth_client_cert_content }}"
+        dest: "{{ tempdir }}/auth-client.crt"
+      become: yes
+    - name: Copy TLS key
+      copy:
+        content: "{{ auth_client_key_content }}"
+        dest: "{{ tempdir }}/auth-client.key"
+      become: yes
+  when:
+    - auth_client_cert_content is defined
+    - auth_client_key_content is defined
+
+- name: Copy TLS CA cert
+  copy:
+    src: "{{ auth_client_ca_file }}"
+    dest: "{{ tempdir }}/ca.crt"
+  when: auth_client_ca_file is defined and auth_client_ca_file | length > 0
+
+- name: Copy TLS CA cert
+  copy:
+    content: "{{ auth_client_ca_content }}"
+    dest: "{{ tempdir }}/ca.crt"
+  when: auth_client_ca_content is defined
+
+- name: Copy TLS Dex CA cert
+  copy:
+    src: "{{ kube_cert_dir }}/dex.crt"
+    dest: "{{ tempdir }}/ca.crt"
+    remote_src: yes
+  become: yes
+  when: auth_client_cert_file is undefined and auth_client_cert_content is undefined
+
+- block:
+    - name: create SAN config file
+      copy:
+        dest: "/sanconfigfile_auth"
+        content: |
+          [ req ]
+          distinguished_name = req_distinguished_name
+          req_extensions     = req_ext
+
+          [ req_distinguished_name ]
+
+          [ req_ext  ]
+          subjectAltName     = @alt_names
+
+          [alt_names]
+          DNS.1              = {{ auth_client_ingress_host }}
+      become: yes
+
+    - name: create auth-client key
+      shell: openssl genrsa 2048 > {{ tempdir }}/auth-client.key
+
+    - name: create auth-client certificate
+      command: |
+        openssl req -x509 -new -sha256 -nodes -days 3650 \
+          -key "{{ tempdir }}/auth-client.key" \
+          -out "{{ tempdir }}/auth-client.crt" \
+          -subj "/CN={{ auth_client_ingress_host }}" \
+          -extensions req_ext -config /sanconfigfile_auth
+
+    - name: delete auth client san config file
+      file:
+        name: /sanconfigfile_auth
+        state: absent
+      become: yes
+
+  when:
+    - create_self_signed_cert_authclient | bool
+
+- name: Update registry tls secret with new certificates
+  shell:
+    executable: /bin/bash
+    cmd: "{{ kubectl }} create -n kube-system secret tls auth-client-tls \
+          --cert={{ tempdir }}/auth-client.crt --key={{ tempdir }}/auth-client.key \
+          --dry-run=client -o yaml | {{ kubectl }} apply -f -"
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+
+- name: Delete secret with CA
+  command: >
+    {{ kubectl }} -n kube-system delete secret auth-client-ca --ignore-not-found
+  become: yes
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (result.rc == 0 or "not found" in result.stderr)
+
+- name: Create secret with CA
+  command: >
+    {{ kubectl }} -n kube-system create secret generic auth-client-ca
+    --from-file=ca.crt={{ tempdir }}/ca.crt
+  become: yes
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+
+- name: Delete temp directory
+  file:
+    name: "{{ tempdir }}"
+    state: absent
+  changed_when: false

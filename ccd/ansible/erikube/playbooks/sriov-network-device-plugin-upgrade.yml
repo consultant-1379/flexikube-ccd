@@ -1,0 +1,97 @@
+---
+- name: Upgrade SRIOV network device plugin
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+  vars:
+    - tarball_name: "{{ helm_charts.sriov_network_device_plugin.name + '-' + helm_charts.sriov_network_device_plugin.version + '.tgz' }}"
+    - default_node_selector:
+        "node-role.kubernetes.io/worker": ""
+    - legacy_chart_name: "sriov-network-device-plugin"
+  roles:
+  - erikube-defaults
+  tasks:
+    - name: Backward compatibility and Default handling
+      set_fact:
+        sriov_network_device_plugin_configs:
+          default:
+            sriov_network_device_plugin_configmap_name: "{{ sriov_network_device_plugin_configmap_name | default('sriov-dp-configmap') }}"
+            sriov_network_device_plugin_configmap_data: "{{ sriov_network_device_plugin_configmap_data | default(omit) | string }}"
+      when:
+        - sriov_network_device_plugin_configs is not defined or not sriov_network_device_plugin_configs
+        - sriov_network_device_plugin_enabled | default(false) | bool
+
+    - name: Get installed sriov-dps
+      shell:
+        cmd: "{{ kubectl }} get ds -n kube-system | grep sriov | awk '{print $1}' |sed -e 's/^sriov-dp-ds-//'"
+      register: installed_key_data
+
+    - name: Declare the old config list
+      set_fact:
+        old_config: "{{ installed_key_data.stdout.split('\n') }}"
+
+    - name: Declare the new config list
+      set_fact:
+        new_config: "{{ sriov_network_device_plugin_configs.keys() | list }}"
+      when: sriov_network_device_plugin_enabled | default(false) | bool
+
+    - name: Delete sriov-dp chart installed prior to multiple sriov_dp feature
+      include_role:
+        name: helm-chart-provisioner
+      vars:
+        - chart_name: "{{ legacy_chart_name }}"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - kube_namespace: kube-system
+        - state: purged
+
+    - name: Delete all the installed sriov dps when disabled
+      include_role:
+        name: helm-chart-provisioner
+      vars:
+        - chart_name: "sriov-dp-{{ item }}"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - kube_namespace: kube-system
+        - state: purged
+      with_items: "{{ old_config }}"
+      when:
+        - not sriov_network_device_plugin_enabled | default(false) | bool
+        - old_config
+
+    - name: Delete sriov dps that are removed in the new config
+      include_role:
+        name: helm-chart-provisioner
+      vars:
+        - chart_name: "sriov-dp-{{ item }}"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - kube_namespace: kube-system
+        - state: purged
+      with_items: "{{ old_config }}"
+      when:
+        - sriov_network_device_plugin_enabled | default(false) | bool
+        - item not in new_config
+
+    - name: Upgrading sriov-network-device-plugin
+      include_role:
+        name: helm-chart-provisioner
+      vars:
+        - chart_name: "sriov-dp-{{ item.key }}"
+        - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '1200s' }}"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - kube_namespace: kube-system
+        - state: update-installed
+        - base_name: "{{ item.value.sriov_network_device_plugin_configmap_name | default('sriov-dp-configmap') }}"
+        - values:
+            image:
+              repo: "{{ docker_registry_host | default(default_registry) }}"
+              tag: "{{ containers.erikube.sriov_network_device_plugin.split(':')[1] }}"
+            configmap:
+              data: "{{ item.value.sriov_network_device_plugin_configmap_data | default(omit) | string }}"
+              name: "{{ base_name }}-{{ item.key }}"
+            daemonset_name: "sriov-dp-ds-{{ item.key }}"
+            nodeSelector: "{{ item.value.node_selectors | default(default_node_selector) }}"
+            tolerations: [{"key": "", "operator": "Exists"}]
+            imagePullSecrets:
+              - name: local-registry-secret
+      with_dict: "{{ sriov_network_device_plugin_configs }}"
+      when: sriov_network_device_plugin_enabled | default(false) | bool

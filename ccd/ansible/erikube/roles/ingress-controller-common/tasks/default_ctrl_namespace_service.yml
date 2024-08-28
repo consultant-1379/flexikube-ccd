@@ -1,0 +1,18 @@
+---
+
+- name: Set namespace and service for default ingress controller {{ controller_name }}
+  block:
+    - name: Set namespace fact used by {{ controller_name }} controller
+      set_fact:
+        default_ingress_namespace: "{{ controller_namespace }}"
+      when:
+        - default_ingress_namespace is not defined or default_ingress_namespace == None or default_ingress_namespace == ""
+
+    - name: Set service name fact used by {{ default_ingress_controller }} ingress controller
+      set_fact:
+        default_ingress_service: "{{ controller_servicename }}"
+      when:
+        - default_ingress_service is not defined or default_ingress_service == None or default_ingress_service == ""
+  when:
+    - default_ingress_controller is defined
+    - default_ingress_controller == controller_name

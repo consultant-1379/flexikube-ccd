@@ -1,0 +1,25 @@
+---
+network_service_name: networking
+host_prepare_packages:
+  - conntrack
+  - ebtables
+  - ethtool
+  - nfs-common
+  - openssl
+  - socat
+  - vlan
+  - python3-docker
+  - python3-pip
+  - irqbalance
+  - apache2-utils
+  - ceph-common
+  - ipvsadm
+  - jq
+
+host_remove_packages:
+  - unattended-upgrades
+os_services_to_disable:
+  - apt-daily.timer
+  - apt-daily-upgrade.timer
+  - apt-daily
+  - apt-daily-upgrade

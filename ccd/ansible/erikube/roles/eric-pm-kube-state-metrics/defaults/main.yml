@@ -1,0 +1,2 @@
+kube_state_metrics_name: eric-pm-kube-state-metrics
+namespace_ksm: monitoring

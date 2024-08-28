@@ -1,0 +1,9 @@
+---
+ecfe_config_map_raw: ""
+ecfe_config_map_peers: []
+ecfe-own-asn: 64500
+ecfe_configmap_name: metallb-config
+ecfe_secret_name: ecfe-bgp-secret
+ecfe_configmap_name_space: kube-system
+ecfe_mode: bgp
+ecfe_controller_only: false

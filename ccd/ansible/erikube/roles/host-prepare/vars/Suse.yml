@@ -1,0 +1,35 @@
+---
+network_service_name: network
+host_prepare_packages:
+  - cron
+  - conntrack-tools
+  - ebtables
+  - ethtool
+  - nfs-kernel-server
+  - nfs-client
+  - openssl
+  - socat
+  - e2fsprogs
+  - xfsprogs
+  - kernel-default
+  - rsyslog
+  - ceph-common
+  - unzip
+  - supportutils
+  - bash-completion
+  - python3-docker
+  - htop
+  - systemd-coredump
+  - irqbalance
+  - apache2-utils
+  - rsyslog-module-gtls
+  - cron
+  - cronie
+  - runc
+  - ipvsadm
+  - ucode-intel
+  - ucode-amd
+  - ipset
+  - jq
+sles_patterns:
+  - apparmor

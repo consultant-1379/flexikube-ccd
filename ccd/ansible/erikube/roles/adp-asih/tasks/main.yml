@@ -1,0 +1,5 @@
+---
+- name: Create CA directories for asih and create secret
+  import_tasks: create-asih-nels-secret.yml
+  vars:
+    dir: /tmp/erikube-asih-ca

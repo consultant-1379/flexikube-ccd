@@ -1,0 +1,3 @@
+---
+# defaults file for calicoctl-network-policy
+calicoctl_namespace: kube-system

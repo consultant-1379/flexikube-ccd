@@ -1,0 +1,56 @@
+---
+
+- name: Install ipsvadm on LB host
+  package:
+    name: ipvsadm
+    state: present
+
+- name: Install kernel-default and rsyslog on LB host
+  package:
+    name: "{{ install_packages }}"
+    state: present
+  vars:
+    install_packages:
+      - rsyslog
+      - kernel-default
+      - systemd-coredump
+      - irqbalance
+  when: ansible_distribution == "SLES"
+
+- name: Install python3-pip on LB host (Ubuntu only)
+  package:
+    name: python3-pip
+    state: present
+  when: ansible_os_family == "Debian"
+
+- name: Provsion LB node for SLES based host image
+  block:
+  - name: Install kernel-default on LB SLES host which container required kernel modules
+    package:
+      name: kernel-default
+      state: present
+    when: ansible_distribution == "SLES"
+
+  - name: Install conntrack-tools on LB SLES host
+    package:
+      name: conntrack-tools
+      state: present
+    when: ansible_distribution == "SLES"
+
+  - name: Create config file for IPVS
+    copy:
+      content: |
+        ip_vs
+        ip_vs_rr
+        ip_vs_wrr
+        ip_vs_sh
+        nf_conntrack
+      dest: "/etc/modules-load.d/ipvs.conf"
+
+- name: Create empty /etc/sysconfig/ipvsadm (RedHat only) on LB host
+  copy:
+    content: ""
+    dest: /etc/sysconfig/ipvsadm
+    force: no
+    mode: 0644
+  when: ansible_os_family == 'RedHat'

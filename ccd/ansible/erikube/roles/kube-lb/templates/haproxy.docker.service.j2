@@ -1,0 +1,17 @@
+[Unit]
+Description=HAproxy service in docker container
+After={{ docker_cmd }}.service
+Requires={{ docker_cmd }}.service
+PartOf={{ docker_cmd }}.service
+
+[Service]
+ExecStartPre=-/usr/bin/{{ docker_cmd }} rm -f {{ kube_lb_service_name }}
+ExecStart=/usr/bin/{{ docker_cmd }} run -e SYSLOGD=1 --name {{ kube_lb_service_name }} -v /etc/haproxy:/usr/local/etc/haproxy:ro --net=host {{ haproxy_image }}
+ExecStop=/usr/bin/{{ docker_cmd }} stop {{ kube_lb_service_name }}
+ExecReload=/usr/bin/{{ docker_cmd }} kill --signal=HUP {{ kube_lb_service_name }}
+SyslogIdentifier={{ kube_lb_service_name }}
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy={{ docker_cmd }}.service

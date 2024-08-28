@@ -1,0 +1,22 @@
+---
+
+erikube_hostname_prefix: "erikube"
+
+erikube_cluster:
+  - {name: "{{ erikube_hostname_prefix }}-master-{{ os_ssh_key_name }}", groups: "master, etcd"}
+  - {name: "{{ erikube_hostname_prefix }}-node1-{{ os_ssh_key_name }}", groups: "worker, etcd"}
+  - {name: "{{ erikube_hostname_prefix }}-node2-{{ os_ssh_key_name }}", groups: "worker, etcd"}
+
+erikube_lb_node_name: "loadbalancer"
+erikube_lb_group_name: "ingress_lb"
+
+erikube_lb:
+  - {name: "{{ erikube_hostname_prefix }}-{{ erikube_lb_node_name }}-{{ os_ssh_key_name }}", groups: "{{ erikube_lb_group_name }}"}
+
+# This wildcard need to match all VMs which were created for Erikube deployment
+eccd_node_wildcard: "{{ erikube_hostname_prefix }}-*"
+erikube_master_cluster_dns_prefix: "{{ erikube_hostname_prefix }}-master"
+
+os_inventory_filename: "os_inventory.ini"
+os_inventory_path: "{{ playbook_dir | dirname }}/inventory"
+os_lb_internal_port_name: "os-{{ os_ci_group_number }}-lb-internal-port"

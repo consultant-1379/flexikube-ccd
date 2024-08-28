@@ -1,0 +1,35 @@
+---
+# Configurable by user
+manila_volume_name_prefix: "ccd"
+openstack_manila_sc_az: ""
+openstack_manila_sc_type: ""
+openstack_ca_cert: ""
+manila_TLSInsecure: false
+manila_topology_nodeazs: []
+manila_csi_loglevel: 2
+
+# Not to be configured by user
+manila_csi_allow_expansion: false
+manila_openstack_ca_cert_path: "/etc/oscacert"
+manila_openstack_ca_cert_file_path: "/etc/oscacert/os_cacert"
+csi_nfs_csi_address: "/csi/csi.sock"
+csi_nfs_csi_endpoint: "unix:///csi/csi.sock"
+csi_nfs_pods_mount_dir: "/var/lib/kubelet/pods"
+csi_nfs_driver_reg_sock_path: "/var/lib/kubelet/plugins/csi-nfsplugin/csi.sock"
+manila_csi_drivername: "manila.csi.openstack.org"
+manila_csi_address: "unix:///var/lib/kubelet/plugins/manila.csi.openstack.org/csi.sock"
+manila_csi_kubelet_registration_path: "/var/lib/kubelet/plugins/manila.csi.openstack.org/csi.sock"
+manila_plugin_dir: "/var/lib/kubelet/plugins/manila.csi.openstack.org"
+manila_fwd_csi_endpoint: "unix:///var/lib/kubelet/plugins/csi-nfsplugin/csi.sock"
+manila_csi_share_protocol: "NFS"
+manila_csi_plugin_dir: "/var/lib/kubelet/plugins/manila.csi.openstack.org"
+manila_csi_fwd_plugin_dir: "/var/lib/kubelet/plugins/csi-nfsplugin"
+manila_csi_pods_mount_dir: "/var/lib/kubelet/pods"
+manila_csi_registration_dir: "/var/lib/kubelet/plugins_registry"
+manila_fwd_node_plugin_endpoint: "/var/lib/kubelet/plugins/csi-nfsplugin/"
+manila_namespace: "kube-system"
+manila_secret_name: "csi-manila-secrets"
+manila_csi_timeout: "4m0s"
+manila_csi_leader_election: true
+manila_csi_leader_election_lease_duration: "30s"
+manila_csi_leader_election_renew_deadline: "25s"

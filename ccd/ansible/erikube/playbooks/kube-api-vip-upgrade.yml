@@ -1,0 +1,17 @@
+---
+- name: Upgrade(Redeploy) Kubernetes API VIP
+  hosts: master
+  become: yes
+  roles:
+    - erikube-defaults
+  tasks:
+    - include_role:
+        name: kube-api-vip
+      vars:
+        keepalived_master: "{{ groups.master[0] }}"
+        keepalived_vip: "{{ kube_apiserver_ip }}"
+        kube_lb_upstream_servers: "{{ groups.master }}"
+        kube_api_check: false
+        keepalived_unicast_src_ip: "{{ k8s_ip_address }}"
+        keepalived_unicast_peers: "{{ groups.master | difference([inventory_hostname]) }}"
+      when: kube_api_vip_enabled | default(false) | bool

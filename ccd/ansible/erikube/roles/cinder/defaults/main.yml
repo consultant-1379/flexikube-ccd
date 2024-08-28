@@ -1,0 +1,31 @@
+---
+cinder_volume_name_prefix: "ccd"
+
+openstack_sc_name: "network-block"
+openstack_sc_az: ""
+openstack_sc_type: ""
+openstack_sc_is_default: "true"
+openstack_sc_allow_expansion: "true"
+openstack_ca_cert: ""
+#this variable need to be in sync with openstack-cloud-provider role default
+cinder_csi_provisioner_name: csi-cinder-plugin
+openstack_ca_cert_path: "/etc/pki/ca-trust/source/anchors/"
+cinder_csi_timeout: "4m0s"
+cinder_csi_loglevel: 4
+cinder_kubelet_registration_path: "/var/lib/kubelet/plugins/csi-cinder-plugin"
+cinder_csi_host_network: false
+cinder_csi_retry_interval_start: "10s"
+cinder_csi_retry_interval_max: "5m0s"
+cinder_csi_leader_election: true
+cinder_csi_leader_election_type: "leases"
+cinder_csi_worker_threads: 100
+cinder_csi_snapshot_name_prefix: ccd-snap
+cinder_csi_create_snapshotcontent_retrycount: 5
+cinder_csi_create_snapshotcontent_interval: "10s"
+cinder_csi_resizer_workers: 10
+
+# api limits and leader election timeouts
+cinder_csi_leader_election_lease_duration: "30s"
+cinder_csi_leader_election_renew_deadline: "25s"
+cinder_csi_kube_api_qps: 10
+cinder_csi_kube_api_burst: 25

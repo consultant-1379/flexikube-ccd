@@ -1,0 +1,17 @@
+---
+# common
+scale_down_delay_after_add_duration: "10m0s"
+scale_down_unneeded_time: "10m0s"
+skip_nodes_with_local_storage: false
+cluster_autoscaler_loglevel: 3
+cluster_autoscaler_replicas: 2
+
+# azure specific
+cluster_autoscaler_azure_secret: cluster-autoscaler-azure
+minimum_worker_scale_set_size: 2
+maximum_worker_scale_set_size: 6
+scale_set_name: ccd-worker-vmss
+
+# aws specific
+autoscale_expander: "least-waste"
+autoscale_auto_discovery_tags: "k8s.io/cluster-autoscaler/enabled,k8s.io/cluster-autoscaler/ccd-cluster-name"

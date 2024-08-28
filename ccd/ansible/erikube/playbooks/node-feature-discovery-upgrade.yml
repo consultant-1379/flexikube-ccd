@@ -1,0 +1,45 @@
+---
+- name: Gather facts as non root
+  hosts: master[0]
+  gather_facts: yes
+
+# Deleting node feature discovery helm-chart
+- name: Delete helm chart for node feature discovery
+  hosts: master[0]
+  become: yes
+  ignore_errors: True
+  roles:
+    - erikube-defaults
+    - role: helm-chart-provisioner
+      vars:
+        - kube_namespace: "kube-system"
+        - chart_name: node-feature-discovery
+        - state: purged
+      when:
+        - node_feature_discovery_enabled | default(true) | bool
+
+- name: Upgrade node-feature-discovery
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+  vars:
+    - kube_image_prefix: "{{ docker_registry_host | default(default_registry) }}/"
+    - node_feature_discovery_enabled: "{{ nfd_enabled | default(false) | bool }}"
+    - tarball_name: "{{ helm_charts.node_feature_discovery.name + '-' + helm_charts.node_feature_discovery.version + '.tgz' }}"
+  roles:
+   - erikube-defaults
+   - role: helm-chart-provisioner
+     when: node_feature_discovery_enabled is defined and node_feature_discovery_enabled
+     vars:
+       - chart_name: node-feature-discovery
+       - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '1200s' }}"
+       - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+       - state: update-installed
+       - kube_namespace: kube-system
+       - values:
+           imagePullSecrets:
+             - name: local-registry-secret
+           image:
+             repository: "{{ kube_image_prefix }}{{ containers.erikube.node_feature_discovery.split(':')[0] }}"
+             tag: "{{ containers.erikube.node_feature_discovery.split(':')[1] }}"

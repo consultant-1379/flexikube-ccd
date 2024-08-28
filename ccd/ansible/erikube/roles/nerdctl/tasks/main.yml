@@ -1,0 +1,23 @@
+- block:
+  - name: Make nerdctl symlink
+    file: src=/usr/local/bin/nerdctl dest=/usr/bin/nerdctl state=link
+
+  - name: Check nerdctl config directory.
+    stat:
+      path: "{{ nerdctl_config_dir }}"
+    register: nerdctl_config_path
+
+  - name: Create nerdctl config directory if not exists
+    file:
+      path: "{{ nerdctl_config_dir }}"
+      state: directory
+    become: yes
+    when: nerdctl_config_path.stat.exists == false
+
+  - name: Configure "{{ nerdctl_config_dir }}/nerdctl.toml"
+    template:
+      src: nerdctl.j2
+      dest: "{{ nerdctl_config_dir }}/nerdctl.toml"
+    become: true
+    notify:
+    - restart containerd

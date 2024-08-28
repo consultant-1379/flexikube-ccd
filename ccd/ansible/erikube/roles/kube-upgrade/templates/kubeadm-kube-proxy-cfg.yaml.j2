@@ -1,0 +1,55 @@
+---
+apiVersion: kubeproxy.config.k8s.io/v1alpha1
+kind: KubeProxyConfiguration
+{% if (k8s_ip_version == "ipv6") %}
+bindAddress: "::"
+{% endif %}
+clientConnection:
+  acceptContentTypes: ""
+  burst: 10
+  contentType: application/vnd.kubernetes.protobuf
+  kubeconfig: /var/lib/kube-proxy/kubeconfig.conf
+  qps: 5
+{% if k8s_cluster_cidr is defined %}
+clusterCIDR: "{{ k8s_cluster_cidr }}"
+{% else %}
+clusterCIDR: "{{ k8s_pod_cidr }}"
+{% endif %}
+configSyncPeriod: 15m0s
+conntrack:
+  maxPerCore: 32768
+  min: 131072
+  tcpCloseWaitTimeout: 1h0m0s
+  tcpEstablishedTimeout: 24h0m0s
+enableProfiling: false
+healthzBindAddress: "[::]:10256"
+hostnameOverride: ""
+iptables:
+  masqueradeAll: false
+  masqueradeBit: 14
+  minSyncPeriod: 0s
+  syncPeriod: 30s
+ipvs:
+{% if ipvs_excluded_cidrs is defined and ipvs_excluded_cidrs != "" %}
+  excludeCIDRs: {{ ipvs_excluded_cidrs | to_json }}
+{% else %}
+  excludeCIDRs: null
+{% endif %}
+  minSyncPeriod: 0s
+  scheduler: ""
+  syncPeriod: 30s
+  tcpTimeout: {{ ipvs_tcp_timeout }}s
+  tcpFinTimeout: {{ ipvs_tcp_fin_timeout }}s
+  udpTimeout: {{ ipvs_udp_timeout }}s
+{% if (k8s_ip_version != "ipv6") and (ecfe_enabled | default(false) | bool) %}
+  strictARP: true
+{% endif %}
+metricsBindAddress: "[::1]:10249"
+{% if (k8s_ip_version == "dualstack") and (k8s_ip_version == "ipv6") %}
+mode: "ipvs"
+{% else %}
+mode: "{{ kube_proxy_mode }}"
+{% endif %}
+nodePortAddresses: null
+oomScoreAdj: -999
+portRange: ""

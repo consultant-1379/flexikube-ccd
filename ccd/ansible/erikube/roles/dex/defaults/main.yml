@@ -1,0 +1,5 @@
+---
+
+dex_namespace: kube-system
+dex_replicas: 2
+dex_action: deploy

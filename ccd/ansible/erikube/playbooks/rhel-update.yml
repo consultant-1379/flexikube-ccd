@@ -1,0 +1,11 @@
+---
+- name: Gather facts as non root
+  hosts: all
+  gather_facts: yes
+
+- name: Update RHEL packages of base image
+  hosts: all
+  become: yes
+  tasks:
+  - include_role:
+      name: rhel-update

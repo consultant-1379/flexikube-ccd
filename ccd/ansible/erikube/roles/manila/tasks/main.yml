@@ -1,0 +1,105 @@
+---
+- name: Verify openstack_manila_storage_classes
+  block:
+    - name: Validate list of Manila storage classes
+      assert:
+        that:
+          - "openstack_manila_storage_classes is defined"
+          - "openstack_manila_storage_classes | length > 0"
+
+    - name: Create list of unique items
+      set_fact:
+        openstack_manila_storage_classes_unique_list: >-
+          {{ openstack_manila_storage_classes | unique }}
+
+    - name: Check that openstack_manila_storage_classes does not contain duplicates
+      assert:
+        that: ( openstack_manila_storage_classes | length ) == ( openstack_manila_storage_classes_unique_list | length )
+        fail_msg: "Duplicate items in openstack_manila_storage_classes: {{ openstack_manila_storage_classes }}"
+
+    - name: Validate allowedTopologies
+      assert:
+        that:
+          - "item.allowedTopologies_key | length > 0"
+          - "item.allowedTopologies_values is defined"
+          - "item.allowedTopologies_values | length > 0"
+        fail_msg: "Invalid values for allowedTopologies: {{ item }}"
+      when: item.allowedTopologies_key is defined
+      with_items: "{{ openstack_manila_storage_classes }}"
+
+    - name: Check if expansion allowed in storage classes
+      set_fact:
+          manila_csi_allow_expansion: true
+      when: item.allow_expansion is defined and item.allow_expansion
+      with_items: "{{ openstack_manila_storage_classes }}"
+
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/erikube-k8s-XXXXXX
+  register: mktemp_csi
+  changed_when: False
+
+- set_fact:
+    k8s_csi_file_loc: "{{ mktemp_csi.stdout }}"
+
+- name: Create Manila yaml files
+  template:
+    src: "{{item}}.j2"
+    dest: "{{ k8s_csi_file_loc }}/{{item}}"
+  with_items:
+    - csi-nfs-node.yaml
+    - csi-controllerplugin-rbac.yaml
+    - csi-nodeplugin-rbac.yaml
+    - csidriver.yaml
+    - csi-controllerplugin.yaml
+    - csi-nodeplugin.yaml
+    - manila-sc.yaml
+    - manila-secret.yaml
+
+- name: Remove Manila secret if found
+  shell: "{{ kubectl }} delete secret {{ manila_secret_name }} -n {{ manila_namespace }}"
+  ignore_errors: yes
+  register: output
+
+- name: Create Manila secret
+  shell: "{{ kubectl }} apply -f {{ k8s_csi_file_loc }}/{{item}}"
+  register: output
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: output.rc == 0
+  with_items:
+    - manila-secret.yaml
+
+- name: Deploy RBACs and CSIDriver CRD
+  shell: "{{ kubectl }} apply -f {{ k8s_csi_file_loc }}/{{item}}"
+  register: output
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: output.rc == 0
+  with_items:
+    - csi-nfs-node.yaml
+    - csi-controllerplugin-rbac.yaml
+    - csi-nodeplugin-rbac.yaml
+    - csidriver.yaml
+
+- name: Deploy Controller and Node plugins
+  shell: "{{ kubectl }} apply -f {{ k8s_csi_file_loc }}/{{item}}"
+  register: output
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: output.rc == 0
+  with_items:
+    - csi-controllerplugin.yaml
+    - csi-nodeplugin.yaml
+
+- name: Apply Manila CSI Storage Class template
+  shell: "{{ kubectl }} apply -f {{ k8s_csi_file_loc }}/manila-sc.yaml"
+  register: output
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: output.rc == 0
+
+- name: Delete temp directory
+  file:
+    name: "{{ mktemp_csi.stdout }}"
+    state: absent
+  changed_when: False

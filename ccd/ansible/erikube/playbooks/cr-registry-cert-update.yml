@@ -1,0 +1,22 @@
+---
+- name: Update container registry certificate
+  hosts: master[0]
+  become: yes
+  vars:
+    - cr_hostname: "{{ container_registry_hostname | default('k8s-registry.eccd.local') }}"
+    - cr_cert_tls_secret_name: "{{ container_registry_registry_secret_name | default('cr-registry-tls') }}"
+  roles:
+    - erikube-defaults
+
+  tasks:
+  - import_role:
+      name: cr-registry
+      tasks_from: tls.yml
+    vars:
+      - tls_secret_namespace: kube-system
+      - tls_secret: "{{ cr_cert_tls_secret_name }}"
+    when:
+      - container_registry_enabled | default(true) | bool
+      - ca_key is defined
+      - ca_cert is defined
+      - container_registry_ssl_cert is not defined or container_registry_ssl_key is not defined

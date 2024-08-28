@@ -1,0 +1,52 @@
+---
+
+- block:
+  - name: Get pre-configured docker storage driver on master hosts
+    become: yes
+    shell: docker info |awk '/Storage Driver:/ {print $3}'
+    register: docker_storage_result
+    changed_when: false
+
+  - name: Check pre-configured docker storage driver on master hosts
+    assert:
+      that: "docker_storage_result.stdout in docker_storage_driver_allow_list"
+      msg: "Unsupported Docker Storage Driver. Support {{ docker_storage_driver_allow_list }}, but configured as {{ docker_storage_result.stdout }}"
+    when: "'command not found' not in docker_storage_result.stderr"
+
+  when:
+    - groups.master is defined
+    - ansible_hostname in master_hosts
+
+- block:
+  - name: Get pre-configured docker storage driver on worker hosts
+    become: yes
+    shell: docker info |awk '/Storage Driver:/ {print $3}'
+    register: docker_storage_result
+    changed_when: false
+
+  - name: Check pre-configured docker storage driver on worker hosts
+    assert:
+      that: "docker_storage_result.stdout in docker_storage_driver_allow_list"
+      msg: "Unsupported Docker Storage Driver. Support {{ docker_storage_driver_allow_list }}, but configured as {{ docker_storage_result.stdout }}"
+    when: "'command not found' not in docker_storage_result.stderr"
+
+  when:
+    - groups.worker is defined
+    - ansible_hostname in worker_hosts
+
+- block:
+  - name: Get pre-configured docker storage driver on etcd hosts
+    become: yes
+    shell: docker info |awk '/Storage Driver:/ {print $3}'
+    register: docker_storage_result
+    changed_when: false
+
+  - name: Check pre-configured docker storage driver on etcd hosts
+    assert:
+      that: "docker_storage_result.stdout in docker_storage_driver_allow_list"
+      msg: "Unsupported Docker Storage Driver. Support {{ docker_storage_driver_allow_list }}, but configured as {{ docker_storage_result.stdout }}"
+    when: "'command not found' not in docker_storage_result.stderr"
+
+  when:
+    - groups.etcd is defined
+    - ansible_hostname in etcd_hosts

@@ -1,0 +1,27 @@
+---
+- name: Gather facts as non root
+  hosts: all
+  gather_facts: yes
+
+
+- name: "Execute pre-check before cluster deployment starts"
+  hosts: all
+  become: yes
+  roles:
+    - erikube-defaults
+  vars:
+    - etcd_hosts: "{{ groups['etcd'] }}"
+    - master_hosts: "{{ groups['master'] }}"
+    - worker_hosts: "{{ groups['worker'] }}"
+    - kube_hosts: "{{ groups['master'] + groups['worker'] }}"
+  tasks:
+    - name: Erikube defaults for all hosts
+      include_role:
+        name: erikube-defaults
+    - name: Execute precheck toward cluster nodes
+      include_role:
+        name: precheck
+      when: >
+        (inventory_hostname in groups['etcd']) or
+        (inventory_hostname in groups['master']) or
+        (inventory_hostname in groups['worker'])

@@ -1,0 +1,19 @@
+---
+- name: Prepare pss templates
+  template: >
+    src="{{ item }}.j2"
+    dest="/etc/kubernetes/policies/{{ item }}"
+  with_items:
+  - pss-namespace-rules.yaml
+  become: yes
+
+- name: Deploy pod security standards rules
+  command: "{{ kubectl }} apply -f /etc/kubernetes/policies/{{ item }}"
+  become: yes
+  register: status
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: status.rc == 0
+  with_items:
+  # default rules included in kubeadm config file, thus not included here
+  - pss-namespace-rules.yaml

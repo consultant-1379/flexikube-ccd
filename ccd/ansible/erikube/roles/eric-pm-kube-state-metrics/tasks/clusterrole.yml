@@ -1,0 +1,44 @@
+- name: Get clusterrolebinding status of Kube State Metrics
+  shell: "{{ kubectl }} get clusterrolebinding {{ kube_state_metrics_name }}"
+  register: clusterrolebinding_status
+  become: yes
+  failed_when: false == true
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (clusterrolebinding_status.rc == 0 or "not found" in clusterrolebinding_status.stderr)
+
+- name: Create clusterrolebinding for Kube State Metrics
+  when: clusterrolebinding_status.rc != 0
+  block:
+  - name: Create temp workspace directory
+    command: mktemp -d /tmp/erikube-k8s-XXXXXX
+    register: kubestatetemp
+    changed_when: False
+
+  - name: Copy the clusterrole template for Kube State Metrics
+    template:
+      src: kube-state-metrics-clusterrole.yaml.j2
+      dest: "{{ kubestatetemp.stdout }}/kube-state-metrics-clusterrole.yaml"
+    become: yes
+
+  - name: Apply modified Kube State Metrics clusterrole
+    shell: "{{ kubectl }} apply -f {{ kubestatetemp.stdout }}/kube-state-metrics-clusterrole.yaml"
+    become: yes
+    register: result
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: result.rc == 0
+
+  - name: Create clusterrolebinding for Kube State Metrics
+    shell: "{{ kubectl }} create clusterrolebinding {{ kube_state_metrics_name }} --clusterrole={{ kube_state_metrics_name }} --serviceaccount=monitoring:{{ kube_state_metrics_name }}"
+    become: yes
+    register: result
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: result.rc == 0
+
+  - name: Delete temp directory
+    file:
+      name: "{{ kubestatetemp.stdout }}"
+      state: absent
+    changed_when: False

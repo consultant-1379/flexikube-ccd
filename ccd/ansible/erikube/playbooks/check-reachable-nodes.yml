@@ -1,0 +1,17 @@
+---
+- name: Group reachable and unreachable master and etcd nodes
+  hosts: master,etcd
+  gather_facts: false
+  tasks:
+  - block:
+    - wait_for_connection:
+        timeout: 5
+    - name: Add hosts with connectivity to reachable group
+      group_by:
+        key: "reachable_{{ item }}"
+      with_items: "{{ group_names }}"
+    rescue:
+    - name: Add hosts without connectivity to unreachable group
+      group_by:
+        key: "unreachable_{{ item }}"
+      with_items: "{{ group_names }}"

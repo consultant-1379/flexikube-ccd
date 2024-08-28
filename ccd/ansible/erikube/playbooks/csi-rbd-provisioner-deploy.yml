@@ -1,0 +1,88 @@
+---
+- name: Deploy Ceph CSI RBD storage provisioner
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - name: Check Mandatory variable ceph cluster ID
+      when:
+      - ceph is defined
+      assert:
+        that:
+          - ( ceph.cluster_id is defined ) and (ceph.cluster_id|length > 0)
+        fail_msg: "Mandatory Ansible variable ceph cluster ID not set"
+    - name: Check Mandatory variable ceph monitor address
+      when:
+      - ceph is defined
+      assert:
+        that:
+          - ( ceph.monitor_address is defined ) and ( ceph.monitor_address|length > 0)
+        fail_msg: "Mandatory Ansible variable ceph monitor address not set"
+    - name: Check Mandatory variable ceph user name
+      when:
+      - ceph is defined
+      assert:
+        that:
+          - ( ceph.user_name is defined ) and ( ceph.user_name|length > 0)
+        fail_msg: "Mandatory Ansible variable ceph user name not set"
+    - name: Check Mandatory variable ceph user key
+      when:
+      - ceph is defined
+      assert:
+        that:
+          - ( ceph.user_key is defined ) and ( ceph.user_key|length > 0)
+        fail_msg: "Mandatory Ansible variable ceph user key not set"
+
+    - include_vars: ../../common/container-list.json
+  vars:
+    - tarball_name: "{{ helm_charts.ceph_csi_rbd.name + '-' + helm_charts.ceph_csi_rbd.version + '.tgz' }}"
+  roles:
+   - erikube-defaults
+   - role: helm-chart-provisioner
+     when:
+     - ceph is defined
+     vars:
+       - chart_name: "ceph-csi-rbd"
+       - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '1200s' }}"
+       - kube_namespace: "kube-system"
+       - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+       - state: installed
+       - values:
+           nodeplugin:
+             registrar:
+               image:
+                 repository: "{{ kube_image_prefix }}{{ containers.erikube.csi_node_driver_registrar_nsf.split(':')[0] }}"
+                 tag: "{{ containers.erikube.csi_node_driver_registrar_nsf.split(':')[1] }}"
+             plugin:
+               image:
+                 repository: "{{ kube_image_prefix }}{{ containers.erikube.cephcsi.split(':')[0] }}"
+                 tag: "{{ containers.erikube.cephcsi.split(':')[1] }}"
+           provisioner:
+             replicaCount: "{{ ceph.replica_count | default ('1') }}"
+             hostNetwork: "{{ ceph.host_network | default (false) | bool }}"
+             provisioner:
+               image:
+                 repository: "{{ kube_image_prefix }}{{ containers.erikube.csi_provisioner_ceph.split(':')[0] }}"
+                 tag: "{{ containers.erikube.csi_provisioner_ceph.split(':')[1] }}"
+             attacher:
+               image:
+                 repository: "{{ kube_image_prefix }}{{ containers.erikube.csi_attacher_ceph.split(':')[0] }}"
+                 tag: "{{ containers.erikube.csi_attacher_ceph.split(':')[1] }}"
+             resizer:
+               image:
+                 repository: "{{ kube_image_prefix }}{{ containers.erikube.csi_resizer_ceph.split(':')[0] }}"
+                 tag: "{{ containers.erikube.csi_resizer_ceph.split(':')[1] }}"
+             snapshotter:
+               image:
+                 repository: "{{ kube_image_prefix }}{{ containers.erikube.csi_snapshotter_ceph.split(':')[0] }}"
+                 tag: "{{ containers.erikube.csi_snapshotter_ceph.split(':')[1] }}"
+           csiConfig:
+             - clusterID: "{{ ceph.cluster_id }}"
+               monitors:  "{{ ceph.monitor_address }}"
+           secret:
+             userName: "{{ ceph.user_name }}"
+             userKey: "{{ ceph.user_key }}"
+           storage:
+             provisionerName: "{{ ceph.storage_class | default('network-block') }}"
+             clusterID: "{{ ceph.cluster_id }}"
+             rbdPool: "{{ ceph.pool | default('rbd') }}"
+             fsType: "{{ ceph.fstype | default ('ext4') }}"

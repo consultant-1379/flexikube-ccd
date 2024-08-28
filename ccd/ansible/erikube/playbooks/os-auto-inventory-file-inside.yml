@@ -1,0 +1,4 @@
+---
+
+- import_playbook: os-vm-instances-creation.yml
+- import_playbook: os-vm-instances-collection.yml

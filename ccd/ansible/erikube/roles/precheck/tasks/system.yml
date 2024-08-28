@@ -1,0 +1,49 @@
+---
+# Hosts may not have python-selinux module installed, so we
+# will check manually.
+- name: Check if /sys/fs/selinux/enforce file exists
+  stat:
+    path: /sys/fs/selinux/enforce
+  register: enforce_file
+
+- name: Check if selinux config exists
+  stat:
+    path: /etc/selinux/config
+  register: selinux_config
+
+# /sys/fs/selinux directory does not exist if selinux is disabled
+- name: Ensure SELinux is not enforced if /sys/fs/selinux/enforce exists
+  command: grep -q '^0$' /sys/fs/selinux/enforce
+  register: enforce_status
+  when: enforce_file.stat.exists
+
+- name: Ensure SELinux config mode is permissive or disabled
+  shell: grep '^SELINUX=' /etc/sysconfig/selinux | cut -d '=' -f2
+  register: selinux_config_mode
+  when: selinux_config.stat.exists
+  failed_when: "selinux_config_mode.stdout not in ('permissive', 'disabled')"
+
+- name: Ensure swap is disabled
+  command: grep "^[^#].*swap" /etc/fstab
+  changed_when: false
+  register: swap_result
+  failed_when: swap_result.stdout_lines | length > 0
+
+- name: Ensure iptables is enabled to see bridged packets
+  become: yes
+  check_mode: true
+  register: bridged_packets
+  sysctl:
+    name: net.bridge.bridge-nf-call-iptables
+    value: 1
+  failed_when: bridged_packets.changed
+
+- name: Ensure iptables is enabled to see bridged packets (IPv6)
+  become: yes
+  check_mode: true
+  register: bridged_packets_v6
+  sysctl:
+    name: net.bridge.bridge-nf-call-ip6tables
+    value: 1
+  failed_when: bridged_packets_v6.changed
+  when: k8s_ip_version == 'ipv6'

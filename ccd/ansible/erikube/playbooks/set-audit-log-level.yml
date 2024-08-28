@@ -1,0 +1,185 @@
+---
+  - name: Prepare Ansible inventory with IBD
+    hosts: localhost
+    become: yes
+    tasks:
+    - name: Worker inventory creation
+      include_role:
+        name: roles/erikube-defaults
+        tasks_from: create_worker_inventory
+
+  - name: set audit rules and restart auditctl
+    hosts: master, director, worker
+    tasks:
+
+    - name: Set minimum audit rules
+      become: yes
+      blockinfile:
+        path: /etc/audit/rules.d/audit.rules
+        block: |
+          -a exit,always -F arch=b64 -S execve -F path=/usr/bin/ssh -k ssh
+          -w /etc/group -p wa -k identity
+          -w /etc/passwd -p wa -k identity
+          -w /etc/gshadow -p wa -k identity
+          -w /etc/shadow -p wa -k identity
+          -w /etc/security/opasswd -p wa -k identity
+          -a always,exit -F arch=b64 -S sethostname -S setdomainname -k system-locale
+          -a always,exit -F arch=b32 -S sethostname -S setdomainname -k system-locale
+          -w /var/log/lastlog -p wa -k logins
+          -w /var/run/faillock/ -p wa -k logins
+          -w /var/run/utmp -p wa -k session
+          -w /var/log/wtmp -p wa -k session
+          -w /var/log/btmp -p wa -k session
+          -a always,exit -F arch=b64 -S mount -F auid>=1000 -F auid!=4294967295 -k mounts
+          -a always,exit -F arch=b32 -S mount -F auid>=1000 -F auid!=4294967295 -k mounts
+          -e 2
+      when: audit_log_level is defined and audit_log_level == "minimum"
+
+    - name: Set basic audit rules
+      become: yes
+      blockinfile:
+        path: /etc/audit/rules.d/audit.rules
+        block: |
+          -a exit,always -F arch=b64 -S execve -F path=/usr/bin/ssh -k ssh
+          -w /etc/group -p wa -k identity
+          -w /etc/passwd -p wa -k identity
+          -w /etc/gshadow -p wa -k identity
+          -w /etc/shadow -p wa -k identity
+          -w /etc/security/opasswd -p wa -k identity
+          -a always,exit -F arch=b64 -S sethostname -S setdomainname -k system-locale
+          -a always,exit -F arch=b32 -S sethostname -S setdomainname -k system-locale
+          -w /etc/issue -p wa -k system-locale
+          -w /etc/issue.net -p wa -k system-locale
+          -w /etc/hosts -p wa -k system-locale
+          -w /etc/sysconfig/network -p wa -k system-locale
+          -w /var/log/lastlog -p wa -k logins
+          -w /var/run/faillock/ -p wa -k logins
+          -w /var/run/utmp -p wa -k session
+          -w /var/log/wtmp -p wa -k session
+          -w /var/log/btmp -p wa -k session
+          -a always,exit -F arch=b64 -S chmod -S fchmod -S fchmodat -F auid>=1000 -F auid!=4294967295 -k perm_mod
+          -a always,exit -F arch=b32 -S chmod -S fchmod -S fchmodat -F auid>=1000 -F auid!=4294967295 -k perm_mod
+          -a always,exit -F arch=b64 -S chown -S fchown -S fchownat -S lchown -F auid>=1000 -F auid!=4294967295 -k perm_mod
+          -a always,exit -F arch=b32 -S chown -S fchown -S fchownat -S lchown -F auid>=1000 -F auid!=4294967295 -k perm_mod
+          -a always,exit -F arch=b64 -S setxattr -S lsetxattr -S fsetxattr -S removexattr -S lremovexattr -S fremovexattr -F auid>=1000 -F auid!=4294967295 -k perm_mod
+          -a always,exit -F arch=b32 -S setxattr -S lsetxattr -S fsetxattr -S removexattr -S lremovexattr -S fremovexattr -F auid>=1000 -F auid!=4294967295 -k perm_mod
+          -a always,exit -F arch=b64 -S mount -F auid>=1000 -F auid!=4294967295 -k mounts
+          -a always,exit -F arch=b32 -S mount -F auid>=1000 -F auid!=4294967295 -k mounts
+          -a always,exit -F arch=b64 -S unlink -S unlinkat -S rename -S renameat -F auid>=1000 -F auid!=4294967295 -k delete
+          -a always,exit -F arch=b32 -S unlink -S unlinkat -S rename -S renameat -F auid>=1000 -F auid!=4294967295 -k delete
+          -w /var/log/sudo.log -p wa -k actions
+          -w /sbin/insmod -p x -k modules
+          -w /sbin/rmmod -p x -k modules
+          -w /sbin/modprobe -p x -k modules
+          -a always,exit -F arch=b64 -S init_module -S delete_module -k modules
+          -e 2
+      when: audit_log_level is defined and audit_log_level == "basic"
+
+    - name: Set detailed audit rules
+      become: yes
+      blockinfile:
+        path: /etc/audit/rules.d/audit.rules
+        block: |
+          -a exit,always -F arch=b64 -S execve -F path=/sbin/reboot -k reboot
+          -a exit,always -F arch=b64 -S execve -F path=/sbin/init -k reboot
+          -a exit,always -F arch=b64 -S execve -F path=/sbin/poweroff -k reboot
+          -a exit,always -F arch=b64 -S execve -F path=/sbin/shutdow -k reboot
+          -a exit,always -F arch=b64 -S execve -F path=/usr/bin/ssh -k ssh
+          -a always,exit -F arch=b64 -S adjtimex -S settimeofday -k time-change
+          -a always,exit -F arch=b32 -S adjtimex -S settimeofday -S stime -k time-change
+          -a always,exit -F arch=b64 -S clock_settime -k time-change
+          -a always,exit -F arch=b32 -S clock_settime -k time-change
+          -w /etc/localtime -p wa -k time-change
+          -w /etc/group -p wa -k identity
+          -w /etc/passwd -p wa -k identity
+          -w /etc/gshadow -p wa -k identity
+          -w /etc/shadow -p wa -k identity
+          -w /etc/security/opasswd -p wa -k identity
+          -a always,exit -F arch=b64 -S sethostname -S setdomainname -k system-locale
+          -a always,exit -F arch=b32 -S sethostname -S setdomainname -k system-locale
+          -w /etc/issue -p wa -k system-locale
+          -w /etc/issue.net -p wa -k system-locale
+          -w /etc/hosts -p wa -k system-locale
+          -w /etc/sysconfig/network -p wa -k system-locale
+          -w /etc/selinux/ -p wa -k MAC-policy
+          -w /usr/share/selinux/ -p wa -k MAC-policy
+          -w /var/log/faillog -p wa -k logins
+          -w /var/log/lastlog -p wa -k logins
+          -w /var/log/tallylog -p wa -k logins
+          -w /var/log/faillock/ -p wa -k logins
+          -w /var/run/faillock/ -p wa -k logins
+          -w /var/run/utmp -p wa -k session
+          -w /var/log/wtmp -p wa -k session
+          -w /var/log/btmp -p wa -k session
+          -a always,exit -F arch=b64 -S chmod -S fchmod -S fchmodat -F auid>=1000 -F auid!=4294967295 -k perm_mod
+          -a always,exit -F arch=b32 -S chmod -S fchmod -S fchmodat -F auid>=1000 -F auid!=4294967295 -k perm_mod
+          -a always,exit -F arch=b64 -S chown -S fchown -S fchownat -S lchown -F auid>=1000 -F auid!=4294967295 -k perm_mod
+          -a always,exit -F arch=b32 -S chown -S fchown -S fchownat -S lchown -F auid>=1000 -F auid!=4294967295 -k perm_mod
+          -a always,exit -F arch=b64 -S setxattr -S lsetxattr -S fsetxattr -S removexattr -S lremovexattr -S fremovexattr -F auid>=1000 -F auid!=4294967295 -k perm_mod
+          -a always,exit -F arch=b32 -S setxattr -S lsetxattr -S fsetxattr -S removexattr -S lremovexattr -S fremovexattr -F auid>=1000 -F auid!=4294967295 -k perm_mod
+          -a always,exit -F arch=b64 -S creat -S open -S openat -S truncate -S ftruncate -F exit=-EACCES -F auid>=1000 -F auid!=4294967295 -k access
+          -a always,exit -F arch=b32 -S creat -S open -S openat -S truncate -S ftruncate -F exit=-EACCES -F auid>=1000 -F auid!=4294967295 -k access
+          -a always,exit -F arch=b64 -S creat -S open -S openat -S truncate -S ftruncate -F exit=-EPERM -F auid>=1000 -F auid!=4294967295 -k access
+          -a always,exit -F arch=b32 -S creat -S open -S openat -S truncate -S ftruncate -F exit=-EPERM -F auid>=1000 -F auid!=4294967295 -k access
+          -a always,exit -F arch=b64 -S mount -F auid>=1000 -F auid!=4294967295 -k mounts
+          -a always,exit -F arch=b32 -S mount -F auid>=1000 -F auid!=4294967295 -k mounts
+          -a always,exit -F arch=b64 -S unlink -S unlinkat -S rename -S renameat -F auid>=1000 -F auid!=4294967295 -k delete
+          -a always,exit -F arch=b32 -S unlink -S unlinkat -S rename -S renameat -F auid>=1000 -F auid!=4294967295 -k delete
+          -w /etc/sudoers -p wa -k scope
+          -w /etc/sudoers.d -p wa -k scope
+          -w /var/log/sudo.log -p wa -k actions
+          -w /sbin/insmod -p x -k modules
+          -w /sbin/rmmod -p x -k modules
+          -w /sbin/modprobe -p x -k modules
+          -a always,exit -F arch=b64 -S init_module -S delete_module -k modules
+          -e 2
+      when: audit_log_level == "detailed" or audit_log_level is undefined
+
+    #CIS-CAT 4.1.11 Ensure use of privileged commands is collected
+    - name: Gather privileged commands
+      become: yes
+      command: |
+        find /usr /sbin /opt -xdev \( -perm -4000 -o -perm -2000 \) -type f
+      register: privileged_commands
+
+    - name: Append privileged commands
+      become: yes
+      lineinfile:
+        dest: /etc/audit/rules.d/audit.rules
+        line: "-a always,exit -F path={{ item }} -F perm=x -F auid>=1000 -F auid!=-1 -F key=privileged"
+        insertbefore: '^-e 2'
+      with_items:
+        - "{{ privileged_commands.stdout_lines }}"
+
+    - name: restart auditctl(CentOS)
+      become: yes
+      ignore_errors: True
+      command: /sbin/service auditd restart
+      args:
+        warn: false
+      when: ansible_distribution == "CentOS"
+
+#    SP4 broke auditd restart and it breaks whole audit rules, stop/start needs to be used instead
+#    - name: restart auditctl(Ubuntu and SLES)
+#      become: yes
+#      ignore_errors: True
+#      service:
+#        name: auditd
+#        state: restarted
+#      when: ansible_distribution != "CentOS"
+
+    - name: stop auditctl(Ubuntu and SLES)
+      become: yes
+      ignore_errors: True
+      service:
+        name: auditd
+        state: stopped
+      when: ansible_distribution != "CentOS"
+
+    - name: start auditctl(Ubuntu and SLES)
+      become: yes
+      ignore_errors: True
+      service:
+        name: auditd
+        state: started
+      when: ansible_distribution != "CentOS"

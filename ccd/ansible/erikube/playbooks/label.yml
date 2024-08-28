@@ -1,0 +1,22 @@
+---
+
+- name: Label cluster with erikube version
+  hosts: master
+  become: yes
+  roles:
+  - erikube-defaults
+  tasks:
+  - name: Determine erikube version
+    shell: "STRING=$(grep .erikube_version /usr/local/lib/erikube_setup/image-list.json) && echo ${STRING//[!0-9.]/}"
+    register: erikube_version
+    args:
+      executable: /bin/bash
+
+  - name: Label all nodes with the Erikube version
+    shell: "{{ kubectl }} label nodes --all --overwrite 'ccd/version={{ erikube_version.stdout }}'"
+    register: kubectl_result
+    failed_when: kubectl_result.rc != 0 and "not found" not in kubectl_result.stderr
+    changed_when: kubectl_result.rc == 0
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: (kubectl_result.rc == 0)

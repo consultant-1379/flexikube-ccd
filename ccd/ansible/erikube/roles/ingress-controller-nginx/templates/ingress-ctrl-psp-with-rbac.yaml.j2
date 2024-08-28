@@ -1,0 +1,33 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ccd-ingress-nginx-psp
+  namespace: ingress-nginx
+rules:
+- apiGroups:
+  - policy
+  resourceNames:
+  - ccd-ingress-nginx
+  resources:
+  - podsecuritypolicies
+  verbs:
+  - use
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ccd-ingress-nginx-psp
+  namespace: ingress-nginx
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ccd-ingress-nginx-psp
+subjects:
+# Lets cover default and nginx-ingress-serviceaccount service accounts
+# Could have altered default-http-backend deployment to use the same service acccount to avoid granting the default service account access
+- kind: ServiceAccount
+  name: default
+- kind: ServiceAccount
+  name: nginx-ingress-serviceaccount

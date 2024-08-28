@@ -1,0 +1,13 @@
+---
+- name: Update CA certs for fluentd
+  import_tasks: upgrade.yml
+  vars:
+    dir: /tmp/erikube-fluent-ca
+
+- name: Update external server secret
+  import_tasks: external_server_upgrade.yml
+
+- name: Update director certs for rsyslog
+  import_tasks: director_certs_upgrade.yml
+  vars:
+    dir2: /tmp/erikube-fluent-rsyslog

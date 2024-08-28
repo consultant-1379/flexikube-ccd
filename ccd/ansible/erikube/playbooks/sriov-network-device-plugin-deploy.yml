@@ -1,0 +1,45 @@
+---
+- name: Deploy SRIOV network device plugin
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+  vars:
+    - tarball_name: "{{ helm_charts.sriov_network_device_plugin.name + '-' + helm_charts.sriov_network_device_plugin.version + '.tgz' }}"
+    - default_node_selector:
+        "node-role.kubernetes.io/worker": ""
+  tasks:
+    - name: Backward compatibility and Default handling
+      set_fact:
+        sriov_network_device_plugin_configs:
+          default:
+            sriov_network_device_plugin_configmap_name: "{{ sriov_network_device_plugin_configmap_name | default('sriov-dp-configmap') }}"
+            sriov_network_device_plugin_configmap_data: "{{ sriov_network_device_plugin_configmap_data | default(omit) | string }}"
+      when:
+        - sriov_network_device_plugin_configs is not defined or not sriov_network_device_plugin_configs
+        - sriov_network_device_plugin_enabled | default(false) | bool
+
+    - name: Installing sriov-network-device-plugin
+      include_role:
+        name: helm-chart-provisioner
+      vars:
+        - chart_name: "sriov-dp-{{ item.key }}"
+        - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '1200s' }}"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - kube_namespace: kube-system
+        - state: installed
+        - base_name: "{{ item.value.sriov_network_device_plugin_configmap_name | default('sriov-dp-configmap') }}"
+        - values:
+            image:
+              repo: "{{ docker_registry_host | default(default_registry) }}"
+              tag: "{{ containers.erikube.sriov_network_device_plugin.split(':')[1] }}"
+            configmap:
+              data: "{{ item.value.sriov_network_device_plugin_configmap_data | default(omit) | string }}"
+              name: "{{ base_name }}-{{ item.key }}"
+            daemonset_name: "sriov-dp-ds-{{ item.key }}"
+            nodeSelector: "{{ item.value.node_selectors | default(default_node_selector) }}"
+            tolerations: [{"key": "", "operator": "Exists"}]
+            imagePullSecrets:
+              - name: local-registry-secret
+      with_dict: "{{ sriov_network_device_plugin_configs }}"
+      when: sriov_network_device_plugin_enabled | default(false) | bool

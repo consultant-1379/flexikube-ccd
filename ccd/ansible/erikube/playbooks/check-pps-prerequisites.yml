@@ -1,0 +1,24 @@
+---
+- name: Validate if hosts are prepared correctly
+  hosts: worker, master, etcd
+  gather_facts: yes
+  become: yes
+  vars:
+    check_inside: 0
+  tasks:
+    - block:
+        - set_fact:
+            check_inside: 1
+        - include_vars: "../roles/erikube-defaults/defaults/main.yml"
+        - include:  "../roles/erikube-defaults/tasks/main.yml"
+        - include_role:
+            name: host-prerequisites-validation
+      when: ansible_distribution == "Ubuntu" or ansible_distribution == "CentOS" or ansible_distribution == "SLES"
+
+    - block:
+        - name: Check if recommended OS is installed
+          assert:
+            that: check_inside == 1
+            fail_msg: "Warning!! {{ansible_distribution}} on {{ansible_hostname}} is not the recommended OS"
+            quiet: true
+          ignore_errors: True

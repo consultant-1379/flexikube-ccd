@@ -1,0 +1,24 @@
+# This flow is used when there is only one master and secrets encryption
+# has been enabled previously.
+
+
+- name: Update cryptoprov keys
+  include_tasks: update-cryptprov-cfg.yml
+  vars:
+    conf_file_exists: true
+    update_phase: 0
+
+- name: Restart apiserver to enable new key
+  include_tasks: kubeapi-restart.yml
+
+- name: Reencrypt secrets with new key
+  include_tasks: kube-process-secrets.yml
+
+- name: Cleanup cryptoprov keys
+  include_tasks: update-cryptprov-cfg.yml
+  vars:
+    conf_file_exists: true
+    update_phase: 3
+
+- name: Restart apiserver to pick up final config
+  include_tasks: kubeapi-restart.yml

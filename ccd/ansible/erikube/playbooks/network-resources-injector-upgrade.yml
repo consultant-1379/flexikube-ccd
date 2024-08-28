@@ -1,0 +1,54 @@
+---
+- name: Delete NRI Secret if network_resources_injector_enabled is true
+  hosts: master[0]
+  become: yes
+  ignore_errors: True
+  roles:
+    - erikube-defaults
+  tasks:
+    - name: Delete NRI secret
+      include_role:
+        name: network-resources-injector
+      when: network_resources_injector_enabled | default(false) | bool
+
+- name: Delete helm chart for Network Resource Injector
+  hosts: master[0]
+  become: yes
+  ignore_errors: True
+  vars:
+    - tarball_name: "{{ helm_charts.network_resources_injector.name + '-' + helm_charts.network_resources_injector.version + '.tgz' }}"
+  roles:
+    - erikube-defaults
+    - role: helm-chart-provisioner
+      vars:
+        - tarball_name: "{{ helm_charts.network_resources_injector.name + '-' + helm_charts.network_resources_injector.version + '.tgz' }}"
+        - chart_name: network-resources-injector
+        - kube_namespace: kube-system
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - state: purged
+      when: network_resources_injector_enabled | default(false) | bool
+
+- name: Upgrade Network Resource Injector
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+  vars:
+    - tarball_name: "{{ helm_charts.network_resources_injector.name + '-' + helm_charts.network_resources_injector.version + '.tgz' }}"
+  roles:
+    - erikube-defaults
+    - role: helm-chart-provisioner
+      when: kube_network_extra_plugin is defined and kube_network_extra_plugin is search("multus") and network_resources_injector_enabled | default(false) | bool
+      vars:
+        - chart_name: network-resources-injector
+        - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '1200s' }}"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - kube_namespace: kube-system
+        - state: update-installed
+        - values:
+            imagePullSecrets:
+              - name: local-registry-secret
+            image:
+              repo: "{{ docker_registry_host | default(default_registry) }}"
+              tag: "{{ containers.erikube.network_resources_injector.split(':')[1] }}"
+            nodeSelector: "{{ network_resources_injector_node_selector | default({}) }}"

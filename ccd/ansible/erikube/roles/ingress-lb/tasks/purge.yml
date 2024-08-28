@@ -1,0 +1,97 @@
+---
+- name: Include ingress LB default vars
+  include_vars: "{{ item }}"
+  with_items:
+  - roles/ingress-lb/defaults/main.yml
+
+- name: Check for ingress LB service file
+  stat:
+    path: "/etc/systemd/system/{{ ingress_lb_service }}.service"
+  register: lb_service
+
+- name: Stop Erikube LB ingress service
+  become: yes
+  systemd:
+    name: "{{ ingress_lb_service }}.service"
+    state: stopped
+    enabled: no
+  when: lb_service.stat.exists
+
+- name: Delete Erikube LB ingress systemd unit file
+  become: yes
+  file:
+    path: "/etc/systemd/system/{{ ingress_lb_service }}.service"
+    state: absent
+  when: lb_service.stat.exists
+
+- name: Disable connection tracking (conntrack)
+  become: yes
+  sysctl:
+    name: "net.ipv4.vs.conntrack"
+    state: absent
+    reload: yes
+
+- name: Stop ipvsadm service
+  become: yes
+  systemd:
+    name: ipvsadm
+    state: stopped
+    enabled: no
+  register: stopipvsadm
+  failed_when: "stopipvsadm is failed and 'could not find' not in stopipvsadm.msg|lower"
+
+- name: Delete empty /etc/sysconfig/ipvsadm (RedHat only)
+  become: yes
+  file:
+    path: /etc/sysconfig/ipvsadm
+    state: absent
+  when: ansible_os_family == 'RedHat'
+
+- name: Disable IP v4 forwarding
+  become: yes
+  sysctl:
+    name: "net.ipv4.ip_forward"
+    state: absent
+    reload: yes
+
+- name: Delete deployment directory {{ cert_deploy_dir }}
+  become: yes
+  file:
+    path: "{{ cert_deploy_dir }}"
+    state: absent
+
+- name: Delete old ClusterRole for LB
+  ignore_errors: yes
+  failed_when: false
+  command: "{{ kubectl }} delete --force=true --ignore-not-found=true clusterrole {{ serviceaccount }}"
+  register: delete_cluster_role
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: delete_cluster_role.rc == 0
+
+- name: Delete old ClusterRoleBinding for LB
+  ignore_errors: yes
+  failed_when: false
+  command: "{{ kubectl }} delete --force=true --ignore-not-found=true clusterrolebinding {{ serviceaccount }}"
+  register: delete_cluster_role_binding
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: delete_cluster_role_binding.rc == 0
+
+- name: Delete old ServiceAccount for LB
+  ignore_errors: yes
+  failed_when: false
+  command: "{{ kubectl }} delete --force=true --ignore-not-found=true serviceaccount {{ serviceaccount }}"
+  register: delete_service_account
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: delete_service_account.rc == 0
+
+- name: Delete old Secret for LB
+  ignore_errors: yes
+  failed_when: false
+  command: "{{ kubectl }} delete --force=true --ignore-not-found=true secret {{ serviceaccount }}"
+  register: delete_secret
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: delete_secret.rc == 0

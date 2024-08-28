@@ -1,0 +1,371 @@
+---
+- name: Include docker image list
+  include_vars: ../../../../common/container-list.json
+
+- name: Docker registry set facts
+  set_fact:
+    docker_registry_ip: "{{ hostvars[groups['registry'][0]]['ansible_host'] }}"
+    docker_registry_cn: "jedi-registry"
+    docker_registry_host: "jedi-registry:5000"
+  when: "'registry' in groups"
+
+- name: Initialize docker registry hostname for use in image names
+  set_fact:
+    kube_image_prefix: "{{ docker_registry_host | default(default_registry) }}/"
+
+- name: Check if Atomic host
+  stat: path=/run/ostree-booted
+  register: stat_ostree
+
+- name: Set fact for Atomic host
+  set_fact:
+    is_atomic: "{{ stat_ostree.stat.exists }}"
+
+- set_fact:
+    head_master: "{{ groups['reachable_master'][0] | d(groups['master'][0]) }}"
+  when: "groups is defined and 'master' in groups"
+
+- set_fact:
+    dex_ingress_host: auth.eccd.local
+  when: dex_ingress_host is undefined
+
+- set_fact:
+    dex_issuer_url: "https://{{ dex_ingress_host }}"
+  when: dex_issuer_url is undefined
+
+- set_fact:
+    auth_client_ingress_host: authclient.eccd.local
+  when: auth_client_ingress_host is undefined
+
+- set_fact:
+    oidc_client_id: "{{ auth_client_ingress_host }}"
+  when: oidc_client_id is undefined
+
+- set_fact:
+    auth_client_redirect_path: /ui
+  when: auth_client_redirect_path is undefined
+
+# IP version for the K8s internal network
+# The valid options are 'ipv4', 'ipv6' and 'dualstack'
+- set_fact:
+    k8s_ip_version: "ipv4"
+  when: k8s_ip_version is undefined
+
+- set_fact:
+    first_master: "{{ groups['reachable_master'] | d(groups['master']) | first }}"
+  when: groups['master'] is defined
+
+- set_fact:
+    last_master: "{{ groups['reachable_master'] | d(groups['master']) | last }}"
+  when: groups['master'] is defined
+
+- name: Set Kubernetes internal traffic interface (IPv4)
+  set_fact:
+    kubernetes_interface: "{{ kubernetes_interface_override | default(ansible_default_ipv4.interface) }}"
+  when:
+    - k8s_ip_version == 'ipv4'
+    - kubernetes_interface is undefined
+    - ansible_default_ipv4 is defined
+
+# On dualstack the default IPv6 interface is used
+- name: Set Kubernetes internal traffic interface (IPv6 or dualstack)
+  set_fact:
+    kubernetes_interface: "{{ kubernetes_interface_override | default(ansible_default_ipv6.interface) }}"
+  when:
+    - k8s_ip_version == 'ipv6' or k8s_ip_version == 'dualstack'
+    - kubernetes_interface is undefined
+    - ansible_default_ipv6 is defined
+    - ansible_default_ipv6.interface is defined
+
+# On ipv6/dualstack the default IPv4 interface is used if no default IPv6 address
+# is found (the case when ssh'ing to host vias ipv4) assuming the interface is dualstack
+- name: Set Kubernetes internal traffic interface (IPv6 or dualstack)
+  set_fact:
+    kubernetes_interface: "{{ kubernetes_interface_override | default(ansible_default_ipv4.interface) }}"
+  when:
+    - k8s_ip_version == 'ipv6' or k8s_ip_version == 'dualstack'
+    - kubernetes_interface is undefined
+    - ansible_default_ipv6.interface is undefined
+    - ansible_default_ipv4 is defined
+
+
+- name: Set default values to undefined facts
+  set_fact:
+    default_ingress_controller: "{{ ingress_controller_names[0] }}"
+  when:
+    - default_ingress_controller is undefined
+    - ingress_controller_names is defined
+
+- name: Set the default_ingress_namespace and default_ingress_service nginx
+  set_fact:
+    default_ingress_namespace: ingress-nginx
+    default_ingress_service: ingress-nginx
+    container_registry_use_http_proxy: false
+  when: default_ingress_controller == "nginx"
+
+- name: Set LB container type
+  set_fact:
+    kube_lb_container: haproxy_container
+  when:
+    - kube_api_vip_enabled is defined
+    - kube_api_vip_enabled | bool
+    - default_kube_lb is defined and default_kube_lb == 'haproxy'
+
+- name: Debug for kube_apiserver_ip
+  debug:
+    msg: "kube_apiserver_ip --> {{ kube_apiserver_ip }}"
+  when: kube_apiserver_ip is defined
+
+# In case there are no interfaces without default route, we choose the Ansible IP address.
+- name: Use interface used by Ansible for Kubernetes internal traffic
+  set_fact:
+    k8s_ip_address: "{{ ansible_host }}"
+  when:
+    - k8s_ip_address is undefined
+    - inventory_hostname != '127.0.0.1'
+    - inventory_hostname != 'localhost'
+    - inventory_hostname != '::1'
+    - kubernetes_interface is undefined
+
+- name: Set k8s_ip_address (IPv4 only cluster)
+  set_fact:
+    k8s_ip_address: "{{ hostvars[inventory_hostname]['ansible_'+kubernetes_interface]['ipv4'].address }}"
+  when:
+    - k8s_ip_version == 'ipv4'
+    - k8s_ip_address is undefined
+    - inventory_hostname != '127.0.0.1'
+    - inventory_hostname != 'localhost'
+    - inventory_hostname != '::1'
+
+- name: Set k8s_ip_address (IPv6 only)
+  set_fact:
+    k8s_ip_address: "{{ hostvars[inventory_hostname]['ansible_'+kubernetes_interface]['ipv6'][0].address }}"
+  when:
+    - k8s_ip_version == 'ipv6'
+    - k8s_ip_address is undefined
+    - inventory_hostname != '127.0.0.1'
+    - inventory_hostname != 'localhost'
+    - inventory_hostname != '::1'
+
+- name: Set k8s_ip_address (dualstack)
+  block:
+    - name: Set k8s_ip_address_ipv4 and k8s_ip_address_ipv6
+      set_fact:
+        k8s_ip_address_ipv4: "{{ hostvars[inventory_hostname]['ansible_'+kubernetes_interface]['ipv4'].address }}"
+        k8s_ip_address_ipv6: "{{ hostvars[inventory_hostname]['ansible_'+kubernetes_interface]['ipv6'][0].address }}"
+    - name: Set k8s_ip_address based on 'default_dualstack_ip_family'(dualstack)
+      set_fact:
+        k8s_ip_address: "{% if default_dualstack_ip_family == 'ipv4' %}{{ k8s_ip_address_ipv4 }}{% else %}{{ k8s_ip_address_ipv6 }}{% endif %}"
+  when:
+    - k8s_ip_version == 'dualstack'
+    - k8s_ip_address is undefined
+    - inventory_hostname != '127.0.0.1'
+    - inventory_hostname != 'localhost'
+    - inventory_hostname != '::1'
+
+- name: Set k8s_ip_address (dualstack) again if is the same as kube_apiserver_ip
+  set_fact:
+    k8s_ip_address: "{{ hostvars[inventory_hostname]['ansible_'+kubernetes_interface]['ipv6'][1].address }}"
+  when:
+    - k8s_ip_version == 'dualstack'
+    - default_dualstack_ip_family == 'ipv6'
+    - inventory_hostname != '127.0.0.1'
+    - inventory_hostname != 'localhost'
+    - inventory_hostname != '::1'
+    - k8s_ip_address is defined
+    - kube_apiserver_ip is defined
+    - k8s_ip_address == kube_apiserver_ip
+    - hostvars[inventory_hostname]['ansible_'+kubernetes_interface]['ipv6'] | length > 1
+    - hostvars[inventory_hostname]['ansible_'+kubernetes_interface]['ipv6'][1].scope == 'global'
+
+- name: "Set k8s_ip_address (IPv6 only) again if is the same as kube_apiserver_ip"
+  set_fact:
+    k8s_ip_address: "{{ hostvars[inventory_hostname]['ansible_'+kubernetes_interface]['ipv6'][1].address }}"
+  when:
+    - k8s_ip_version == 'ipv6'
+    - inventory_hostname != '127.0.0.1'
+    - inventory_hostname != 'localhost'
+    - inventory_hostname != '::1'
+    - k8s_ip_address is defined
+    - kube_apiserver_ip is defined
+    - k8s_ip_address == kube_apiserver_ip
+    - hostvars[inventory_hostname]['ansible_'+kubernetes_interface]['ipv6'] | length > 1
+    - hostvars[inventory_hostname]['ansible_'+kubernetes_interface]['ipv6'][1].scope == 'global'
+
+# Ansible < 2.8 has a bug that will only have one IPv6 address getting facts
+# Due to this one of the master nodes will use the VIP address for k8s config
+# This workaround detects that case and will use the IP address configured on the inventory
+- name: "Ansible bug workaround: use inventory IP address for this K8s host"
+  set_fact:
+    k8s_ip_address: "{{ ansible_host }}"
+  when:
+    - k8s_ip_version == 'ipv6'
+    - inventory_hostname != '127.0.0.1'
+    - inventory_hostname != 'localhost'
+    - inventory_hostname != '::1'
+    - k8s_ip_address is defined
+    - kube_apiserver_ip is defined
+    - k8s_ip_address == kube_apiserver_ip
+
+# Set apiserver IP to the first master if it was not defined on variables
+- name: "kube_apiserver_ip is not defined, setting it up to the first master"
+  set_fact:
+    kube_apiserver_ip: "{{ hostvars[first_master].k8s_ip_address }}"
+  when:
+    - kube_apiserver_ip is undefined
+    - first_master is defined
+    - hostvars[first_master] is defined
+    - hostvars[first_master].k8s_ip_address is defined
+
+- debug:
+    msg: "Host, IP --> '{{inventory_hostname}}', '{{hostvars[inventory_hostname].k8s_ip_address}}'"
+  when: k8s_ip_address is defined
+
+- name: Dualstack configuration
+  when: k8s_ip_version == "dualstack"
+  block:
+    # Validate the Pod and Subnet CIDR in the case of dualstack
+    - name: "If cluster is dualstack then validate the Pod/Service Subnets"
+      when:
+        - k8s_pod_cidr_v4 is undefined
+        - k8s_pod_cidr_v6 is undefined
+        - k8s_service_cidr_v4 is undefined
+        - k8s_service_cidr_v6 is undefined
+      block:
+        - name: Assert 'k8s_pod_cidr' and 'k8s_service_cidr' are both comma delimited strings of ONLY two IPv4 and IPv6 Subnets
+          assert:
+            that:
+              - k8s_pod_cidr.split(',') | length == 2
+              - k8s_service_cidr.split(',') | length == 2
+            fail_msg: "'k8s_pod_cidr' and 'k8s_service_cidr' must be a comma delimited string of ONLY two IPv4 and IPv6 Subnets"
+            success_msg: "'k8s_pod_cidr' and 'k8s_service_cidr' is a valid comma delimited string of ONLY two IPv4 and IPv6 Subnets"
+
+        - name: Assert 'k8s_pod_cidr' is comma delimited string of IPv4 and IPv6 Subnets
+          assert:
+            that:
+              - (k8s_pod_cidr.split(',') | ipv4('net') | first) | default("") != ""
+              - (k8s_pod_cidr.split(',') | ipv6('net') | first) | default("") != ""
+            fail_msg: "'k8s_pod_cidr' must be a comma delimited string of IPv4 and IPv6 Subnets"
+            success_msg: "'k8s_pod_cidr' is a valid comma delimited string of IPv4 and IPv6 Subnets"
+
+        - name: Assert 'k8s_service_cidr' is comma delimited string of IPv4 and IPv6 Subnets
+          assert:
+            that:
+              - (k8s_service_cidr.split(',') | ipv4('net') | first) | default("") != ""
+              - (k8s_service_cidr.split(',') | ipv6('net') | first) | default("") != ""
+            fail_msg: "'k8s_service_cidr' must be a comma delimited string of IPv4 and IPv6 Subnets"
+            success_msg: "'k8s_service_cidr' is a valid comma delimited string of IPv4 and IPv6 Subnets"
+
+    # Split the Pod/Service CIDR for dualstack to be used in the network plugin
+    - name: Extraction of Pod/Service CIDR for both IP families
+      set_fact:
+        k8s_pod_cidr_v4: "{{ k8s_pod_cidr.split(',') | ipv4('net') | first }}"
+        k8s_pod_cidr_v6: "{{ k8s_pod_cidr.split(',') | ipv6('net') | first }}"
+        k8s_service_cidr_v4: "{{ k8s_service_cidr.split(',') | ipv4('net') | first }}"
+        k8s_service_cidr_v6: "{{ k8s_service_cidr.split(',') | ipv6('net') | first }}"
+      when:
+        - k8s_pod_cidr.split(',') | length == 2
+        - k8s_service_cidr.split(',') | length == 2
+        - k8s_pod_cidr_v4 is undefined
+        - k8s_pod_cidr_v6 is undefined
+        - k8s_service_cidr_v4 is undefined
+        - k8s_service_cidr_v6 is undefined
+
+    # Ensure kube-proxy mode is set to IPVS in the case of dualstack
+    - name: Setting kube-proxy to IPVS
+      set_fact:
+        kube_proxy_mode: "ipvs"
+      when:
+        - kube_proxy_mode is undefined or kube_proxy_mode != "ipvs"
+
+    # Rearange order according to 'default_dualstack_ip_family':
+    - name: "Default IP Family is '{{ default_dualstack_ip_family }}'. Rearrangement of Pod/Service CIDR"
+      set_fact:
+        k8s_pod_cidr: "{% if default_dualstack_ip_family == 'ipv4' %}{{ k8s_pod_cidr_v4 }},{{ k8s_pod_cidr_v6 }}{% else %}{{ k8s_pod_cidr_v6 }},{{ k8s_pod_cidr_v4 }}{% endif %}"
+        k8s_service_cidr: "{% if default_dualstack_ip_family == 'ipv4' %}{{ k8s_service_cidr_v4 }},{{ k8s_service_cidr_v6 }}{% else %}{{ k8s_service_cidr_v6 }},{{ k8s_service_cidr_v4 }}{% endif %}"
+      when:
+        - k8s_pod_cidr_v4 is defined
+        - k8s_pod_cidr_v6 is defined
+        - k8s_service_cidr_v4 is defined
+        - k8s_service_cidr_v6 is defined
+
+    - name: "Default IP Family is '{{ default_dualstack_ip_family }}'. Set internal_ip_family accordingly"
+      set_fact:
+        internal_ip_family: "{% if default_dualstack_ip_family == 'ipv4' %}IPv4{% else %}IPv6{% endif %}"
+
+# Validate kube_proxy_mode if it's defined
+- name: "Validating 'kube_proxy_mode'"
+  assert:
+    that:
+      - kube_proxy_mode in ['', 'userspace', 'iptables', 'ipvs']
+    fail_msg: "'{{ kube_proxy_mode }}' is not a valid kube-proxy mode!"
+    success_msg: "'kube_proxy_mode' is set to '{{ kube_proxy_mode }}'"
+  when:
+    - kube_proxy_mode is defined
+
+# Set Kubelet clusterDNS value
+- name: Set Kubelet DNS IP when kube proxy mode is not IPVS
+  when: kube_proxy_mode is not defined or kube_proxy_mode != "ipvs"
+  block:
+  - name: Set master Kubelet cluster DNS address (IPv4)
+    set_fact:
+      kubelet_DNS: "{{ k8s_service_cidr | next_nth_usable(10) }}"
+    when: k8s_ip_version == "ipv4" or (k8s_ip_version == "dualstack" and default_dualstack_ip_family == 'ipv4')
+
+  # Adds 10 to the k8s_service_cidr -- "2001:db8::ffff:0/112 --> 2001:db8::ffff:a"
+  - name: Set master Kubelet cluster DNS address (IPv6)
+    set_fact:
+      kubelet_DNS: "{{ k8s_service_cidr | next_nth_usable(10) }}"
+    when:
+    - k8s_ip_version == "ipv6" or (k8s_ip_version == "dualstack" and default_dualstack_ip_family == 'ipv6')
+
+- name: Set Kubelet DNS IP when kube proxy mode is IPVS
+  when: kube_proxy_mode is defined and kube_proxy_mode == "ipvs"
+  block:
+  - name: Set Kubelet cluster DNS address (IPv4)
+    set_fact:
+      kubelet_DNS: "{{ nodelocalDNS_ipv4 }}"
+    when:
+    - k8s_ip_version == "ipv4" or (k8s_ip_version == "dualstack" and default_dualstack_ip_family == 'ipv4')
+
+  - name: Set worker Kubelet cluster DNS address (IPv6)
+    set_fact:
+      kubelet_DNS: "{{ nodelocalDNS_ipv6 }}"
+    when:
+    - k8s_ip_version == "ipv6" or (k8s_ip_version == "dualstack" and default_dualstack_ip_family == 'ipv6')
+
+# Set ipvs_excluded_cidrs value
+- name: Set ipvs_excluded_cidrs value
+  set_fact:
+    ipvs_excluded_cidrs: "{{ ipvs_excluded_cidrs.split(',') }}"
+  when:
+    - ipvs_excluded_cidrs is defined
+    - ipvs_excluded_cidrs is string
+    - ipvs_excluded_cidrs != ""
+
+# Set ipvs_tcp_timeout value
+- name: Set ipvs_tcp_timeout value
+  set_fact:
+    ipvs_tcp_timeout: "{{ ipvs_tcp_timeout }}"
+  when:
+    - ipvs_tcp_timeout is defined
+    - ipvs_tcp_timeout is string
+    - ipvs_tcp_timeout != ""
+
+# Set ipvs_tcp_fin_timeout value
+- name: Set ipvs_tcp_fin_timeout value
+  set_fact:
+    ipvs_tcp_fin_timeout: "{{ ipvs_tcp_fin_timeout }}"
+  when:
+    - ipvs_tcp_fin_timeout is defined
+    - ipvs_tcp_fin_timeout is string
+    - ipvs_tcp_fin_timeout != ""
+
+# Set s value
+- name: Set ipvs_udp_timeout value
+  set_fact:
+    ipvs_udp_timeout: "{{ ipvs_udp_timeout }}"
+  when:
+    - ipvs_udp_timeout is defined
+    - ipvs_udp_timeout is string
+    - ipvs_udp_timeout != ""

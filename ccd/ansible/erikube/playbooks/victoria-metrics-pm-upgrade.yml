@@ -1,0 +1,554 @@
+- name: Gather facts as non root
+  hosts: master[0]
+  gather_facts: yes
+
+#Uninstall Victoria Metrics Helm Chart and delete PVC if PVC size config for vmselect changed
+- name: Delete helm chart for Victoria Metrics Cluster
+  hosts: master[0]
+  become: yes
+  vars:
+    - tarball_name: "{{ helm_charts.eric_victoria_metrics_cluster.name + '-' + helm_charts.eric_victoria_metrics_cluster.version + '.tgz' }}"
+    - pv_size: "{{ pm_vmstorage_volume_size | default('8Gi') }}"
+    - pv_storageclass: "{{ pm_vmstorage_volume_storage_class | default('network-block') }}"
+    - pvc_names: "{{ ['vmstorage-volume-eric-victoria-metrics-cluster-vmstorage-0', 'vmstorage-volume-eric-victoria-metrics-cluster-vmstorage-1'] }}"
+    - kube_namespace: "monitoring"
+  pre_tasks:
+    - name: Get PVC for vmstorage server
+      include_role:
+        name: victoria-metrics
+        tasks_from: get-pvc
+      when:
+        - pm_monitoring_enabled | default(true) | bool
+  roles:
+    - erikube-defaults
+    - role: helm-chart-provisioner
+      vars:
+        - chart_name: "{{ helm_charts.eric_victoria_metrics_cluster.name  }}"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - state: purged
+      when:
+        - delete_victoria_metrics_cluster_helm_chart | default(false)
+        - pm_monitoring_enabled | default(true) | bool
+  post_tasks:
+    - name: Delete PVC for vmstorage server
+      when:
+        - delete_vmstorage_pvc | default(false)
+        - pm_monitoring_enabled | default(true) | bool
+      include_role:
+        name: victoria-metrics
+        tasks_from: delete-pvc
+
+- name: Rotate PM server client cert for ETCD
+  hosts: master[0]
+  vars:
+     etcd_ca_host: "{{ groups.etcd.0 }}"
+  tasks:
+    - include_role:
+        name: victoria-metrics
+        tasks_from: rotate-etcd-certs
+      when:
+        - pm_monitoring_enabled | default(true) | bool
+
+- import_playbook: director-monitoring.yml
+  when:
+    - pm_monitoring_enabled | default(true) | bool
+
+- name: Create/Update ingress victoria metrics select tls secrets
+  hosts: master[0]
+  become: yes
+  vars:
+    tls_hostname: "{{ pm_vmselect_ingress_hostname | default('vmselect.eccd.local') }}"
+    tls_secret:  "eric-victoria-metrics-vmselect-ingress-tls"
+    tls_cert: "{{ pm_vmselect_ingress_cert | default('') }}"
+    tls_key:  "{{ pm_vmselect_ingress_key | default('') }}"
+  tasks:
+    - name: Create/Update tls secrets for Victoria Metrics vmselect ingress rule
+      include_role:
+        name: eric-pm-utils
+        tasks_from: create-tls-secret
+      when:
+        - pm_vmselect_ingress_enabled | default(false) | bool
+        - pm_monitoring_enabled | default(true) | bool
+
+- name: Create/Update local registry secret for victoria metrics
+  hosts: master[0]
+  become: yes
+  tasks:
+    - name: Create/Update victoria metrics secret for accessing local registry
+      shell: |
+        {{ kubectl }} create secret docker-registry local-registry-secret \
+        --docker-server={{ 'registry.eccd.local:5000' if local_registry_user is defined and local_registry_user != "" else 'null.eccd.local' }} \
+        --docker-username={{ local_registry_user if local_registry_user is defined and local_registry_user != "" else 'null' }} \
+        --docker-password={{ local_registry_password if local_registry_password is defined and local_registry_password != "" else 'nopassword' }} -n monitoring \
+        --dry-run=client -o yaml | {{ kubectl }} apply -f -
+      register: result
+      become: true
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: result.rc == 0
+      ignore_errors: True
+      when:
+        - pm_vmselect_ingress_enabled | default(false) | bool
+        - pm_monitoring_enabled | default(true) | bool
+
+- name: Upgrade Victoria Metrics Cluster Performance Management Server (Helm chart)
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+    - name: Set node selector if pm_victoria_metrics_schedule_in_masternode
+      set_fact:
+        nodeSelector: { "node-role.kubernetes.io/master" : "" }
+      when: pm_victoria_metrics_schedule_in_masternode | default(false) | bool
+    - name: Set node selector if pm_victoria_metrics_schedule_in_masternode
+      set_fact:
+        nodeSelector: {}
+      when: not pm_victoria_metrics_schedule_in_masternode | default(false) | bool
+    - name: Set tolerations if pm_victoria_metrics_schedule_in_masternode
+      set_fact:
+        tolerations:
+          - key: node-role.kubernetes.io/master
+            effect: NoSchedule
+      when: pm_victoria_metrics_schedule_in_masternode | default(false) | bool
+    - name: Set tolerations if pm_victoria_metrics_schedule_in_masternode
+      set_fact:
+        tolerations: []
+      when: not pm_victoria_metrics_schedule_in_masternode | default(false) | bool
+  vars:
+    - tarball_name: "{{ helm_charts.eric_victoria_metrics_cluster.name + '-' + helm_charts.eric_victoria_metrics_cluster.version + '.tgz' }}"
+    - vmselect_cpu_request: "{{ pm_vmselect_cpu_requests | default('50m') }}"
+    - vmselect_cpu_limit: "{{ pm_vmselect_cpu_limit | default('500m') }}"
+    - vmselect_mem_request: "{{ pm_vmselect_memory_requests | default('64Mi') }}"
+    - vmselect_mem_limit: "{{ pm_vmselect_memory_limit | default('256Mi') }}"
+    - vmselect_ephemeral_storage_request: "{{ pm_vmselect_ephemeral_storage_requests | default('512Mi') }}"
+    - vmselect_ephemeral_storage_limit: "{{ pm_vmselect_ephemeral_storage_limit | default('8Gi') }}"
+    - vmselect_ha_enabled : "{{ pm_vmselect_ha_enabled | default(true) | bool }}"
+    - vmselect_replica_count: "{{ 2 if vmselect_ha_enabled == true else 1 }}"
+    - vmselect_ingress_enabled : "{{ pm_vmselect_ingress_enabled | default(false) | bool }}"
+    - vmselect_ingress_hostname : "{{ pm_vmselect_ingress_hostname | default('vmselect.eccd.local') }}"
+    - vminsert_cpu_request: "{{ pm_vminsert_cpu_requests | default('50m') }}"
+    - vminsert_cpu_limit: "{{ pm_vminsert_cpu_limit | default('500m') }}"
+    - vminsert_mem_request: "{{ pm_vminsert_memory_requests | default('64Mi') }}"
+    - vminsert_mem_limit: "{{ pm_vminsert_memory_limit | default('512Mi') }}"
+    - vminsert_ha_enabled : "{{ pm_vminsert_ha_enabled | default(true) | bool }}"
+    - vminsert_replica_count: "{{ 2 if vminsert_ha_enabled == true else 1 }}"
+    - vmstorage_storage_class: "{{ pm_vmstorage_volume_storage_class | default('network-block') }}"
+    - vmstorage_volume_size: "{{ pm_vmstorage_volume_size | default('8Gi') }}"
+    - vmstorage_retention_time: "{{ pm_vmstorage_retention_time | default('15d') }}"
+    - vmstorage_cpu_request: "{{ pm_vmstorage_cpu_requests | default('500m') }}"
+    - vmstorage_cpu_limit: "{{ pm_vmstorage_cpu_limit | default('2') }}"
+    - vmstorage_mem_request: "{{ pm_vmstorage_memory_requests | default('512Mi') }}"
+    - vmstorage_mem_limit: "{{ pm_vmstorage_memory_limit | default('2Gi') }}"
+    - vmstorage_ha_enabled : "{{ pm_vmstorage_ha_enabled | default(true) | bool }}"
+    - vmstorage_replica_count: "{{ 2 if vmstorage_ha_enabled == true else 1 }}"
+    - scrape_interval: "{{ pm_vmagent_scrape_interval | default('30s') }}"
+  roles:
+    - erikube-defaults
+    - role: helm-chart-provisioner
+      when:
+        - pm_monitoring_enabled | default(true) | bool
+      vars:
+        - chart_name: "{{ helm_charts.eric_victoria_metrics_cluster.name }}"
+        - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '1200s' }}"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - kube_namespace: "monitoring"
+        - state: update-installed
+        - values:
+           global:
+             registry:
+               url: "{{ kube_image_prefix | regex_replace('\\/$', '') }}"
+           imagePullSecrets:
+             - name: local-registry-secret
+           vmselect:
+             image:
+               repository: "{{ kube_image_prefix }}{{ containers.monitoring.vmselect.split(':')[0] }}"
+               tag: "{{ containers.monitoring.vmselect.split(':')[1] }}"
+             nodeSelector: "{{ nodeSelector }}"
+             tolerations: "{{ tolerations }}"
+             strategy:
+               rollingUpdate:
+                 maxUnavailable: 1
+             replicaCount: "{{ vmselect_replica_count }}"
+             affinity:
+               podAntiAffinity:
+                 requiredDuringSchedulingIgnoredDuringExecution:
+                 - labelSelector:
+                     matchExpressions:
+                     - key: "app"
+                       operator: In
+                       values:
+                       - vmselect
+                   topologyKey: "kubernetes.io/hostname"
+             resources:
+               limits:
+                 cpu: "{{ vmselect_cpu_limit }}"
+                 memory: "{{ vmselect_mem_limit }}"
+                 ephemeral-storage: "{{ vmselect_ephemeral_storage_limit }}"
+               requests:
+                 cpu: "{{ vmselect_cpu_request }}"
+                 memory: "{{ vmselect_mem_request }}"
+                 ephemeral-storage: "{{ vmselect_ephemeral_storage_request }}"
+             service:
+               annotations:
+                 prometheus.io/scrape: "true"
+                 prometheus.io/port: "8481"
+             extraArgs:
+               dedup.minScrapeInterval: "{{ scrape_interval }}"
+             ingress:
+               enabled: "{{ vmselect_ingress_enabled }}"
+               hosts:
+                 - name: "{{ vmselect_ingress_hostname }}"
+                   path: "/select"
+               tls:
+                 - secretName: "eric-victoria-metrics-vmselect-ingress-tls"
+                   hosts:
+                     - "{{ vmselect_ingress_hostname  }}"
+             rbac:
+               pspEnabled: false
+             securityContext:
+               runAsUser: 207620
+               runAsGroup: 207620
+               runAsNonRoot: true
+               fsGroup: 207620
+           vminsert:
+             image:
+               repository: "{{ kube_image_prefix }}{{ containers.monitoring.vminsert.split(':')[0] }}"
+               tag: "{{ containers.monitoring.vminsert.split(':')[1] }}"
+             priorityClassName: "system-cluster-critical"
+             nodeSelector: "{{ nodeSelector }}"
+             tolerations: "{{ tolerations }}"
+             strategy:
+               rollingUpdate:
+                 maxUnavailable: 1
+             replicaCount: "{{ vminsert_replica_count }}"
+             affinity:
+               podAntiAffinity:
+                 requiredDuringSchedulingIgnoredDuringExecution:
+                 - labelSelector:
+                     matchExpressions:
+                     - key: "app"
+                       operator: In
+                       values:
+                       - vminsert
+                   topologyKey: "kubernetes.io/hostname"
+             resources:
+               limits:
+                 cpu: "{{ vminsert_cpu_limit }}"
+                 memory: "{{ vminsert_mem_limit }}"
+               requests:
+                 cpu: "{{ vminsert_cpu_request }}"
+                 memory: "{{ vminsert_mem_request }}"
+             service:
+               annotations:
+                 prometheus.io/scrape: "true"
+                 prometheus.io/port: "8480"
+             extraArgs:
+               maxLabelsPerTimeseries: 100
+               replicationFactor: "{{ vmstorage_replica_count }}"
+             rbac:
+               pspEnabled: false
+             securityContext:
+               runAsUser: 292658
+               runAsGroup: 292658
+               runAsNonRoot: true
+               fsGroup: 292658
+           vmstorage:
+             image:
+               repository: "{{ kube_image_prefix }}{{ containers.monitoring.vmstorage.split(':')[0] }}"
+               tag: "{{ containers.monitoring.vmstorage.split(':')[1] }}"
+             priorityClassName: "system-cluster-critical"
+             retentionPeriod: "{{ vmstorage_retention_time }}"
+             nodeSelector: "{{ nodeSelector }}"
+             tolerations: "{{ tolerations }}"
+             replicaCount: "{{ vmstorage_replica_count }}"
+             affinity:
+               podAntiAffinity:
+                 requiredDuringSchedulingIgnoredDuringExecution:
+                 - labelSelector:
+                     matchExpressions:
+                     - key: "app"
+                       operator: In
+                       values:
+                       - vmstorage
+                   topologyKey: "kubernetes.io/hostname"
+             persistentVolume:
+               storageClass: "{{ vmstorage_storage_class }}"
+               size: "{{ vmstorage_volume_size }}"
+             resources:
+               limits:
+                 cpu: "{{ vmstorage_cpu_limit }}"
+                 memory: "{{ vmstorage_mem_limit }}"
+               requests:
+                 cpu: "{{ vmstorage_cpu_request }}"
+                 memory: "{{ vmstorage_mem_request }}"
+             service:
+               annotations:
+                 prometheus.io/scrape: "true"
+                 prometheus.io/port: "8482"
+             extraArgs:
+               dedup.minScrapeInterval: "{{ scrape_interval }}"
+             rbac:
+               pspEnabled: false
+             securityContext:
+               runAsUser: 217082
+               runAsGroup: 217082
+               runAsNonRoot: true
+               fsGroup: 217082
+
+- name: Delete PVC for 2nd vmselect if HA disabled
+  hosts: master[0]
+  become: yes
+  ignore_errors: True
+  vars:
+    - pvc_names: "{{ [ 'vmstorage-volume-eric-victoria-metrics-cluster-vmstorage-1'] }}"
+    - kube_namespace: "monitoring"
+  tasks:
+    - name: Delete PVC for 2nd vmselect instance if HA disabled
+      include_role:
+        name: victoria-metrics
+        tasks_from: delete-pvc
+      when:
+        - pm_monitoring_enabled | default(true) | bool
+        - not (pm_vmstorage_ha_enabled | default(true) | bool)
+
+- name: Upgrade Victoria Metrics vmAgent (Helm chart)
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+    - name: Set node selector if pm_victoria_metrics_schedule_in_masternode
+      set_fact:
+        nodeSelector: { "node-role.kubernetes.io/master" : "" }
+      when: pm_victoria_metrics_schedule_in_masternode | default(false) | bool
+    - name: Set node selector if pm_victoria_metrics_schedule_in_masternode
+      set_fact:
+        nodeSelector: {}
+      when: not pm_victoria_metrics_schedule_in_masternode | default(false) | bool
+    - name: Set tolerations if pm_victoria_metrics_schedule_in_masternode
+      set_fact:
+        tolerations:
+          - key: node-role.kubernetes.io/master
+            effect: NoSchedule
+      when: pm_victoria_metrics_schedule_in_masternode | default(false) | bool
+    - name: Set tolerations if pm_victoria_metrics_schedule_in_masternode
+      set_fact:
+        tolerations: []
+      when: not pm_victoria_metrics_schedule_in_masternode | default(false) | bool
+  vars:
+    - tarball_name: "{{ helm_charts.eric_victoria_metrics_agent.name + '-' + helm_charts.eric_victoria_metrics_agent.version + '.tgz' }}"
+    - vmagent_cpu_request: "{{ pm_vmagent_cpu_requests | default('100m') }}"
+    - vmagent_cpu_limit: "{{ pm_vmagent_cpu_limit | default('1') }}"
+    - vmagent_mem_request: "{{ pm_vmagent_memory_requests | default('128Mi') }}"
+    - vmagent_mem_limit: "{{ pm_vmagent_memory_limit | default('256Mi') }}"
+    - vmagent_ha_enabled : "{{ pm_vmagent_ha_enabled | default(true) | bool }}"
+    - vmagent_replica_count: "{{ 2 if vmagent_ha_enabled == true else 1 }}"
+    - vmagent_remotewrite: "{{ 'http://' + helm_charts.eric_victoria_metrics_cluster.name + '-vminsert.monitoring.svc.' + kubelet_domain + ':8480/insert/0/prometheus' }}"
+    - vmagent_maxscrape_size: "{{ pm_vmagent_maxscrape_size | default('128MB') }}"
+    - vmagent_maxdisk_size: "{{ pm_vmagent_maxdisk_size | default('5GB') }}"
+  roles:
+    - erikube-defaults
+    - role: helm-chart-provisioner
+      when:
+        - pm_monitoring_enabled | default(true) | bool
+      vars:
+        - chart_name: "{{ helm_charts.eric_victoria_metrics_agent.name }}"
+        - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '1200s' }}"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - kube_namespace: "monitoring"
+        - state: update-installed
+        - values:
+           global:
+             registry:
+               url: "{{ kube_image_prefix | regex_replace('\\/$', '') }}"
+           image:
+             repository: "{{ kube_image_prefix }}{{ containers.monitoring.vmagent.split(':')[0] }}"
+             tag: "{{ containers.monitoring.vmagent.split(':')[1] }}"
+           priorityClassName: "system-cluster-critical"
+           nodeSelector: "{{ nodeSelector }}"
+           tolerations: "{{ tolerations }}"
+           imagePullSecrets:
+             - name: local-registry-secret
+           replicaCount: "{{ vmagent_replica_count }}"
+           deployment:
+             strategy:
+               rollingUpdate:
+                 maxUnavailable: 1
+           remoteWriteUrls:
+             - "{{ vmagent_remotewrite }}"
+           affinity:
+             podAntiAffinity:
+               requiredDuringSchedulingIgnoredDuringExecution:
+               - labelSelector:
+                   matchExpressions:
+                   - key: "app.kubernetes.io/name"
+                     operator: In
+                     values:
+                     - eric-victoria-metrics-agent
+                 topologyKey: "kubernetes.io/hostname"
+           configMap: eric-victoria-metrics-vmagent
+           rbac:
+             pspEnabled: false
+           resources:
+             limits:
+               cpu: "{{ vmagent_cpu_limit }}"
+               memory: "{{ vmagent_mem_limit }}"
+             requests:
+               cpu: "{{ vmagent_cpu_request }}"
+               memory: "{{ vmagent_mem_request }}"
+           extraArgs:
+             promscrape.maxScrapeSize: "{{ vmagent_maxscrape_size }}"
+             remoteWrite.maxDiskUsagePerURL: "{{ vmagent_maxdisk_size }}"
+           extraVolumes:
+             - name: etcd-certs
+               secret:
+                 defaultMode: 420
+                 secretName: etcd-certs
+           extraVolumeMounts:
+             - name: etcd-certs
+               mountPath: /var/run/secrets/etcd/client
+               readOnly: true
+           extraContainers:
+             - name: vmagent-config-reload
+               image: "{{ kube_image_prefix }}{{ containers.monitoring.configmap_reload.split(':')[0] }}:{{ containers.monitoring.configmap_reload.split(':')[1] }}"
+               imagePullPolicy: IfNotPresent
+               args:
+                 - --volume-dir=/config
+                 - --webhook-url=http://localhost:8429/-/reload
+               volumeMounts:
+                 - name: config
+                   mountPath: /config
+                   readOnly: true
+           podSecurityContext:
+             runAsUser: 236650
+             runAsGroup: 236650
+             runAsNonRoot: true
+             fsGroup: 236650
+
+- name: Upgrade Victoria Metrics vmAlert (Helm chart)
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+    - name: Set node selector if pm_victoria_metrics_schedule_in_masternode
+      set_fact:
+        nodeSelector: { "node-role.kubernetes.io/master" : "" }
+      when: pm_victoria_metrics_schedule_in_masternode | default(false) | bool
+    - name: Set node selector if pm_victoria_metrics_schedule_in_masternode
+      set_fact:
+        nodeSelector: {}
+      when: not pm_victoria_metrics_schedule_in_masternode | default(false) | bool
+    - name: Set tolerations if pm_victoria_metrics_schedule_in_masternode
+      set_fact:
+        tolerations:
+          - key: node-role.kubernetes.io/master
+            effect: NoSchedule
+      when: pm_victoria_metrics_schedule_in_masternode | default(false) | bool
+    - name: Set tolerations if pm_victoria_metrics_schedule_in_masternode
+      set_fact:
+        tolerations: []
+      when: not pm_victoria_metrics_schedule_in_masternode | default(false) | bool
+  vars:
+    - tarball_name: "{{ helm_charts.eric_victoria_metrics_alert.name + '-' + helm_charts.eric_victoria_metrics_alert.version + '.tgz' }}"
+    - ccd_stack_name: "{{ heat_stack_name | default('kubernetes') }}"
+    - vmalert_cpu_request: "{{ pm_vmalert_cpu_requests | default('100m') }}"
+    - vmalert_cpu_limit: "{{ pm_vmalert_cpu_limit | default('100m') }}"
+    - vmalert_mem_request: "{{ pm_vmalert_memory_requests | default('128Mi') }}"
+    - vmalert_mem_limit: "{{ pm_vmalert_memory_limit | default('128Mi') }}"
+    - vmalert_ha_enabled : "{{ pm_vmalert_ha_enabled | default(true) | bool }}"
+    - vmalert_replica_count: "{{ 2 if vmalert_ha_enabled == true else 1 }}"
+    - vmalert_remoteread: "{{ 'http://' + helm_charts.eric_victoria_metrics_cluster.name + '-vmselect.monitoring.svc.' + kubelet_domain + ':8481/select/0/prometheus' }}"
+    - vmalert_remotewrite: "{{ 'http://' + helm_charts.eric_victoria_metrics_cluster.name + '-vminsert.monitoring.svc.' + kubelet_domain + ':8480/insert/0/prometheus' }}"
+  roles:
+    - erikube-defaults
+    - role: helm-chart-provisioner
+      when:
+        - pm_monitoring_enabled | default(true) | bool
+      vars:
+        - chart_name: "{{ helm_charts.eric_victoria_metrics_alert.name }}"
+        - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '1200s' }}"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - kube_namespace: "monitoring"
+        - state: update-installed
+        - values:
+           global:
+             registry:
+               url: "{{ kube_image_prefix | regex_replace('\\/$', '') }}"
+           server:
+             image:
+               repository: "{{ kube_image_prefix }}{{ containers.monitoring.vmalert.split(':')[0] }}"
+               tag: "{{ containers.monitoring.vmalert.split(':')[1] }}"
+             priorityClassName: "system-cluster-critical"
+             nodeSelector: "{{ nodeSelector }}"
+             tolerations: "{{ tolerations }}"
+             imagePullSecrets:
+               - name: local-registry-secret
+             strategy:
+               rollingUpdate:
+                 maxUnavailable: 1
+             replicaCount: "{{ vmalert_replica_count }}"
+             datasource:
+               url: "{{ vmalert_remoteread }}"
+             remote:
+               write:
+                 url: "{{ vmalert_remotewrite }}"
+               read:
+                 url: "{{ vmalert_remoteread }}"
+             notifier:
+               alertmanager:
+                 url: "http://eric-pm-alertmanager.monitoring.svc.{{ kubelet_domain }}:9093"
+             affinity:
+               podAntiAffinity:
+                 requiredDuringSchedulingIgnoredDuringExecution:
+                 - labelSelector:
+                     matchExpressions:
+                     - key: "app.kubernetes.io/name"
+                       operator: In
+                       values:
+                       - eric-victoria-metrics-alert
+                   topologyKey: "kubernetes.io/hostname"
+             configMap: eric-victoria-metrics-vmalert
+             rbac:
+               pspEnabled: false
+             resources:
+               limits:
+                 cpu: "{{ vmalert_cpu_limit }}"
+                 memory: "{{ vmalert_mem_limit }}"
+               requests:
+                 cpu: "{{ vmalert_cpu_request }}"
+                 memory: "{{ vmalert_mem_request }}"
+             extraContainers:
+               - name: vmalert-config-reload
+                 image: "{{ kube_image_prefix }}{{ containers.monitoring.configmap_reload.split(':')[0] }}:{{ containers.monitoring.configmap_reload.split(':')[1] }}"
+                 imagePullPolicy: IfNotPresent
+                 args:
+                   - --volume-dir=/config
+                   - --webhook-url=http://localhost:8880/-/reload
+                 volumeMounts:
+                   - name: alerts-config
+                     mountPath: /config
+                     readOnly: true
+             service:
+               annotations:
+                 prometheus.io/scrape: "true"
+                 prometheus.io/port: "8880"
+             extraArgs:
+               external.label: cluster={{ ccd_stack_name }}
+             securityContext:
+               runAsUser: 181913
+               runAsGroup: 181913
+               runAsNonRoot: true
+               fsGroup: 181913
+
+- name: Delete ingress victoria-metrics vmselect tls secrets
+  hosts: master[0]
+  become: yes
+  vars:
+    tls_secret:  "eric-victoria-metrics-vmselect-ingress-tls"
+  tasks:
+    - name: Delete tls secrets used for victoria-metrics vmselect ingress rule if exists
+      include_role:
+        name: eric-pm-utils
+        tasks_from: delete-tls-secret
+      when:
+        - pm_monitoring_enabled | default(true) | bool
+        - not(pm_vmselect_ingress_enabled | default(false) | bool)

@@ -1,0 +1,56 @@
+---
+
+# The tasks in this file are required when changing the kube api server endpoint
+
+- name: Update admin.conf with own IP for API Server
+  lineinfile:
+    path: "/etc/kubernetes/admin.conf"
+    regexp: '(\s+)server:\s+https://.*'
+    line: '\1server: https://{{ kube_apiserver_fqdn }}:{{ kube_apiserver_port }}'
+    backrefs: yes
+  become: true
+
+- name: Update controller-manager.conf with nodelocal for API Server
+  lineinfile:
+    path: "/etc/kubernetes/controller-manager.conf"
+    regexp: '(\s+)server:\s+https://.*'
+    line: '\1server: https://{{ kube_apiserver_fqdn }}:{{ kube_apiserver_port }}'
+    backrefs: yes
+  become: true
+
+- name: Update scheduler.conf with nodelocal for API Server
+  lineinfile:
+    path: "/etc/kubernetes/scheduler.conf"
+    regexp: '(\s+)server:\s+https://.*'
+    line: '\1server: https://{{ kube_apiserver_fqdn }}:{{ kube_apiserver_port }}'
+    backrefs: yes
+  become: true
+
+- name: Update kubelet.conf with nodelocal for API Server
+  lineinfile:
+    path: "/etc/kubernetes/kubelet.conf"
+    regexp: '(\s+)server:\s+https://.*'
+    line: '\1server: https://{{ kube_apiserver_fqdn }}:{{ kube_apiserver_port }}'
+    backrefs: yes
+  become: true
+
+- name: Update kubeadm-config.yaml with nodelocal for API Server
+  lineinfile:
+    path: "/etc/kubernetes/kubeadm-config.yaml"
+    regexp: 'controlPlaneEndpoint:\s+.*'
+    line: 'controlPlaneEndpoint: {{ kube_apiserver_fqdn }}:{{ kube_apiserver_port }}'
+    backrefs: yes
+  become: true
+
+- name: Check if HOME/.kube/config is present
+  stat:
+    path: "{{ ansible_env.HOME }}/.kube/config"
+  register: local_kube_conf
+
+- name: Update ~/.kube/config with own IP for API Server
+  lineinfile:
+    path: "{{ ansible_env.HOME }}/.kube/config"
+    regexp: '(\s+)server:\s+https://.*'
+    line: '\1server: https://{{ kube_apiserver_fqdn }}:{{ kube_apiserver_port }}'
+    backrefs: yes
+  when: local_kube_conf.stat.exists

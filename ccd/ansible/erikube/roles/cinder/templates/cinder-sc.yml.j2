@@ -1,0 +1,56 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+    name: {{ openstack_sc_name }}
+{% if (openstack_sc_is_default ~ '').lower() == "true" %}
+    annotations:
+        storageclass.kubernetes.io/is-default-class: "true"
+{% endif %}
+provisioner: cinder.csi.openstack.org
+parameters:
+    csi.storage.k8s.io/fstype: ext4
+{% if openstack_sc_az != "" %}
+    availability: {{ openstack_sc_az }}
+{% endif %}
+{% if openstack_sc_type != "" %}
+    type: {{ openstack_sc_type }}
+{% endif %}
+{% if (openstack_sc_allow_expansion ~ '').lower() == "true" %}
+allowVolumeExpansion: true
+{% endif %}
+
+{% for sc in openstack_cinder_storage_classes | default([]) %}
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+    name: {{ sc.name }}
+{% if ( sc.default | default(false) | bool ) %}
+    annotations:
+        storageclass.kubernetes.io/is-default-class: "true"
+{% endif %}
+provisioner: cinder.csi.openstack.org
+parameters:
+    csi.storage.k8s.io/fstype: ext4
+{% if (sc.availability_zone | default("")) != "" %}
+    availability: {{ sc.availability_zone }}
+{% endif %}
+{% if (sc.type | default("")) != "" %}
+    type: {{ sc.type }}
+{% endif %}
+{% if ( sc.allow_expansion | default(false) ) %}
+allowVolumeExpansion: true
+{% endif %}
+{% if (sc.selectors | default([]) | length) > 0 %}
+volumeBindingMode: WaitForFirstConsumer
+allowedTopologies:
+- matchLabelExpressions:
+{% for k8s_selector in sc.selectors %}
+  - key: {{ k8s_selector.key }}
+    values:
+{% for selector_value in k8s_selector.get("values") %}
+    - {{ selector_value }}
+{% endfor %}
+{% endfor %}
+{% endif %}
+{% endfor %}

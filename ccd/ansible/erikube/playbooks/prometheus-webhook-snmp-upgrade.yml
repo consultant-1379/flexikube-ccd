@@ -1,0 +1,2 @@
+---
+- import_playbook: prometheus-webhook-snmp-deploy.yml

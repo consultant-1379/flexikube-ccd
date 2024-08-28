@@ -1,0 +1,47 @@
+---
+- name: Gather facts as non root
+  hosts: all
+  gather_facts: yes
+
+- import_playbook: playbooks/isp-upgrade-start.yml
+
+ # This workaround is needed once more for the certs on the first upgraded master
+- import_playbook: playbooks/kubelet-server-cert.yml
+
+# Upgrade all applications of ECCD running on top of k8s
+- import_playbook: playbooks/kube-api-vip-upgrade.yml
+- import_playbook: playbooks/openstack-cloud-provider-upgrade.yml
+- import_playbook: playbooks/network-upgrade.yml
+- import_playbook: playbooks/nat64-upgrade.yml
+- import_playbook: playbooks/dns64-upgrade.yml
+- import_playbook: playbooks/ingress-lb-upgrade.yml
+- import_playbook: playbooks/cinder.yml
+- import_playbook: playbooks/manila.yml
+- import_playbook: playbooks/ecfe-upgrade.yml
+- import_playbook: playbooks/ingressctrl-upgrade.yml
+- import_playbook: playbooks/object-storage-mn-upgrade.yml
+- import_playbook: playbooks/cr-registry-upgrade.yml
+- import_playbook: playbooks/prometheus-webhook-snmp-upgrade.yml
+- import_playbook: playbooks/eric-pm-3pp-upgrade.yml
+- import_playbook: playbooks/victoria-metrics-pm-upgrade.yml
+- import_playbook: playbooks/eric-pmbr-upgrade.yml
+- import_playbook: playbooks/set-audit-log-level.yml
+- import_playbook: playbooks/license-management-upgrade.yml
+- import_playbook: playbooks/sriov-network-device-plugin-upgrade.yml
+- import_playbook: playbooks/metrics-server-upgrade.yml
+- import_playbook: playbooks/network-resources-injector-upgrade.yml
+- import_playbook: playbooks/fluent-bit-upgrade.yml
+- import_playbook: playbooks/fluentd-upgrade.yml
+- import_playbook: playbooks/subport-manager-controller-upgrade.yaml
+- import_playbook: playbooks/dex-upgrade.yml
+  when: dex_enabled is defined and dex_enabled and auth_client_enabled is defined and auth_client_enabled
+- import_playbook: playbooks/authclient-upgrade.yml
+  when: dex_enabled is defined and dex_enabled and auth_client_enabled is defined and auth_client_enabled
+- import_playbook: playbooks/isp-logger-deploy.yml
+- import_playbook: playbooks/calicoctl-upgrade.yml
+- import_playbook: playbooks/isp-upgrade-end.yml
+- import_playbook: playbooks/helm2-purge.yml
+# Create PSS rule directory and files
+- import_playbook: playbooks/kube-pss-upgrade.yml
+- import_playbook: playbooks/node-problem-detector-upgrade.yml
+  when: node_problem_detector_enabled | default(false) | bool

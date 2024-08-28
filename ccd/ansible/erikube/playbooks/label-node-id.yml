@@ -1,0 +1,81 @@
+---
+# This playbook gets the machine ID for all master and worker nodes
+# And adds it as a label to its kubernetes node.
+# It can be run standalone, no dependencies on other playbooks or roles.
+# It will overwrite the labels already present, so it can be used
+# for upgrades.
+
+# The order to find out the id is:
+# - cloud-init (typically OpenStack provisioned nodes)
+# - DMI data (Both OpenStack and Azure provide this)
+# - FreeDesktop.org machine id (for baremetal)
+# The first will be used
+
+- name: Get machine IDs from all nodes
+  hosts: [master, worker]
+  roles:
+  - erikube-defaults
+  vars:
+    kubectl: "/usr/local/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf"
+  tasks:
+  - name: OpenStack node ID from cloud-init
+    block:
+    - name: Get instance-id from cloud-init
+      command: cloud-init query instance_id
+      register: cloud_init_output
+      ignore_errors: true
+    - name: Register OpenStack instance_id
+      set_fact:
+        machine_id: "{{ cloud_init_output.stdout }}"
+        machine_id_source: "cloud-init"
+      when:
+        - cloud_init_output.rc == 0
+        - cloud_init_output != ""
+
+  - name: Read from DMI data
+    block:
+    - name: Get instance-id from DMI BIOS data
+      shell: dmidecode --string system-uuid
+      register: dmi_output
+      become: true
+      ignore_errors: true
+    - name: Register DMI instance-id
+      set_fact:
+        machine_id: "{{ dmi_output.stdout }}"
+        machine_id_source: "dmi"
+      when:
+        - dmi_output is defined
+        - dmi_output.stdout is defined
+        - dmi_output.stdout != ""
+    when: machine_id is not defined
+
+  - name: FreeDesktop.org's machine ID
+    block:
+    - name: Read machine ID from remote machine
+      slurp:
+        src: /etc/machine-id
+      register: fdorg_output
+      ignore_errors: true
+    - name:
+      set_fact:
+        machine_id: "{{ fdorg_output['content'] | b64decode | trim}}"
+        machine_id_source: "/etc/machine-id"
+      when:
+        - fdorg_output is defined
+    when: machine_id is not defined
+
+  - debug:
+      var: machine_id
+  - debug:
+      var: machine_id_source
+
+  - name: Add labels to Kubernetes
+    shell: >-
+      {{ kubectl }} label nodes {{ansible_nodename}} --overwrite
+      node.uuid={{machine_id}} node.uuid_source={{machine_id_source}}
+    delegate_to: "{{ groups.master.0 }}"
+    register: label_nodes
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: label_nodes.rc == 0
+    become: true

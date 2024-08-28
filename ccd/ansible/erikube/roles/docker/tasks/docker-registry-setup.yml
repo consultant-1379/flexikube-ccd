@@ -1,0 +1,36 @@
+---
+# Setup trust of private docker registry
+
+- name: Add CN (hostname) to IP translation for registry
+  lineinfile:
+    path: /etc/hosts
+    regexp: '^{{ docker_registry_ip }} {{ docker_registry_cn }}'
+    line: '{{ docker_registry_ip }} {{ docker_registry_cn }}'
+    state: present
+
+- name: Create Docker registry certificates configuration directory
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ file_default_owner }}"
+    group: "{{ file_default_group }}"
+    mode: "{{ file_default_mode }}"
+  with_items:
+    - "/etc/docker/certs.d/{{ docker_registry_cn }}"
+    - "{{ ca_certs_path }}"
+
+- name: Install certs for trust of registry
+  register: addkeys
+  copy:
+    src: '{{ docker_registry_cert }}'
+    dest: "{{ item }}"
+    owner: "{{ file_default_owner }}"
+    group: "{{ file_default_group }}"
+    mode: "{{ file_default_mode }}"
+  with_items:
+    - "/etc/docker/certs.d/{{ docker_registry_cn }}/docker-registry.crt"
+    - "{{ ca_certs_path }}/{{ docker_registry_cn }}.crt"
+
+- name: Update CA trust
+  shell: "{{ ca_cert_update_cmd }}"
+  become: yes

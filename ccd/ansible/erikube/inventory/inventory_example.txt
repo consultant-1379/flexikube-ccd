@@ -1,0 +1,22 @@
+# Example inventory for erikube
+
+node1 ansible_host=192.168.122.221
+node2 ansible_host=192.168.122.222
+node3 ansible_host=192.168.122.223
+node4 ansible_host=192.168.122.224
+
+[etcd]
+node1
+node2
+node3
+
+[master]
+node1
+
+[worker]
+node2
+node3
+node4
+
+[ingress_lb]
+lb ansible_host=192.168.122.220 lb_external_ip=137.58.230.122 lb_internal_ip=192.168.122.220

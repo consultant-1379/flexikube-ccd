@@ -1,0 +1,78 @@
+---
+- name: Slurp (fetch) CA certs
+  slurp:
+    src: "{{ item }}"
+  with_items:
+    - "{{ etcd_ca_cert }}"
+    - "{{ etcd_ca_key }}"
+  register: etcd_certs
+  delegate_to: "{{ etcd_ca_host }}"
+  run_once: true
+
+- name: Copy CA certs
+  copy:
+    dest: "{{ item.item }}"
+    content: "{{ item.content | b64decode }}"
+    owner: root
+    group: root
+    mode: 0700
+  no_log: true
+  with_items: "{{ etcd_certs.results }}"
+  when: inventory_hostname != etcd_ca_host
+
+- name: Create server CSR
+  command: >
+    openssl req -new -config {{ etcd_openssl_conf }}
+      -keyout {{ etcd_key_file }}
+      -out {{ etcd_csr_file }}
+      -reqexts etcd_v3_req -batch -nodes
+      -subj /CN=etcd-{{ etcd_hostname }}
+  args:
+    chdir: "{{ etcd_conf_dir }}"
+  environment:
+    SAN: "{{ etcd_SAN_peers }}"
+  when: true
+
+- name: Sign the server CSR
+  command: >
+    openssl ca -config {{ etcd_openssl_conf }}
+      -in {{ etcd_csr_file }}
+      -out {{ etcd_cert_file }}
+      -extensions etcd_v3_ca_server -batch
+      -create_serial
+  environment:
+    SAN: "{{ etcd_SAN_peers }}"
+
+- name: Create the peer CSR
+  command: >
+    openssl req -new -config {{ etcd_openssl_conf }}
+      -keyout {{ etcd_peer_key_file }}
+      -out {{ etcd_peer_csr_file }}
+      -reqexts etcd_v3_req -batch -nodes
+      -subj /CN={{ etcd_hostname }}
+  args:
+    chdir: "{{ etcd_conf_dir }}"
+  environment:
+    SAN: "{{ etcd_SAN_peers }}"
+
+- name: Sign the peer CSR
+  command: >
+    openssl ca -config {{ etcd_openssl_conf }}
+      -in {{ etcd_peer_csr_file }}
+      -out {{ etcd_peer_cert_file }}
+      -extensions etcd_v3_ca_peer -batch
+      -create_serial
+  environment:
+    SAN: "{{ etcd_SAN_peers }}"
+
+- name: Check if hard link exist to CA cert
+  stat:
+    path: "{{ etcd_peer_ca_file }}"
+  register: ca_cert_peer_link
+
+- name: Create server/peer symlink for CA cert
+  file:
+    src: "{{ etcd_ca_cert }}"
+    dest: "{{ etcd_peer_ca_file }}"
+    state: hard
+  when: not ca_cert_peer_link.stat.exists

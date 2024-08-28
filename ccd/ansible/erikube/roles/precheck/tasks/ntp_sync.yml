@@ -1,0 +1,19 @@
+---
+
+- name: "NTP should be synchronized"
+  shell: timedatectl  | grep 'System clock synchronized'
+  register: synchronized
+  changed_when: false
+  until: "'yes' in synchronized.stdout"
+  retries: 300
+  delay: 2
+  when: (ansible_os_family == 'Debian') or (ansible_os_family == 'Suse')
+
+- name: "NTP should be synchronized"
+  shell: timedatectl  | grep 'NTP synchronized'
+  register: synchronized
+  changed_when: false
+  until: "'yes' in synchronized.stdout"
+  retries: 300
+  delay: 2
+  when: (ansible_os_family != 'Debian') and (ansible_os_family != 'Suse')

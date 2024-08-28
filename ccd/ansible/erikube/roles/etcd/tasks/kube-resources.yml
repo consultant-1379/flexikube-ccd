@@ -1,0 +1,31 @@
+---
+- name: Create namespace
+  command: "{{ kubectl }} create namespace etcd"
+  register: ns_create
+  failed_when: ns_create.rc != 0 and not ns_create.stderr.find("already exists") != -1
+  changed_when: ns_create.rc == 0
+  become: true
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: ns_create.rc == 0
+
+- name: Create manifest
+  template:
+    src: kube-resources.yml.j2
+    dest: /tmp/etcd.yml
+  changed_when: false
+
+- name: Create resources
+  command: "{{ kubectl }} -n etcd apply -f /tmp/etcd.yml"
+  become: true
+  register: apply
+  changed_when: "'created' in apply.stdout"
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: apply.rc == 0
+
+- name: Delete manifest
+  file:
+    name: /tmp/etcd.yml
+    state: absent
+  changed_when: false

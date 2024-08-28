@@ -1,0 +1,128 @@
+---
+- name: Create custom Application System Info Handler swim configmap
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+    - include_vars:
+        file: /etc/eccd/eccd_release_version.ini
+        name: release_version_dict
+      ignore_errors: True
+      when: image_based_deployment | default(false) | bool
+    - include_vars:
+        file: ../../../eccd_release_version.ini
+        name: release_version_dict
+      ignore_errors: True
+      when:  not image_based_deployment | default(false) | bool
+
+  tasks:
+    - name: Create asih configmap
+      include_role:
+        name: adp-asih
+        tasks_from: create-asih-swim-config-map
+      when:
+        - release_version_dict is defined
+
+- name: Upgrade ADP Application System Info Handler
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+
+    - include_vars: ../../common/container-list.json
+
+    - name: "Set adp_asih_nodeSelector to {}"
+      set_fact:
+        adp_asih_nodeselector: {}
+    - name: "Set adp_asih_nodeSelector if infra_node_pool_name is defined"
+      set_fact:
+        adp_asih_nodeselector:
+          node-pool: "{{ infra_node_pool_name }}"
+      when: infra_node_pool_name is defined
+  vars:
+    - tarball_name: "{{ helm_charts.eric_si_application_sys_info_handler.tarball }}"
+    - asih_nels_host_ip: "{{ ccd_app_sys_info_nels_host_ip | default('192.168.20.1') }}"
+    - asih_nels_host_name: "{{ ccd_app_sys_info_nels_host_name | default('test.application.info') }}"
+    - asih_nels_port: "{{ ccd_app_sys_info_nels_port | default(9099) }}"
+    - asih_cpu_limit: "{{ ccd_app_sys_info_cpu_limit | default('100m') }}"
+    - asih_mem_limit: "{{ ccd_app_sys_info_mem_limit | default('100Mi') }}"
+    - asih_cpu_req: "{{ ccd_app_sys_info_cpu_req | default('50m') }}"
+    - asih_mem_req: "{{ ccd_app_sys_info_mem_req | default('50Mi') }}"
+    - asih_applicationId: "{{ heat_stack_name | default('ccd-application') }}"
+    - asih_reportTimeInterval: "{{ ccd_app_sys_info_nels_report_interval | default('12') }}"
+    - asih_nels_tls_enable: "{{ ccd_app_sys_info_nels_tls_enable | default(true) | bool }}"
+    - asih_nels_scheme: "{{ 'https' if asih_nels_tls_enable == true else 'http' }}"
+    - asih_nels_sendReport: "{{ ccd_app_sys_info_nels_sendReport | default(true) }}"
+    - asih_log_level: "{{ ccd_app_sys_info_log_level | default('info') }}"
+    - asih_fetch_infra_info: "{{ ccd_app_sys_info_fetch_infra_info | default(true) }}"
+
+  roles:
+    - role: erikube-defaults
+
+    - role: adp-asih
+
+    - role: helm-chart-provisioner
+      vars:
+        - chart_name: eric-si-application-sys-info-handler
+        - helm_install_timeout: "{{ helm_install_timeout_value if helm_install_timeout_value is defined else '600s' }}"
+        - tarball: "{{ helm_chart_loc }}/{{ tarball_name }}"
+        - state: update-installed
+        - kube_namespace: kube-system
+        - productInfo:
+            images:
+              asih:
+                name: "{{ containers.erikube.eric_si_application_sys_info_handler.split(':')[0] }}"
+                tag: "{{ containers.erikube.eric_si_application_sys_info_handler.split(':')[1] }}"
+                repoPath: ""
+              hooklauncher:
+                name: "{{ containers.erikube.eric_si_application_sys_info_handler_hooklauncher.split(':')[0] }}"
+                tag: "{{ containers.erikube.eric_si_application_sys_info_handler_hooklauncher.split(':')[1] }}"
+                repoPath: ""
+        - values:
+            global:
+              registry:
+                  url: "{{ kube_image_prefix | regex_replace('\\/$', '') }}"
+              security:
+                tls:
+                  enabled: false
+              nodeSelector: "{{ adp_asih_nodeselector }}"
+              ericsson:
+                licensing:
+                  nelsConfiguration:
+                    primary:
+                      ip: "{{ asih_nels_host_ip }}"
+                      hostname: "{{ asih_nels_host_name }}"
+            nameOverride: "eric-app-sys-info-handler"
+            imageCredentials:
+              repoPath: ""
+              pullSecret: "local-registry-secret"
+            podPriority:
+              asih:
+                priorityClassName: "system-cluster-critical"
+            applicationInfoService:
+              port: "{{ asih_nels_port }}"
+              scheme: "{{ asih_nels_scheme }}"
+              sendAppReport: "{{ asih_nels_sendReport }}"
+            asih:
+              applicationId: "{{ asih_applicationId }}"
+              reportTimeInterval: "{{ asih_reportTimeInterval }}"
+              fetchInfrastructureInfo: "{{ asih_fetch_infra_info }}"
+              uploadSwimInformation: false
+            log:
+              level: "{{ asih_log_level }}"
+            appArmorProfile:
+              asih:
+                type: runtime/default
+              hooklauncher:
+                type: runtime/default
+            seccompProfile:
+              asih:
+                type: RuntimeDefault
+              hooklauncher:
+                type: RuntimeDefault
+            resources:
+              eric-si-application-sys-info-handler:
+                limits:
+                  cpu: "{{ asih_cpu_limit }}"
+                  memory: "{{ asih_mem_limit }}"
+                requests:
+                  cpu: "{{ asih_cpu_req }}"
+                  memory: "{{ asih_mem_req }}"

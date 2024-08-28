@@ -1,0 +1,50 @@
+---
+- name: Gather facts as non root
+  hosts: all
+  gather_facts: yes
+
+- name: Configure containerd service file changes
+  hosts: add_master, add_worker, master, worker
+  order: reverse_sorted
+  roles:
+    - erikube-defaults
+  become: yes
+  tasks:
+    - name: Deploy erikube installer for containerd changes
+      include_tasks: "../roles/kube-common/tasks/deploy-erikube-installer.yml"
+
+    - name: Configure containerd
+      include_role:
+        name: containerd
+
+    - name: Configure crictl
+      include_role:
+        name: crictl
+
+    - name: List pod status in configure-containerd-svc after containerd restart
+      command: "{{ kubectl }} get pods -A -o wide"
+      register: podstatus
+      delegate_to: "{{ first_master }}"
+      ignore_errors: true
+
+    - name: Print the pod status after containerd restart
+      debug:
+        msg: "{{ podstatus.stdout_lines }}"
+      ignore_errors: true
+
+    - name: List node status in configure-containerd-svc after containerd restart
+      command: "{{ kubectl }} get nodes -o wide"
+      register: nodestatus
+      delegate_to: "{{ first_master }}"
+      ignore_errors: true
+
+    - name: Print the node status after containerd restart
+      debug:
+        msg: "{{ nodestatus.stdout_lines }}"
+      ignore_errors: true
+
+    - name: Configure nerdctl
+      include_role:
+        name: nerdctl
+
+  serial: 1

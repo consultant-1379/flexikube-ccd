@@ -1,0 +1,18 @@
+---
+- name: Upgrade etcd
+  hosts: etcd
+  become: yes
+  serial: 1
+  tasks:
+    - include_role:
+        name: etcd
+        tasks_from: upgrade
+
+- name: Check etcd version
+  hosts: etcd
+  become: yes
+  vars:
+    container_images_dict:
+      etcd_container: "{{ etcd_image }}"
+  roles:
+    - version_check

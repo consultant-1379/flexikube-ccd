@@ -1,0 +1,106 @@
+kind: DaemonSet
+apiVersion: apps/v1
+metadata:
+  name: openstack-manila-csi-nodeplugin
+  namespace: {{ manila_namespace }}
+  labels:
+    app: openstack-manila-csi
+    component: nodeplugin
+spec:
+  selector:
+    matchLabels:
+      app: openstack-manila-csi
+      component: nodeplugin
+  template:
+    metadata:
+      labels:
+        app: openstack-manila-csi
+        component: nodeplugin
+    spec:
+      serviceAccountName: openstack-manila-csi-nodeplugin
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      imagePullSecrets:
+        - name: local-registry-secret
+      containers:
+        - name: registrar
+          image: {{ driver_registrar_image }}
+          args:
+            - "--csi-address=/csi/csi.sock"
+            - "--kubelet-registration-path={{ manila_csi_kubelet_registration_path }}"
+          lifecycle:
+            preStop:
+              exec:
+                  command: [
+                    "/bin/sh", "-c",
+                    'rm -rf /registration/{{ manila_csi_drivername }}
+                  /registration/{{ manila_csi_drivername }}-reg.sock'
+                  ]
+          env:
+            - name: KUBE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: plugin-dir
+              mountPath: /csi
+            - name: registration-dir
+              mountPath: /registration
+        - name: nodeplugin
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["SYS_ADMIN"]
+            allowPrivilegeEscalation: true
+          image: {{ manila_csi_plugin_image }}
+          command: ["/bin/sh", "-c",
+            '/bin/manila-csi-plugin
+            --nodeid=$(NODE_ID)
+            --endpoint=$(CSI_ENDPOINT)
+            --drivername=$(DRIVER_NAME)
+            --share-protocol-selector=$(MANILA_SHARE_PROTO)
+            --fwdendpoint=$(FWD_CSI_ENDPOINT)'
+          ]
+          env:
+            - name: DRIVER_NAME
+              value: {{ manila_csi_drivername }}
+            - name: NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: CSI_ENDPOINT
+              value: "{{ manila_csi_address }}"
+            - name: FWD_CSI_ENDPOINT
+              value: {{ manila_fwd_csi_endpoint }}
+            - name: MANILA_SHARE_PROTO
+              value: {{ manila_csi_share_protocol }}
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: plugin-dir
+              mountPath: {{ manila_plugin_dir }}
+            - name: fwd-plugin-dir
+              mountPath: {{ manila_csi_fwd_plugin_dir }}
+{% if openstack_ca_cert != "" %}
+            - name: os-cacert
+              mountPath: {{ manila_openstack_ca_cert_path }}
+              readOnly: true
+{% endif %}
+      volumes:
+        - name: registration-dir
+          hostPath:
+            path: {{ manila_csi_registration_dir }}
+            type: Directory
+        - name: plugin-dir
+          hostPath:
+            path: {{ manila_plugin_dir }}
+            type: DirectoryOrCreate
+        - name: fwd-plugin-dir
+          hostPath:
+            path: {{ manila_csi_fwd_plugin_dir }}
+            type: DirectoryOrCreate
+{% if openstack_ca_cert != "" %}
+        - name: os-cacert
+          secret:
+            secretName: openstack-ca-cert
+{% endif %}

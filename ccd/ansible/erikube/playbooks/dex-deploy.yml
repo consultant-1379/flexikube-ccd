@@ -1,0 +1,20 @@
+---
+- name: Deploy dex
+  hosts: master[0]
+  pre_tasks:
+  - include_vars: ../../common/container-list.json
+  vars:
+  - kube_image_prefix: "{{ docker_registry_host | default(default_registry) }}/"
+  - image: "{{ kube_image_prefix }}{{ containers.erikube.dex }}"
+  - dex_image: "{{ dex_ext_image | default(image) }}"
+  - dex_cert_dir: "{{ kube_cert_dir | default('/etc/kubernetes/pki') }}"
+  - dex_action: deploy
+  - dex_cpu_req: "{{ ccd_dex_cpu_req | default('5m') }}"
+  - dex_mem_req: "{{ ccd_dex_mem_req | default('15Mi') }}"
+  - dex_cpu_limit: "{{ ccd_dex_cpu_limit | default('10m') }}"
+  - dex_mem_limit: "{{ ccd_dex_mem_limit | default('30Mi') }}"  
+  roles:
+  - role: erikube-defaults
+    when: dex_enabled is defined and dex_enabled
+  - role: dex
+    when: dex_enabled is defined and dex_enabled

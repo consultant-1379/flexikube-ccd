@@ -1,0 +1,174 @@
+---
+# Scale-out of master nodes should only be done in odd numbers to maintain quorum and reliability of the cluster.
+# Valid :-  Scale-out from 1 to 3 nodes, 3 to 5 nodes etc
+# Invalid :- Scale-out from 1 to 2 nodes, 4 to 5 node
+
+- import_playbook: playbooks/ansible-check.yml
+
+- name: Check if there is new node groups
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  tasks:
+  - fail:
+      msg: >
+        All add-groups are empty! Add add_master, add_worker and/or add_etcd groups
+        to your inventory if you want to scale up the cluster.
+    when:
+      - groups.add_master | default([]) | length < 1
+      - groups.add_worker | default([]) | length < 1
+      - groups.add_etcd | default([]) | length < 1
+
+- name: Check that worker is not in worker or master group
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  tasks:
+  - fail:
+      msg: New worker can not be in master or worker group
+    when: (groups.add_worker | default([]) | intersect(groups.master) | length > 0) or
+          (groups.add_worker | default([]) | intersect(groups.worker) | length > 0)
+
+- name: Gather facts as non root
+  hosts: all
+  roles:
+  - erikube-defaults
+  gather_facts: yes
+
+- import_playbook: playbooks/host-prepare.yml
+  when: prepare_host | default(false) | bool
+  vars:
+    batch_size: 1
+    upgrading: false
+
+- import_playbook: playbooks/configure-containerd-svc.yml
+
+- name: Execute pre-check before scale out new nodes
+  hosts: add_worker, add_master, add_etcd
+  vars:
+    - etcd_hosts: "{{ groups['add_etcd'] | default([]) }}"
+    - master_hosts: "{{ groups['add_master'] | default([]) }}"
+    - worker_hosts: "{{ groups['add_worker'] | default([]) }}"
+    - kube_hosts: "{{ groups['add_master'] + groups['add_worker'] | default([]) }}"
+  tasks:
+  - include_role:
+      name: precheck
+    when: not (skip_precheck | default(false) | bool)
+
+- name: Deploy new etcd nodes
+  hosts: add_etcd
+  become: yes
+  any_errors_fatal: true
+  serial: 1
+  vars:
+    etcd_ca_host: "{{ groups.etcd.0 }}"
+    etcd_peers: "{{ groups.etcd | union(groups.add_etcd) }}"
+    etcd_initial_cluster_state: "existing"
+    working_etcd: "{{ etcd_peers | first }}"
+  tasks:
+    - include_role:
+        name: etcd
+        tasks_from: ca-deploy
+    - include_role:
+        name: etcd
+        tasks_from: add_member
+    - include_role:
+        name: etcd
+        tasks_from: deploy
+      vars:
+        etcd_peers: "{{ etcd_members | union([inventory_hostname]) | default([]) }}"
+    - include_role:
+        name: etcd
+        tasks_from: check-health
+
+- name: Set common etcd related vars
+  hosts: add_master
+  tasks:
+    - set_fact:
+        etcd_peers: "{{ groups.etcd | union(groups.add_etcd | default([])) }}"
+        etcd_ca_host: "{{ groups.etcd.0 }}"
+
+- name: Deploy new Kubernetes masters
+  hosts: add_master
+  serial: 1
+  roles:
+    - kube-master
+
+- name: Update Kubernetes API VIP
+  hosts: master, add_master
+  become: yes
+  roles:
+  - erikube-defaults
+  tasks:
+  - include_role:
+      name: kube-api-vip
+    vars:
+      keepalived_master: "{{ groups.master[0] }}"
+      keepalived_vip: "{{ kube_apiserver_ip }}"
+      kube_lb_upstream_servers: "{{ groups.master | union(groups.add_master) }}"
+      keepalived_unicast_src_ip: "{{ k8s_ip_address }}"
+      keepalived_unicast_peers: "{{ groups.master | union(groups.add_master) | difference([inventory_hostname]) }}"
+    when:
+    - groups.add_master | default([]) | length > 0
+    - kube_api_vip_enabled | default(false) | bool
+
+- name: Update calico ETCD endpoint configuration.
+  hosts: add_master
+  pre_tasks:
+    - include_vars: roles/etcd/defaults/main.yml
+  tasks:
+    - include_role:
+        name: network_plugin
+      vars:
+        etcd_peers: "{{ groups.etcd | union(groups.add_etcd) }}"
+        plugin_action: "install"
+      when: groups.add_etcd | default([]) | length > 0
+
+- name: Deploy new Kubernetes nodes
+  hosts: add_worker
+  roles:
+    - kube-node
+
+# Label newly joined worker nodes
+- import_playbook: playbooks/label.yml
+
+- name: Sign Kubelet Server CSRs
+  hosts: add_master, add_worker
+  serial: 1
+  vars:
+    kubectl: "/usr/local/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf"
+    first_master: "{{ groups['master'] | first }}"
+    node_csr: "{{ ansible_hostname }}"
+  become: yes
+  tasks:
+  - name: Sign Kubelet Server CSRs
+    include_role:
+      name: kubelet-server-cert
+
+#Copying cr-registry certs
+- import_playbook: playbooks/cr-registry-deploy.yml
+
+- name: Verify the state of newly added nodes after scale-out
+  hosts: master[0]
+  gather_facts: false
+  vars:
+    - new_nodes: "{{ (groups['add_master'] | default([]))  + (groups['add_worker'] | default([])) }}"
+  tasks:
+    - name: Get nodes readiness state after scale-out
+      shell: kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}={.status.conditions[?(@.type=="Ready")].status} {end}'
+      register: nodes_status
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: ("Unknown" not in nodes_status.stdout) and ("False" not in nodes_status.stdout)
+      ignore_errors: yes
+      vars:
+        - kubectl_retry_count: 20
+        - kubectl_retry_delay: 15
+
+    - name: Verify if any one of the newly added nodes in NotReady state after scale-out
+      fail:
+        msg: "Scaled-out node '{{ new_node }}' is in NotReady state"
+      when: nodes_status.stdout | regex_search(new_node + '=Unknown') or nodes_status.stdout | regex_search(new_node + '=False')
+      loop: "{{ new_nodes }}"
+      loop_control:
+        loop_var: new_node

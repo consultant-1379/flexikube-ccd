@@ -1,0 +1,47 @@
+- name: Verify that connectivity is established
+  shell: "{{ kubectl }} cluster-info | grep 'Kubernetes control plane'"
+  become: true
+  register: cluster_info
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: cluster_info.rc == 0
+
+# Create the new release config settings, using the values saved by kubeadm
+# init as a base.
+- name: Get kubeadm configset
+  command: "{{ kubectl }} get cm -n kube-system kubeadm-config -o=jsonpath='{.data.ClusterConfiguration}'"
+  register: result
+  become: true
+
+- name: Create temp K8S config view file
+  copy:
+    dest: "/tmp/config_view.yml"
+    content: "{{ result.stdout }}"
+
+- name: Parse current kubeadm config values
+  include_vars:
+    file: /tmp/config_view.yml
+    name: currentvals
+
+- name: Remove the temp config view file
+  file:
+    path: /tmp/config_view.yml
+    state: absent
+
+- name: Apply upgrade kubeadm config override settings
+  set_fact:
+    currentvals: "{{ currentvals | combine(added_kubeadm_cfg, recursive=True) }}"
+
+- name: Set upgrade config file name
+  set_fact:
+    upgrade_cfgfile: "{{ kube_config_dir }}/kubeadm-config-{{ opt_kubernetes_version }}.yaml"
+
+- name: Write kubeadm config {{ upgrade_cfgfile }}
+  copy:
+    content: "{{ currentvals | to_nice_yaml }}"
+    dest: "{{ upgrade_cfgfile }}"
+  become: true
+
+- name: Load {{ upgrade_cfgfile }}
+  command: "{{ kubeadm_cmd }} init phase upload-config kubeadm --config {{ upgrade_cfgfile }}"
+  become: true

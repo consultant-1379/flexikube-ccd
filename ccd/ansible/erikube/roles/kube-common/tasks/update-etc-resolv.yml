@@ -1,0 +1,126 @@
+---
+
+- set_fact:
+    master_hosts: "{{ groups['master'] | default([]) }}"
+    worker_hosts: "{{ groups['worker'] | default([]) }}"
+    new_worker_hosts: "{{ groups['add_worker'] | default([]) }}"
+    new_master_hosts: "{{ groups['add_master'] | default([]) }}"
+
+- set_fact:
+    worker_hosts: "{{ worker_hosts + new_worker_hosts }}"
+
+- set_fact:
+    master_hosts: "{{ master_hosts + new_master_hosts }}"
+  when: not image_based_deployment | default(false) | bool
+
+- name: remove kubelet_DNS if there exist a line in master hosts
+  lineinfile:
+    path: /etc/resolv.conf
+    regexp: "{{ kubelet_DNS }}"
+    state: absent
+  become: true
+  when: inventory_hostname in master_hosts
+
+- name: insert kubelet_DNS as nameserver in master hosts
+  lineinfile:
+    path: /etc/resolv.conf
+    insertbefore: BOF
+    line: "nameserver {{ kubelet_DNS }}"
+  become: true
+  when: inventory_hostname in master_hosts
+
+- name: remove kubelet_DNS ip if there exist a line in worker hosts
+  lineinfile:
+    path: /etc/resolv.conf
+    regexp: "{{ kubelet_DNS }}"
+    state: absent
+  become: true
+  when: inventory_hostname in worker_hosts
+
+- name: insert kubelet_DNS as nameserver in worker hosts
+  lineinfile:
+    path: /etc/resolv.conf
+    insertbefore: BOF
+    line: "nameserver {{ kubelet_DNS }}"
+  become: true
+  when: inventory_hostname in worker_hosts
+
+# Below tasks will be executed on SBD only if /etc/resolv.conf
+# is created by netconfig. The below change is to make sure
+# /etc/resolv.conf is persistent across reboots.
+
+- stat:
+    path: /etc/resolv.conf
+  register: master_link
+- debug:
+    msg: "master_link.exists"
+  when: master_link.stat.exists and master_link.stat.islnk | default(false)
+
+- name: Tasks to update /etc/resolv.conf in master_hosts
+  block:
+     - name: Copy existing /etc/resolv.conf to tmp
+       shell: cp /etc/resolv.conf /tmp
+       register: copy
+       changed_when: False
+
+     - name: Delete the symlink
+       file:
+         path: /etc/resolv.conf
+         state: absent
+       become: true
+
+     - name: Create resolv.conf from /tmp
+       shell: cp /tmp/resolv.conf /etc/resolv.conf
+       register: cp
+       become: true
+       changed_when: False
+
+     - name: Delete the resolv.conf file after copying
+       file:
+          path: /tmp/resolv.conf
+          state: absent
+          owner: root
+          group: root
+          mode: 0777
+  when:
+    - master_link.stat.exists and master_link.stat.islnk | default(false)
+    - inventory_hostname in master_hosts
+    - not image_based_deployment | default(false) | bool
+
+- stat:
+    path: /etc/resolv.conf
+  register: worker_link
+- debug:
+    msg: "worker_link.exists"
+  when: worker_link.stat.exists and worker_link.stat.islnk | default(false)
+
+- name: Tasks to update /etc/resolv.conf in worker_hosts
+  block:
+     - name: Copy existing /etc/resolv.conf to tmp
+       shell: cp /etc/resolv.conf /tmp
+       register: copy
+       changed_when: False
+
+     - name: Delete the symlink
+       file:
+         path: /etc/resolv.conf
+         state: absent
+       become: true
+
+     - name: Create resolv.conf from /tmp
+       shell: cp /tmp/resolv.conf /etc/resolv.conf
+       register: cp
+       become: true
+       changed_when: False
+
+     - name: Delete the resolv.conf file after copying
+       file:
+          path: /tmp/resolv.conf
+          state: absent
+          owner: root
+          group: root
+          mode: 0777
+  when:
+    - worker_link.stat.exists and worker_link.stat.islnk | default(false)
+    - inventory_hostname in worker_hosts
+    - not image_based_deployment | default(false) | bool

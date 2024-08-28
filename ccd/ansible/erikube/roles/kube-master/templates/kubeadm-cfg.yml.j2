@@ -1,0 +1,301 @@
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: {{ kube_apiserver_bind_address }}
+  bindPort: {{ kube_apiserver_port }}
+bootstrapTokens:
+- groups:
+  - system:bootstrappers:kubeadm:default-node-token
+  token: mouqah.94p0dis6xekliz4x
+  ttl: 24h0m0s
+  usages:
+  - signing
+  - authentication
+{% if cloud_provider == "aws" %}
+nodeRegistration:
+  criSocket: "/var/run/dockershim.sock"
+  name: {{ ansible_fqdn }}
+  taints:
+  - effect: NoSchedule
+    key: node-role.kubernetes.io/control-plane
+  kubeletExtraArgs:
+    cloud-provider: aws
+{% endif %}
+nodeRegistration:
+  criSocket: {{ container_runtime_socket }}
+---
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+certificatesDir: /etc/kubernetes/pki
+clusterName: kubernetes
+controllerManager:
+  extraArgs:
+{% if kube_manager_cluster_signing_duration is defined %}
+    cluster-signing-duration: "{{ kube_manager_cluster_signing_duration }}"
+{% endif %}
+{% if cloud_provider != "" %}
+    cloud-provider: "{{ cloud_provider }}"
+{% endif %}
+{% if kube_manager_kube_api_burst is defined %}
+    kube-api-burst: "{{ kube_manager_kube_api_burst }}"
+{% endif %}
+{% if kube_manager_kube_api_qps is defined %}
+    kube-api-qps: "{{ kube_manager_kube_api_qps }}"
+{% endif %}
+{% if kube_manager_attach_detach_reconcile_sync_period is defined %}
+    attach-detach-reconcile-sync-period: "{{ kube_manager_attach_detach_reconcile_sync_period }}"
+{% endif %}
+{% if kube_manager_disable_attach_detach_reconcile_sync is defined %}
+    disable-attach-detach-reconcile-sync: "{{ kube_manager_disable_attach_detach_reconcile_sync | bool }}"
+{% endif %}
+{% if node_cidr_mask_size_ipv4 is defined and node_cidr_mask_size_ipv4 != "" %}
+    node-cidr-mask-size-ipv4: "{{ node_cidr_mask_size_ipv4 }}"
+{% elif k8s_ip_version == "dualstack" %}
+    node-cidr-mask-size-ipv4: "24"
+{% endif %}
+{% if node_cidr_mask_size is defined and node_cidr_mask_size != "" %}
+    node-cidr-mask-size: "{{ node_cidr_mask_size }}"
+{% elif k8s_ip_version == "ipv4" %}
+    node-cidr-mask-size: "24"
+{% elif k8s_ip_version == "ipv6" %}
+    node-cidr-mask-size: "80"
+{% endif %}
+{% if node_cidr_mask_size_ipv6 is defined and node_cidr_mask_size_ipv6 != "" %}
+    node-cidr-mask-size-ipv6: "{{ node_cidr_mask_size_ipv6 }}"
+{% elif k8s_ip_version == "dualstack" %}
+    node-cidr-mask-size-ipv6: "80"
+{% endif %}
+{% if kube_feature_gates is defined and kube_feature_gates != "" %}
+    feature-gates: {{ kube_feature_gates }}
+{% endif %}
+{% if k8s_ip_version == "dualstack" %}
+    service-cluster-ip-range: "{{ k8s_service_cidr }}"
+{% endif %}
+{% if k8s_cluster_cidr is defined %}
+    cluster-cidr: "{{ k8s_cluster_cidr }}"
+{% else %}
+    cluster-cidr: "{{ k8s_pod_cidr }}"
+{% endif %}
+    profiling: "{{ kube_profiling }}"
+  extraVolumes:
+  - hostPath: "/etc/localtime"
+    mountPath: "/etc/localtime"
+    name: tz-config
+controlPlaneEndpoint: {{ kube_apiserver_fqdn }}:{{ kube_apiserver_port }}
+dns:
+  imageRepository: {{ kubeadm_repo }}
+  imageTag: "{{ containers.kubernetes.coredns.split(':')[1] }}"
+etcd:
+  external:
+    endpoints:
+{% for host in etcd_peers | default([]) %}
+    - {{kube_etcd_url_scheme}}://{{ hostvars[host].k8s_ip_address | ipwrap }}:{{ kube_etcd_client_port }}
+{% endfor %}
+    caFile: {{ kube_etcd_cert_dir }}/{{ kube_etcd_cert_prefix }}ca.crt
+    certFile: {{ kube_etcd_cert_dir }}/{{ kube_etcd_cert_prefix }}client.crt
+    keyFile: {{ kube_etcd_cert_dir }}/{{ kube_etcd_cert_prefix }}client.key
+imageRepository: {{ kubeadm_repo }}
+kubernetesVersion: {{ k8s_version }}
+networking:
+  dnsDomain: cluster.local
+  podSubnet: "{{ k8s_pod_cidr }}"
+  serviceSubnet: "{{ k8s_service_cidr }}"
+scheduler:
+  extraArgs:
+{% if kube_feature_gates is defined and kube_feature_gates != "" %}
+    feature-gates: {{ kube_feature_gates }}
+    v: "4"
+{% endif %}
+    profiling: "{{ kube_profiling }}"
+  extraVolumes:
+  - hostPath: "/etc/localtime"
+    mountPath: "/etc/localtime"
+    name: tz-config
+apiServer:
+{% if kube_apiserver_cert_altnames | length > 0 or kube_api_ingress_host is defined or kube_apiserver_ip is defined %}
+  certSANs:
+{% if kube_api_ingress_host is defined %}
+  - {{ kube_api_ingress_host }}
+{% endif %}
+{%   for san in kube_apiserver_cert_altnames %}
+  - {{ san }}
+{%   endfor %}
+{% if kube_apiserver_ip is defined %}
+  - {{ kube_apiserver_ip }}
+{% endif %}
+{% endif %}
+  extraArgs:
+    runtime-config: "apps/v1=true,apps/v1/daemonsets=true,apps/v1/deployments=true,apps/v1/replicasets=true,networking.k8s.io/v1/networkpolicies=true"
+    enable-admission-plugins: {{ kube_admission_control_plugins | join(',') }}
+    admission-control-config-file: /etc/kubernetes/policies/pss-default-rules.yaml
+    bind-address: {{ kube_apiserver_bind_address }}
+    encryption-provider-config: {{ kube_cryptprov_cfg_file }}
+    profiling: "{{ kube_profiling }}"
+    request-timeout: "300s"
+{% if kube_auditlog_backend is not defined or kube_auditlog_backend != "" %}
+    audit-policy-file: {{ kube_auditlog_policy_file }}
+    audit-log-path: {{ kube_auditlog_file }}
+    audit-log-maxsize: "{{ kube_auditlog_maxsize_mb }}"
+    audit-log-maxbackup: "{{ kube_auditlog_maxbackup_count }}"
+    audit-log-maxage: "{{ kube_auditlog_maxage_days }}"
+    audit-log-compress: "{{ kube_auditlog_enable_compression }}"
+{% endif %}
+    authorization-mode: "{{ k8s_authorization_modes }}"
+{% if cloud_provider != "" %}
+    cloud-provider: "{{ cloud_provider }}"
+{% endif %}
+{% if kube_feature_gates is defined and kube_feature_gates != "" %}
+    feature-gates: {{ kube_feature_gates }}
+{% endif %}
+{% if (kube_api_cert is defined and kube_api_key is defined) and (image_based_deployment is defined and image_based_deployment | bool) %}
+    tls-sni-cert-key: {{ kube_cert_dir }}/kube_api.crt,{{ kube_cert_dir }}/kube_api.key
+{% endif %}
+{% if k8s_ip_version == "dualstack" %}
+    service-cluster-ip-range: "{{ k8s_service_cidr }}"
+{% endif %}
+{% if kube_service_node_port_range is defined %}
+    service-node-port-range: "{{ kube_service_node_port_range }}"
+{% endif %}
+{% if kube_tls_cipher_suites is defined and kube_tls_cipher_suites != "" %}
+    tls-cipher-suites: {{ kube_tls_cipher_suites | join(',') }}
+{% endif %}
+{% if kube_strict_transport_security is defined and kube_strict_transport_security != "" %}
+    strict-transport-security-directives: {{ kube_strict_transport_security }}
+{% endif %}
+{% if kube_oidc_auth|default(false) %}
+    oidc-issuer-url: {{ kube_oidc_url }}
+    oidc-client-id: {{ kube_oidc_client_id }}
+{%   if kube_oidc_ca_file_path is defined %}
+    oidc-ca-file: {{ kube_cert_dir }}/oidc-ca.pem
+{%   elif kube_oidc_use_dex_crt_as_ca is defined and kube_oidc_use_dex_crt_as_ca %}
+    oidc-ca-file: {{ kube_cert_dir }}/dex.crt
+{%   endif %}
+{%   if kube_oidc_username_claim is defined %}
+    oidc-username-claim: {{ kube_oidc_username_claim }}
+{%   endif %}
+{%   if kube_oidc_groups_claim is defined %}
+    oidc-groups-claim: {{ kube_oidc_groups_claim }}
+{%   endif %}
+{% endif %}
+
+  extraVolumes:
+  - hostPath: "/etc/kubernetes/policies"
+    mountPath: "/etc/kubernetes/policies"
+    name: pss-config
+    readOnly: true
+{% if kube_auditlog_backend is not defined or kube_auditlog_backend != "" %}
+  - hostPath: "/etc/localtime"
+    mountPath: "/etc/localtime"
+    name: tz-config
+  - hostPath: {{ erikube_config_dir }}
+    mountPath: {{ erikube_config_dir }}
+    name: erikube-cfg
+    readOnly: true
+  - hostPath: {{ kube_apiserver_log_dir }}
+    mountPath: {{ kube_apiserver_log_dir }}
+    name: apiserver-log
+    readOnly: false
+{% endif %}
+  timeoutForControlPlane: 4m0s
+---
+apiVersion: kubeproxy.config.k8s.io/v1alpha1
+kind: KubeProxyConfiguration
+clientConnection:
+  acceptContentTypes: ""
+  burst: 10
+  contentType: application/vnd.kubernetes.protobuf
+  kubeconfig: /var/lib/kube-proxy/kubeconfig.conf
+  qps: 5
+{% if k8s_cluster_cidr is defined %}
+clusterCIDR: "{{ k8s_cluster_cidr }}"
+{% else %}
+clusterCIDR: "{{ k8s_pod_cidr }}"
+{% endif %}
+{% if kube_feature_gates is defined and kube_feature_gates != "" %}
+featureGates: { {{ kube_feature_gates | replace('=', ': ') | replace(',', ', ') }} }
+{% endif %}
+configSyncPeriod: 15m0s
+conntrack:
+  maxPerCore: 32768
+  min: 131072
+  tcpCloseWaitTimeout: 1h0m0s
+  tcpEstablishedTimeout: 24h0m0s
+enableProfiling: false
+healthzBindAddress: "[::]:10256"
+hostnameOverride: ""
+iptables:
+  masqueradeAll: false
+  masqueradeBit: 14
+  minSyncPeriod: 0s
+  syncPeriod: 30s
+ipvs:
+{% if ipvs_excluded_cidrs is defined and ipvs_excluded_cidrs != "" %}
+  excludeCIDRs: {{ ipvs_excluded_cidrs | to_json }}
+{% else %}
+  excludeCIDRs: null
+{% endif %}
+  minSyncPeriod: 0s
+  scheduler: ""
+  syncPeriod: 30s
+  tcpTimeout: {{ ipvs_tcp_timeout }}s
+  tcpFinTimeout: {{ ipvs_tcp_fin_timeout }}s
+  udpTimeout: {{ ipvs_udp_timeout }}s
+{% if (k8s_ip_version != "ipv6") and (ecfe_enabled | default(false) | bool) %}
+  strictARP: true
+{% endif %}
+
+metricsBindAddress: "[::1]:10249"
+{% if (k8s_ip_version == "dualstack") and (k8s_ip_version == "ipv6") %}
+mode: "ipvs"
+{% else %}
+mode: "{{ kube_proxy_mode }}"
+{% endif %}
+nodePortAddresses: null
+oomScoreAdj: -999
+portRange: ""
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+authentication:
+  anonymous:
+    enabled: false
+  webhook:
+    cacheTTL: 0s
+    enabled: true
+  x509:
+    clientCAFile: {{ kubelet_ca_file }}
+authorization:
+  mode: {{ kubelet_authz_mode }}
+  webhook:
+    cacheAuthorizedTTL: 0s
+    cacheUnauthorizedTTL: 0s
+cgroupDriver: "{{ containerd_default_cgroup_driver }}"
+containerLogMaxFiles: {{ container_log_max_files }}
+containerLogMaxSize: "{{ container_log_max_size }}"
+{% if k8s_ip_version == "ipv4" %}
+clusterDNS:
+- "{{ nodelocalDNS_ipv4 }}"
+{% elif k8s_ip_version == "ipv6" %}
+clusterDNS:
+- "{{ nodelocalDNS_ipv6 }}"
+{% elif k8s_ip_version == "dualstack" %}
+clusterDNS:
+- "{{ kubelet_DNS }}"
+{% endif %}
+clusterDomain: {{ kubelet_domain }}
+kubeletCgroups: /ccd.slice/kubelet.service
+rotateCertificates: {{ kubelet_certificate_rotation }}
+serverTLSBootstrap: {{ kubelet_server_certificate_rotation }}
+staticPodPath: {{ kubelet_manifest }}
+readOnlyPort: 0
+{% if kube_feature_gates is defined and kube_feature_gates != "" %}
+featureGates: { {{ kube_feature_gates | replace('=', ': ') | replace(',', ', ') }} }
+{% endif %}
+{% if kubelet_tls_cipher_suites is defined and kubelet_tls_cipher_suites != "" %}
+tlsCipherSuites: [{{ kubelet_tls_cipher_suites | join(',') }}]
+{% endif %}
+imageGCHighThresholdPercent: 80
+imageGCLowThresholdPercent: 75
+{% if enable_seccomp_default == "true" %}
+seccompDefault: true
+{% endif %}

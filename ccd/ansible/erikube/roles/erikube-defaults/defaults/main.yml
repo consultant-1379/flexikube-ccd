@@ -1,0 +1,204 @@
+---
+ansible_version_gt_eq_to: "2.8"
+ansible_version_lt: "2.10"
+
+ansible_python_version_gt_eq_to: 2.7
+# Default python version supported by Ubuntu 20.04 is 3.8
+# So, increasing the max limit of supported py version
+ansible_python_version_lt: 3.9
+
+# Helm chart base URL
+helm_chart_loc: "{{ helm_chart_loc_override | default('https://arm.rnd.ki.sw.ericsson.se/artifactory/proj-erikube-generic-local/erikube/helm-charts/') }}"
+
+# Default file generation access bits
+file_default_owner: root
+file_default_group: root
+# TODO should be 0600 for security reasons?
+file_default_mode: 0755
+
+# docker command
+docker_cmd: "docker"
+
+#ctr command
+ctr_cmd: /usr/local/bin/ctr
+
+#crictl command
+crictl_cmd: /usr/local/bin/crictl
+
+# Container runtime interface socket for kubernetes
+container_runtime_socket: "/run/containerd/containerd.sock"
+container_state_directory: /run/containerd
+
+#Configuration parameters for container log files
+container_log_max_files: 5
+container_log_max_size: 50Mi
+
+# Erikube images
+calico_node_image: "{{ kube_image_prefix }}{{ containers.calico.node }}"
+calico_cni_image: "{{ kube_image_prefix }}{{ containers.calico.cni }}"
+calico_kube_policy_image: "{{ kube_image_prefix }}{{ containers.calico.kube_policy_controller }}"
+calico_kube_controllers_image: "{{ kube_image_prefix }}{{ containers.calico.kube_controllers }}"
+erikube_client_image: "{{ kube_image_prefix }}{{ containers.erikube.client }}"
+erikube_ingress_image: "{{ kube_image_prefix }}{{ containers.erikube.ingress }}"
+erikube_ingressctrl_image: "{{ kube_image_prefix }}{{ containers.erikube.ingressctrl }}"
+erikube_ingressdefaultbackend_image: "{{ kube_image_prefix }}{{ containers.erikube.ingressdefaultbackend }}"
+erikube_installer_image: "{{ kube_image_prefix }}{{ containers.erikube.installer }}"
+erikube_pause_image: "{{ kube_image_prefix }}{{ containers.kubernetes.pause }}"
+kubernetes_pause_image: "{{ kube_image_prefix }}{{ containers.kubernetes.pause.split('-')[0] }}"
+kubernetes_apiserver_image: "{{ kube_image_prefix }}{{ containers.kubernetes.apiserver }}"
+kubernetes_controller_manager_image: "{{ kube_image_prefix }}{{ containers.kubernetes.controller_manager }}"
+kubernetes_scheduler_image: "{{ kube_image_prefix }}{{ containers.kubernetes.scheduler }}"
+kubernetes_proxy_image: "{{ kube_image_prefix }}{{ containers.kubernetes.proxy }}"
+kubernetes_dns_node_cache_image: "{{ kube_image_prefix }}{{ containers.kubernetes.dns_node_cache }}"
+etcd_image: "{{ kube_image_prefix }}{{ containers.erikube.etcd }}"
+# k8s_dashboard_image: "{{ kube_image_prefix }}{{ containers.erikube.dashboard }}"
+multus_cni_image: "{{ kube_image_prefix }}{{ containers.erikube.multus }}"
+haproxy_image: "{{ kube_image_prefix }}{{ containers.erikube.haproxy }}"
+tiny_tools_image: "{{ kube_image_prefix }}{{ containers.monitoring.alpine}}"
+prometheus_image: "{{ kube_image_prefix }}{{ containers.monitoring.prometheus }}"
+ingress_lb_image: "{{ kube_image_prefix }}{{ containers.erikube.ingress }}"
+coredns_image: "{{ kube_image_prefix }}{{ containers.kubernetes.coredns }}"
+kubernetes_coredns_image: "{{ kube_image_prefix }}{{ containers.kubernetes.coredns.split('-')[0] }}"
+metrics_server_image: "{{ kube_image_prefix }}{{ containers.monitoring.metrics_server }}"
+azure_cloud_controller_manager_image: "{{ kube_image_prefix }}{{ containers.erikube.cloud_provider_azure }}"
+fluent_bit_image: "{{ kube_image_prefix }}{{ containers.logging.fluent_bit }}"
+fluentd_image: "{{ kube_image_prefix }}{{ containers.logging.fluentd }}"
+
+# Metrics Server default values for parameters
+ms_ha_enabled : "{{ metrics_server_ha_enabled | default(false) | bool }}"
+metrics_server_replica_count: "{{ 2 if ms_ha_enabled == true else 1 }}"
+
+kubectl: /usr/local/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf
+kube_apiserver_fqdn: nodelocal-api.eccd.local
+kube_apiserver_port: 6443
+
+# Random shifts for retrying failed ops like pushing/downloading
+retry_stagger: 5
+
+# Optional repos and versions used for upgrade and install to enable
+# installation of later kubernetes versions for test
+# kubeadm expects repo to not end with '\'
+opt_kubernetes_version: "{{ containers.kubernetes.apiserver.split(':')[1] | regex_replace('^v', '') }}"
+opt_coredns_version: "{{ containers.kubernetes.coredns.split(':')[1] }}"
+major_coredns_version: "{{ containers.kubernetes.coredns.split(':')[1].split('-')[0] }}"
+
+
+opt_kubernetes_repo: "{{ kube_image_prefix }}"
+opt_erikube_client_version: "{{ opt_kubernetes_version }}"
+
+# Choose network plugin (calico)
+# Can also be set to 'cloud', which lets the cloud provider setup appropriate routing
+# The calico specific variables have been superseded by k8s_pod_cidr and k8s_service_cidr
+kube_network_plugin: calico
+pod_ipv4pool_cidr: "192.168.0.0/16"
+calico_ipv4pool_cidr: "{{ pod_ipv4pool_cidr }}"
+
+# The IPv4 Pools to create if none exists at start up.
+k8s_pod_cidr: "{{ calico_ipv4pool_cidr }}"
+k8s_service_cidr: "10.96.0.0/12"
+
+# Dualstack-related configuration
+default_dualstack_ip_family: "ipv4"
+
+# Disable all alpha features except EphemeralContainers
+kube_feature_gates: "AllAlpha=false,DisableCloudProviders=true"
+
+#Disable profiling
+kube_profiling: "false"
+
+containerd_default_cgroup_driver: "systemd"
+
+# The default ingress controller can be changed if ingress_controller_name is defined.
+# the possilbe values are nginx or haproxy and default is nginx.
+
+default_ingress_controller: "nginx"
+
+# Default kube-lb container name, it will be automatically set based on default_kube_lb name.
+kube_lb_container: haproxy_container
+
+# kube-lb supports haproxy
+default_kube_lb: "haproxy"
+
+kube_tls_cipher_suites:
+  - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+  - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+  - TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305
+  - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+  - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305
+  - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+
+# enable-admission-plugins
+kube_admission_control_plugins:
+  - DefaultStorageClass
+  - DefaultTolerationSeconds
+  - LimitRanger
+  - MutatingAdmissionWebhook
+  - NamespaceLifecycle
+  - NodeRestriction
+  - ResourceQuota
+  - ServiceAccount
+  - ValidatingAdmissionWebhook
+
+# kubelet options
+kubelet_boot_config: /etc/kubernetes/bootstrap-kubelet.conf
+kubelet_config: /etc/kubernetes/kubelet.conf
+kubelet_manifest: /etc/kubernetes/manifests
+kubelet_allow_privileged: "true"
+nodelocalDNS_ipv4: 169.254.20.10
+nodelocalDNS_ipv6: 'fd00::ffff:0:14:a'
+nodelocalDNS_cache_ttl: 10
+nodelocalDNS_config_map_fwdzones: []
+kubelet_domain: cluster.local
+kubelet_infra_image: pause-image
+kubelet_authz_mode: Webhook
+kubelet_ca_file: /etc/kubernetes/pki/ca.crt
+kubelet_certificate_rotation: "true"
+kubelet_server_certificate_rotation: "true"
+kubelet_certificates: /var/lib/kubelet/pki
+kubelet_tls_cipher_suites:
+  - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+  - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+  - TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305
+  - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+  - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305
+  - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+  - TLS_RSA_WITH_AES_256_GCM_SHA384
+  - TLS_RSA_WITH_AES_128_GCM_SHA256
+kubelet_extra_options: ""
+block_node_port_access_for_services: "false"
+# SRIOV network device plugin configMap
+sriov_network_device_plugin_configmap_name: sriov-dp-configmap
+sriov_network_device_plugin_configmap_data: >
+  {
+      "resourceList": [{
+              "resourceName": "intel_sriov_netdevice",
+              "selectors": {
+                  "vendors": ["8086"],
+                  "devices": ["154c", "10ed"],
+                  "drivers": ["i40evf", "ixgbevf", "iavf"]
+              }
+          },
+          {
+              "resourceName": "intel_sriov_dpdk",
+              "selectors": {
+                  "vendors": ["8086"],
+                  "devices": ["154c", "10ed"],
+                  "drivers": ["vfio-pci", "igb_uio"]
+              }
+          },
+          {
+              "resourceName": "mlnx_sriov_rdma",
+              "selectors": {
+                  "vendors": ["15b3"],
+                  "devices": ["1018"],
+                  "drivers": ["mlx5_ib"],
+                  "isRdma": true
+              }
+          }
+      ]
+  }
+
+ipvs_excluded_cidrs: ""
+kubectl_retry_count: 10
+kubectl_retry_delay: 10
+enable_seccomp_default: "false"

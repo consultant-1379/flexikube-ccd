@@ -1,0 +1,322 @@
+#
+# Playbook to rotate etcd ca certificate
+# ansible-playbook rotate-etcd-ca-certificate.yaml -i /mnt/config/inventory/ibd_inventory_file.ini
+#
+# Example taken at
+# https://github.com/coreos/tls_rotate/blob/master/rotate_etcd.sh
+# https://github.com/coreos/tls_rotate/blob/master/gencerts.sh
+---
+
+- name: Prepare Ansible inventory with IBD
+  hosts: localhost
+  become: yes
+  tasks:
+   - name: Worker inventory creation
+     include_role:
+       name: roles/erikube-defaults
+       tasks_from: create_worker_inventory
+     when: image_based_deployment | default(false) | bool
+
+- name: Gather facts as non root
+  hosts: worker
+  gather_facts: yes
+
+- name: Gather facts as non root
+  hosts: etcd
+  gather_facts: yes
+
+- name: Get the current etcd pem certificates for later usage
+  hosts: etcd
+  become: yes
+  tasks:
+  - name: Get the list of the current PEM files
+    find:
+      paths: /etc/etcd/ca/certs/
+      patterns: '*.pem'
+    register: current_etcd_pem_files
+  - name: Show variable
+    debug:
+      msg: "{{ item.path }}"
+    with_items: "{{ current_etcd_pem_files.files }}"
+
+- name: Prepare etcd certificates
+  hosts: localhost, master
+  vars:
+    etcd_ca_host: "{{ groups.etcd.0 }}"
+    etcd_peers: "{{ groups.etcd | default([], true) }}"
+  become: yes
+  serial: 1
+  tasks:
+  - include_role:
+      name: etcd
+      tasks_from: prepare-etcd-certs
+
+- name: Replace master nodes etcd kubernetes CA certificate with combined CA
+  hosts: localhost, etcd
+  vars:
+    rotated_etcd_ca_type: "combined"
+    etcd_ca_host: "{{ groups.etcd.0 }}"
+    etcd_peers: "{{ groups.etcd | default([], true) }}"
+    kube_etcd_cert_dir: "/etc/kubernetes/etcd"
+  become: yes
+  serial: 1
+  tasks:
+  - include_role:
+      name: etcd
+      tasks_from: patch-master-client-ca
+
+- name: sleep for 10 seconds
+  hosts: localhost
+  tasks:
+  - pause:
+      seconds: 10
+
+- name: Restart API Server
+  hosts: master
+  become: yes
+  serial: 1
+  vars:
+    target_container_id_name: "kube-apiserver"
+  tasks:
+  - include_role:
+      name: crictl
+      tasks_from: restart-cri-container
+
+- name: Activate combined etcd ca and restart etcd service
+  hosts: localhost, etcd
+  vars:
+    rotated_etcd_ca_type: "combined"
+    etcd_ca_host: "{{ groups.etcd.0 }}"
+    etcd_peers: "{{ groups.etcd | default([], true) }}"
+    first_etcd: "{{ groups['etcd'] | first }}"
+  become: yes
+  serial: 1
+  tasks:
+  - include_role:
+      name: etcd
+      tasks_from: activate-etcd-ca-cert
+
+- name: sleep for 10 seconds
+  hosts: localhost
+  tasks:
+  - pause:
+      seconds: 10
+
+- name: Change openssl configuration to use new etcd ca
+  hosts: master
+  vars:
+    openssl_configure_action: "change"
+  become: yes
+  gather_facts: yes
+  tasks:
+  - include_role:
+      name: etcd
+      tasks_from: configure-openssl-config
+
+- name: Rotate etcd client certificates for kubernetes by using new ca
+  hosts: master
+  pre_tasks:
+  - include_vars: "roles/kube-master/defaults/main.yml"
+  vars:
+    etcd_ca_host: "{{ groups.etcd.0 }}"
+    etcd_peers: "{{ groups.etcd | default([], true) }}"
+  tasks:
+  - include_role:
+      name: etcd
+      tasks_from: rotate-client-cert
+
+- name: sleep for 10 seconds
+  hosts: localhost
+  tasks:
+  - pause:
+      seconds: 10
+
+- name: Restart API Server
+  hosts: master
+  become: yes
+  serial: 1
+  vars:
+    target_container_id_name: "kube-apiserver"
+  tasks:
+  - include_role:
+      name: crictl
+      tasks_from: restart-cri-container
+
+- name: Rotate Victoria Metrics etcd certificates
+  hosts: master[0]
+  become: yes
+  tasks:
+   - set_fact:
+       victoria_metrics_namespace: monitoring
+
+   - set_fact:
+       victoria_metrics_secret_name: etcd-certs
+
+   - include_tasks: "roles/victoria-metrics/tasks/rotate-etcd-certs.yml"
+     vars:
+       etcd_ca_host: "{{ groups.etcd.0 }}"
+
+- name: Rotate Calico etcd certificates by using new etcd ca
+  hosts: master[0]
+  become: yes
+  tasks:
+
+   - set_fact:
+       calico_secret_name: calico-etcd-secrets
+
+   - include_tasks: "roles/network_plugin/calico/tasks/rotate-etcd-certs.yml"
+     vars:
+       etcd_ca_host: "{{ groups.etcd.0 }}"
+
+- name: sleep for 10 seconds
+  hosts: localhost
+  tasks:
+  - pause:
+      seconds: 10
+
+- name: Restart API Server
+  hosts: master
+  become: yes
+  serial: 1
+  vars:
+    target_container_id_name: "kube-apiserver"
+  tasks:
+  - include_role:
+      name: crictl
+      tasks_from: restart-cri-container
+
+- name: Define k8s_ip_address for etcd nodes
+  hosts: etcd
+  vars:
+    etcd_peers: "{{ groups.etcd | default([], true) }}"
+  become: yes
+  serial: 1
+  tasks:
+  - include_role:
+      name: ip-detection
+
+- name: Rotate etcd server and peer by using new etcd ca
+  hosts: etcd
+  vars:
+    etcd_ca_host: "{{ groups.etcd.0 }}"
+    etcd_peers: "{{ groups.etcd | default([], true) }}"
+  become: yes
+  serial: 1
+  tasks:
+  - include_role:
+      name: etcd
+      tasks_from: rotate-server-peer
+
+- name: Renew all kubernetes certs by using kubeadm and restart kubelet and api server
+  hosts: master
+  serial: 1
+  vars:
+    etcd_ca_host: "{{ groups.etcd.0 }}"
+    etcd_peers: "{{ groups.etcd | default([], true) }}"
+  become: yes
+  serial: 1
+  pre_tasks:
+  - include_vars: "roles/kube-common/defaults/main.yml"
+  tasks:
+  - include_role:
+      name: etcd
+      tasks_from: renew-certs
+
+- name: restart calico node pods
+  hosts: master[0]
+  become: yes
+  roles:
+  - erikube-defaults
+  vars:
+    kubectl: "/usr/local/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf"
+  tasks:
+  - name: Get calico node pods
+    shell: "{{ kubectl }} get pod -n kube-system -l k8s-app=calico-node | grep calico | awk '{print $1}'"
+    register: calico_node_pods
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: (calico_node_pods.rc == 0 or "not found" in calico_node_pods.stderr)
+  - name: Delete calico node pods one by one
+    shell: "{{ kubectl }} delete pod {{ item }} -n kube-system & sleep 10"
+    register: calico_node_pods_delete
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: (calico_node_pods_delete.rc == 0)
+    with_items: "{{ calico_node_pods.stdout_lines }}"
+
+- name: Restart Calicoctl if exist in worker nodes
+  hosts: worker
+  become: yes
+  serial: 1
+  vars:
+    target_container_id_name: "calicoctl"
+  tasks:
+  - include_role:
+      name: crictl
+      tasks_from: restart-cri-container
+
+- name: Revert openssl configuration back to original settings
+  hosts: master
+  vars:
+    openssl_configure_action: "revert"
+  become: yes
+  gather_facts: yes
+  tasks:
+  - include_role:
+      name: etcd
+      tasks_from: configure-openssl-config
+
+- name: Replace master nodes etcd kubernetes CA certificate with new CA
+  hosts: localhost, etcd
+  vars:
+    rotated_etcd_ca_type: "new"
+    etcd_ca_host: "{{ groups.etcd.0 }}"
+    etcd_peers: "{{ groups.etcd | default([], true) }}"
+    kube_etcd_cert_dir: "/etc/kubernetes/etcd"
+  become: yes
+  serial: 1
+  tasks:
+  - include_role:
+      name: etcd
+      tasks_from: patch-master-client-ca
+
+- name: sleep for 10 seconds
+  hosts: localhost
+  tasks:
+  - pause:
+      seconds: 10
+
+- name: Restart API Server
+  hosts: master
+  become: yes
+  serial: 1
+  vars:
+    target_container_id_name: "kube-apiserver"
+  tasks:
+  - include_role:
+      name: crictl
+      tasks_from: restart-cri-container
+
+- name: Activate new etcd ca and restart etcd service
+  hosts: localhost, etcd
+  vars:
+    rotated_etcd_ca_type: "new"
+    etcd_ca_host: "{{ groups.etcd.0 }}"
+    etcd_peers: "{{ groups.etcd | default([], true) }}"
+    first_etcd: "{{ groups['etcd'] | first }}"
+  become: yes
+  serial: 1
+  tasks:
+  - include_role:
+      name: etcd
+      tasks_from: activate-etcd-ca-cert
+
+- name: Cleanup old etcd pem certificates
+  hosts: etcd
+  become: yes
+  tasks:
+  - name: Delete old etcd pem certificates
+    file:
+      path: "{{ item.path }}"
+      state: absent
+    with_items: "{{ current_etcd_pem_files.files }}"

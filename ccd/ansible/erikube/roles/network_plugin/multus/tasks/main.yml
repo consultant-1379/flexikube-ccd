@@ -1,0 +1,4 @@
+---
+
+- name: "{{ plugin_action | capitalize }} Multus"
+  include_tasks: "{{ role_path }}/tasks/multus-{{ plugin_action }}.yml"

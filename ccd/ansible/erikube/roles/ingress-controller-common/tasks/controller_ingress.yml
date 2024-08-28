@@ -1,0 +1,30 @@
+
+---
+
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/k8s-ingress-ctrl-XXXXXX
+  register: tmpdir
+  changed_when: False
+
+- name: Prepare ingress controller ingress resource template
+  template: >
+    src="../templates/{{ item }}.j2"
+    dest="{{ tmpdir.stdout }}/{{ item }}"
+  with_items:
+  - ingress-ctrl-ingress.yaml
+
+- name: Deploy ingress controller ingress
+  command: "{{ kubectl }} apply -f {{ tmpdir.stdout }}/{{ item }}"
+  become: yes
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+  with_items:
+  - ingress-ctrl-ingress.yaml
+
+- name: Delete temp directory
+  file:
+    name: "{{ tmpdir.stdout }}"
+    state: absent
+  changed_when: False

@@ -1,0 +1,26 @@
+---
+
+- name: Add apt-transport-https package
+  package:
+    name: apt-transport-https
+
+- name: Add Repository key
+  apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+
+- name: Add Docker-CE Repository
+  apt_repository:
+    repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
+
+- name: Install docker python lib
+  pip:
+    name: docker-py
+    state: present
+
+- name: Install Docker and pre-reqs
+  package:
+    name: "{{ docker_packages }}"
+  register: result
+  until: result is success
+  retries: "{{ docker_install_retries if (docker_install_retries is defined) else 0 }}"
+  delay: "{{ docker_install_retry_delay if (docker_install_retry_delay is defined) else 5 }}"

@@ -1,0 +1,91 @@
+---
+- name: Gather facts as non root
+  hosts: all
+  gather_facts: yes
+
+# Get container list
+- import_playbook: playbooks/get-container-list.yml
+
+- import_playbook: playbooks/ansible-check.yml
+
+- name: Create directory for storing eccd logs
+  hosts: all
+  become: yes
+  tasks:
+    - name: Create eccd folder under /var/log/ where the deployment logs could be collected
+      file:
+        path: "/var/log/eccd"
+        state: directory
+        mode: "0755"
+
+# Disable host prepare when given appropriate flag
+# [WARNING]: This playbook requires connection to internet
+# batch_size indicates number of machines to be updated in parallel.
+- import_playbook: playbooks/host-prepare.yml
+  when: prepare_host | default(true) | bool
+  vars:
+    batch_size: "100%"
+    upgrading: false
+
+# Check whether all prerequisites for Pre-Provisioned Servers are met
+- import_playbook: playbooks/check-pps-prerequisites.yml
+  when: validation_check | default(false) | bool
+
+# Configure containerd
+- import_playbook: playbooks/configure-containerd-svc.yml
+
+# CCD-9103 master not ready state issue
+- import_playbook: playbooks/configure-docker-svc.yml
+
+# Configure runc
+- import_playbook: playbooks/configure-runc.yml
+
+# Check if all the prerequisites for the erikube installation are fulfilled
+- import_playbook: playbooks/install-precheck.yml
+  when: not (skip_precheck | default(false) | bool)
+
+# Start erikube installation
+- import_playbook: playbooks/etcd-deploy.yml
+- import_playbook: playbooks/kube-deploy.yml
+- import_playbook: playbooks/etcd-post-kube-deploy.yml
+## CCD-10355 Fix Kubernetes Version Disclosure KHV002
+- import_playbook: playbooks/fix-k8-version-disclosure.yml
+- import_playbook: playbooks/ecfe-deploy.yml
+- import_playbook: playbooks/nat64-deploy.yml
+- import_playbook: playbooks/dns64-deploy.yml
+
+- import_playbook: playbooks/ingressctrl-deploy.yml
+  when: deploy_ingressctrl | default(true) | bool
+
+- import_playbook: playbooks/node-feature-discovery-deploy.yml
+- import_playbook: playbooks/rook-operator.yml
+- import_playbook: playbooks/rook-cluster.yml
+- import_playbook: playbooks/csi-rbd-provisioner-deploy.yml
+- import_playbook: playbooks/cinder.yml
+- import_playbook: playbooks/manila.yml
+- import_playbook: playbooks/whereabouts-ipam.yml
+
+- import_playbook: playbooks/cr-registry-deploy.yml
+- import_playbook: playbooks/ingress-lb-deploy.yml
+- import_playbook: playbooks/metrics-server-deploy.yml
+- import_playbook: playbooks/dex-deploy.yml
+- import_playbook: playbooks/victoria-metrics-pm-deploy.yml
+- import_playbook: playbooks/eric-pm-3pp-deploy.yml
+- import_playbook: playbooks/prometheus-webhook-snmp-deploy.yml
+- import_playbook: playbooks/eric-pmbr-deploy.yml
+- import_playbook: playbooks/set-audit-log-level.yml
+
+- import_playbook: playbooks/authclient-deploy.yml
+
+- import_playbook: playbooks/label.yml
+- import_playbook: playbooks/label-node-id.yml
+- import_playbook: playbooks/node-problem-detector-deploy.yml
+- import_playbook: playbooks/cluster-autoscaler.yml
+- import_playbook: playbooks/sriov-network-device-plugin-deploy.yml
+- import_playbook: playbooks/license-management-deploy.yml
+  when: ccd_licensing_enabled | default(true) | bool
+
+- import_playbook: playbooks/isp-logger-deploy.yml
+- import_playbook: playbooks/calicoctl-deploy.yml
+- import_playbook: playbooks/calicoctl-network-policy-deploy.yml
+- import_playbook: playbooks/multus-log-rotate.yml

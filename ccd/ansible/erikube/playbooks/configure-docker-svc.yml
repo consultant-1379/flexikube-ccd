@@ -1,0 +1,15 @@
+---
+- name: Gather facts as non root
+  hosts: all
+  gather_facts: yes
+
+- name: Configuring docker service file with binds to
+  hosts: master, worker
+  roles:
+    - erikube-defaults
+  become: yes
+  tasks:
+    - block:
+        - include_role:
+            name: kube-common
+            tasks_from: configure-docker-svc

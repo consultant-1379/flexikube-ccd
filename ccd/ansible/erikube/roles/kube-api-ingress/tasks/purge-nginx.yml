@@ -1,0 +1,46 @@
+---
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/erikube-k8s-XXXXXX
+  register: mktemp
+  changed_when: False
+
+- set_fact:
+    tmp_workdir: "{{ mktemp.stdout }}"
+
+- name: Create service and endpoints for Kubernetes API Server
+  template:
+    src: "kube-api-service-endpoint.yaml.j2"
+    dest: "{{ tmp_workdir }}/kube-api-service-endpoint.yaml"
+  vars:
+    - ingress_class: "nginx"
+
+- name: Delete Service and Endpoint resources for Kubernetes API Server
+  shell: "{{ kubectl }} delete -f {{ tmp_workdir }}/kube-api-service-endpoint.yaml"
+  become: yes
+  ignore_errors: yes
+  register: deploy_service_endpoint
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: deploy_service_endpoint.rc == 0
+
+- name: Create ingress manifest for Kubernetes API
+  template:
+    src: "kube-api-nginx-ingress.yaml.j2"
+    dest: "{{ tmp_workdir }}/kube-api-ingress.yaml"
+  vars:
+    - ingress_class: "nginx"
+
+- name: Delete ingress resource for Kubernetes API
+  shell: "{{ kubectl }} delete -f {{ tmp_workdir }}/kube-api-ingress.yaml"
+  become: yes
+  ignore_errors: yes
+  register: deploy_ingress
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: deploy_ingress.rc == 0
+
+- name: Delete temp directory
+  file:
+    name: "{{ mktemp.stdout }}"
+    state: absent
+  changed_when: False

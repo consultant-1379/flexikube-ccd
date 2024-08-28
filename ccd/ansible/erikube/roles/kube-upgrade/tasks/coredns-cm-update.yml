@@ -1,0 +1,88 @@
+- name: create temp folder
+  shell: mktemp -d /tmp/coredns-configmap-XXXXXX
+  register: mktemp
+  changed_when: False
+
+- name: Check if coredns configmap contains "ready"
+  shell: "{{ kubectl }} get cm coredns -n kube-system -o yaml | grep 'ready'"
+  register: coredns_ready_attribute_result
+  ignore_errors: true
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (coredns_ready_attribute_result.rc == 0 or "not found" in coredns_ready_attribute_result.stderr)
+  become: yes
+
+- name: Check if coredns configmap contains "prefer_udp"
+  shell: "{{ kubectl }} get cm coredns -n kube-system -o yaml | grep 'prefer_udp'"
+  register: coredns_prefer_udp_attribute_result
+  ignore_errors: true
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (coredns_prefer_udp_attribute_result.rc == 0 or "not found" in coredns_prefer_udp_attribute_result.stderr)
+  become: yes
+
+- name: Fetch the coredns configmap
+  shell: "{{ kubectl }} get cm coredns -n kube-system -o yaml > {{ mktemp.stdout }}/coredns_configmap.yaml"
+  become: yes
+  register: result
+  until: result.rc == 0
+  retries: 30
+  delay: 5
+
+- name: Add the ready to coredns configmap if not present
+  lineinfile:
+    dest: "{{ mktemp.stdout }}/coredns_configmap.yaml"
+    line: "        ready"
+    insertafter: health
+    state: present
+    firstmatch: yes
+  when: '"ready" not in coredns_ready_attribute_result.stdout'
+
+- name: Add the prefer_udp to coredns configmap if not present
+  lineinfile:
+    dest: "{{ mktemp.stdout }}/coredns_configmap.yaml"
+    line: "           prefer_udp"
+    insertafter: max_concurrent
+    state: present
+    firstmatch: yes
+  when: '"prefer_udp" not in coredns_prefer_udp_attribute_result.stdout'
+
+- name: Update external dns server
+  lineinfile:
+    path: "{{ mktemp.stdout }}/coredns_configmap.yaml"
+    regexp: '^(.*)        forward . (.*)$'
+    line: '        forward . {{ dns_servers_ips }} {'
+    backrefs: yes
+
+- name: Update cache success TTL if present
+  replace:
+    path: "{{ mktemp.stdout }}/coredns_configmap.yaml"
+    after: 'cache'
+    regexp: '^(\s+)success.*$'
+    replace: '\1success 9984 {{ kube_dns_success_ttl }}'
+
+- name: Update cache denial TTL if present
+  replace:
+    path: "{{ mktemp.stdout }}/coredns_configmap.yaml"
+    after: 'cache'
+    regexp: '^(\s+)denial.*$'
+    replace: '\1denial 9984 {{ kube_dns_denial_ttl }}'
+
+- name: Add cache success and denial if not present yet
+  replace:
+    path: "{{ mktemp.stdout }}/coredns_configmap.yaml"
+    regexp: '^(\s+)cache (\d+)$'
+    replace: '\1cache \2 {\n\1  success 9984 {{ kube_dns_success_ttl }}\n\1  denial 9984 {{ kube_dns_denial_ttl }}\n\1}'
+
+- name: Apply the coredns configmap fix
+  shell: "{{ kubectl }} apply -f {{ mktemp.stdout }}/coredns_configmap.yaml"
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+  become: yes
+
+- name: Delete temp directory
+  file:
+    name: "{{ mktemp.stdout }}"
+    state: absent

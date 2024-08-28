@@ -1,0 +1,158 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: openstack-manila-csi-controllerplugin
+  namespace: {{ manila_namespace }}
+  labels:
+    app: openstack-manila-csi
+    component: controllerplugin
+spec:
+  selector:
+    app: openstack-manila-csi
+    component: controllerplugin
+  ports:
+    - name: dummy
+      port: 12345
+---
+kind: StatefulSet
+apiVersion: apps/v1
+metadata:
+  name: openstack-manila-csi-controllerplugin
+  namespace: {{ manila_namespace }}
+  labels:
+    app: openstack-manila-csi
+    component: controllerplugin
+spec:
+  serviceName: openstack-manila-csi-controllerplugin
+  replicas: {{ (groups['master'] | length) + (groups['add_master'] | default([]) | length) }}
+  selector:
+    matchLabels:
+      app: openstack-manila-csi
+      component: controllerplugin
+  template:
+    metadata:
+      labels:
+        app: openstack-manila-csi
+        component: controllerplugin
+    spec:
+      serviceAccountName: openstack-manila-csi-controllerplugin
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          effect: NoSchedule
+      imagePullSecrets:
+        - name: local-registry-secret
+      containers:
+        - name: provisioner
+          image: {{csi_provisioner_image}}
+          args:
+            - "--v={{ manila_csi_loglevel }}"
+            - "--csi-address=$(ADDRESS)"
+            - "--timeout={{ manila_csi_timeout }}"
+            - "--leader-election={{ manila_csi_leader_election }}"
+            - "--leader-election-lease-duration={{ manila_csi_leader_election_lease_duration }}"
+            - "--leader-election-renew-deadline={{ manila_csi_leader_election_renew_deadline }}"
+            - "--volume-name-prefix={{ manila_volume_name_prefix }}"
+          env:
+            - name: ADDRESS
+              value: {{ manila_csi_address }}
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: plugin-dir
+              mountPath: {{ manila_plugin_dir }}
+        - name: snapshotter
+          image: {{ csi_snapshotter_image }}
+          args:
+            - "--v={{ manila_csi_loglevel }}"
+            - "--csi-address=$(ADDRESS)"
+            - "--timeout={{ manila_csi_timeout }}"
+            - "--leader-election={{manila_csi_leader_election}}"
+            - "--leader-election-lease-duration={{manila_csi_leader_election_lease_duration}}"
+            - "--leader-election-renew-deadline={{manila_csi_leader_election_renew_deadline}}"
+          env:
+            - name: ADDRESS
+              value: {{ manila_csi_address }}
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: plugin-dir
+              mountPath: {{ manila_plugin_dir }}
+{% if manila_csi_allow_expansion %}
+        - name: resizer
+          image: {{ csi_resizer_image }}
+          args:
+            - "--v={{ manila_csi_loglevel }}"
+            - "--csi-address=$(ADDRESS)"
+            - "--timeout={{ manila_csi_timeout }}"
+            - "--handle-volume-inuse-error=false"
+            - "--leader-election={{manila_csi_leader_election}}"
+            - "--leader-election-lease-duration={{manila_csi_leader_election_lease_duration}}"
+            - "--leader-election-renew-deadline={{manila_csi_leader_election_renew_deadline}}"
+          env:
+            - name: ADDRESS
+              value: {{ manila_csi_address }}
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: plugin-dir
+              mountPath: {{ manila_plugin_dir }}
+{% endif %}
+        - name: nodeplugin
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["SYS_ADMIN"]
+            allowPrivilegeEscalation: true
+          image: {{ manila_csi_plugin_image }}
+          command: ["/bin/sh", "-c",
+            '/bin/manila-csi-plugin
+            --nodeid=$(NODE_ID)
+            --endpoint=$(CSI_ENDPOINT)
+            --drivername=$(DRIVER_NAME)
+            --share-protocol-selector=$(MANILA_SHARE_PROTO)
+            --fwdendpoint=$(FWD_CSI_ENDPOINT)'
+          ]
+          env:
+            - name: DRIVER_NAME
+              value: {{ manila_csi_drivername }}
+            - name: NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: CSI_ENDPOINT
+              value: {{ manila_csi_address }}
+            - name: FWD_CSI_ENDPOINT
+              value: {{ manila_fwd_csi_endpoint }}
+            - name: MANILA_SHARE_PROTO
+              value: {{ manila_csi_share_protocol }}
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: plugin-dir
+              mountPath: {{ manila_plugin_dir }}
+            - name: fwd-plugin-dir
+              mountPath: {{ manila_csi_fwd_plugin_dir }}
+            - name: pod-mounts
+              mountPath: {{ manila_csi_pods_mount_dir }}
+              mountPropagation: Bidirectional
+{% if openstack_ca_cert != "" %}
+            - name: os-cacert
+              mountPath: {{ manila_openstack_ca_cert_path }}
+              readOnly: true
+{% endif %}
+      volumes:
+        - name: plugin-dir
+          hostPath:
+            path: {{ manila_plugin_dir }}
+            type: DirectoryOrCreate
+        - name: fwd-plugin-dir
+          hostPath:
+            path: {{ manila_csi_fwd_plugin_dir }}
+            type: Directory
+        - name: pod-mounts
+          hostPath:
+            path: {{ manila_csi_pods_mount_dir }}
+            type: Directory
+{% if openstack_ca_cert != "" %}
+        - name: os-cacert
+          secret:
+            secretName: openstack-ca-cert
+{% endif %}

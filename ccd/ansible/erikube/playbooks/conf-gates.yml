@@ -1,0 +1,79 @@
+- name: Update kubelet config for master nodes
+  hosts: master
+  become: yes
+  tasks:
+    - name: Remove IPv6DualStack flag from featureGates on master nodes
+      lineinfile:
+        path: /var/lib/kubelet/config.yaml
+        regexp: "IPv6DualStack: false"
+        state: absent
+    - name: Remove RemoveSelfLink flag from featureGates on master nodes
+      lineinfile:
+        path: /var/lib/kubelet/config.yaml
+        regexp: "RemoveSelfLink: false"
+        state: absent
+      when: not image_based_deployment | default(false) | bool
+    - name: Remove MixedProtocolLBService flag from featureGates on master nodes
+      lineinfile:
+        path: /var/lib/kubelet/config.yaml
+        regexp: "MixedProtocolLBService: true"
+        state: absent
+      when: not image_based_deployment | default(false) | bool
+    - name: Remove LegacyServiceAccountTokenNoAutoGeneration flag from featureGates on master nodes
+      lineinfile:
+        path: /var/lib/kubelet/config.yaml
+        regexp: "LegacyServiceAccountTokenNoAutoGeneration: true"
+        state: absent
+      when: not image_based_deployment | default(false) | bool
+    - name: Remove TopologyManager flag from featureGates on master nodes
+      lineinfile:
+        path: /var/lib/kubelet/config.yaml
+        regexp: "TopologyManager: true"
+        state: absent
+      when: not image_based_deployment | default(false) | bool
+
+- name: Update kubelet config for worker nodes
+  hosts: worker
+  become: yes
+  tasks:
+    - name: Remove BoundServiceAccountTokenVolume flag from featureGates on worker nodes
+      lineinfile:
+        path: /var/lib/kubelet/config.yaml
+        regexp: "BoundServiceAccountTokenVolume: false"
+        state: absent
+      when: not image_based_deployment | default(false) | bool
+    - name: Remove SCTPSupport flag from featureGates on worker nodes
+      lineinfile:
+        path: /var/lib/kubelet/config.yaml
+        regexp: "SCTPSupport: true"
+        state: absent
+      when: not image_based_deployment | default(false) | bool
+    - name: Remove IPv6DualStack flag from featureGates on worker nodes
+      lineinfile:
+        path: /var/lib/kubelet/config.yaml
+        regexp: "IPv6DualStack: false"
+        state: absent
+    - name: Remove RemoveSelfLink flag from featureGates on worker nodes
+      lineinfile:
+        path: /var/lib/kubelet/config.yaml
+        regexp: "RemoveSelfLink: false"
+        state: absent
+      when: not image_based_deployment | default(false) | bool
+    - name: Remove MixedProtocolLBService flag from featureGates on worker nodes
+      lineinfile:
+        path: /var/lib/kubelet/config.yaml
+        regexp: "MixedProtocolLBService: true"
+        state: absent
+      when: not image_based_deployment | default(false) | bool
+    - name: Remove LegacyServiceAccountTokenNoAutoGeneration flag from featureGates on worker nodes
+      lineinfile:
+        path: /var/lib/kubelet/config.yaml
+        regexp: "LegacyServiceAccountTokenNoAutoGeneration: true"
+        state: absent
+      when: not image_based_deployment | default(false) | bool
+    - name: Remove TopologyManager flag from featureGates on worker nodes
+      lineinfile:
+        path: /var/lib/kubelet/config.yaml
+        regexp: "TopologyManager: true"
+        state: absent
+      when: not image_based_deployment | default(false) | bool

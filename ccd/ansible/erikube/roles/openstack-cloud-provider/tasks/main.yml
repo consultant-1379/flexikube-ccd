@@ -1,0 +1,71 @@
+
+- name: Set fact for openstack_cloud_controller_manager_image
+  set_fact:
+    openstack_cloud_controller_manager_image: "{{ kube_image_prefix }}{{ containers.erikube.openstack_cloud_controller_manager }}"
+
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/erikube-k8s-XXXXXX
+  register: cloudprovidertemp
+  changed_when: False
+
+- name: Create files for openstack cloud provider
+  template:
+    src: "{{item}}.j2"
+    dest: "{{ cloudprovidertemp.stdout }}/{{item}}"
+  with_items:
+    - cloud-config
+    - openstack-cloud-controller-manager-pod.yml
+
+- block:
+  - name: Create OS CA cert
+    copy:
+      content: "{{ openstack_ca_cert }}"
+      dest: "{{ cloudprovidertemp.stdout }}/os_cacert"
+
+  - name: Delete secret os_cacert if exists
+    shell: "{{ kubectl }} delete secret openstack-ca-cert -n kube-system"
+    register: delete_os_cacert
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: delete_os_cacert.rc == 0
+    ignore_errors: yes
+
+  - name: Create secret os_cecert to kube-system namespace
+    shell: "{{ kubectl }} create secret generic openstack-ca-cert --from-file={{ cloudprovidertemp.stdout }}/os_cacert -n kube-system"
+    register: create_os_cacert
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: create_os_cacert.rc == 0
+
+  when: openstack_ca_cert != ""
+
+- name: Create CA-Signed Openstack Cloud Controller Manager Certificate
+  import_tasks: openstack-cloud-controller-manager-certificate.yml
+
+- name: Delete secret openstack-cloud-config if exists
+  shell: "{{ kubectl }} delete secret openstack-cloud-config -n kube-system"
+  register: delete_os_cloud_config
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (delete_os_cloud_config.rc == 0 or "not found" in delete_os_cloud_config.stderr)
+  ignore_errors: yes
+
+- name: Create secret openstack-cloud-config to kube-system namespace
+  shell: "{{ kubectl }} create secret generic openstack-cloud-config --from-file={{ cloudprovidertemp.stdout }}/cloud-config -n kube-system"
+  register: create_os_cloud_config
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: create_os_cloud_config.rc == 0
+
+- name: Apply Openstack CCM template
+  shell: "{{ kubectl }} apply -f {{ cloudprovidertemp.stdout }}/openstack-cloud-controller-manager-pod.yml"
+  register: apply_os_ccm
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: apply_os_ccm.rc == 0
+
+- name: Delete temp directory
+  file:
+    name: "{{ cloudprovidertemp.stdout }}"
+    state: absent
+  changed_when: False

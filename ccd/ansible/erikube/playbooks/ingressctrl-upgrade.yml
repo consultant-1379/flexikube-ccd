@@ -1,0 +1,160 @@
+---
+- name: Gather facts as non root
+  hosts: master[0]
+  gather_facts: yes
+
+- name: Upgrade ingress controller
+  hosts: master[0]
+  become: yes
+  pre_tasks:
+  - include_vars: ../../common/container-list.json
+  vars:
+  - kube_image_prefix: "{{ docker_registry_host | default(default_registry) }}/"
+  - installed_ingress_controller: "nginx"
+  - installed_ingress_controller_service_name: "ingress-nginx"
+  - installed_ingress_controller_namespace: "ingress-nginx"
+  - cr_hostname: "{{ container_registry_hostname | default('k8s-registry.eccd.local') }}"
+
+  roles:
+    - erikube-defaults
+
+  tasks:
+  # Find the installed ingress controller and set installed_ingress_controller
+  - name: Get the ingress services installed
+    command: "{{ kubectl }} get ing -A"
+    register: output
+    failed_when: false
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: (output.rc == 0 or "not found" in output.stderr)
+  - debug:
+      msg: The Installed Ingress Service Output {{ output.stdout }}
+
+  - name: Set installed ingress controller name as iccr
+    set_fact:
+      installed_ingress_controller: "iccr"
+      installed_ingress_controller_service_name: "eric-tm-ingress-controller-cr"
+      installed_ingress_controller_namespace: "ccd-ingress"
+    when: output.stdout.find('ingress-iccr-ingress') != -1
+  - debug:
+      msg: The installed ingress is {{ installed_ingress_controller }}
+
+  # Copy the ingress controller service external IP to a temporary file
+  - name: Find the External IP address
+    command: "{{ kubectl }} get services {{ installed_ingress_controller_service_name }} -n {{ installed_ingress_controller_namespace }} --output jsonpath='{.status.loadBalancer.ingress[0].ip}'"
+    register: result
+    failed_when: false
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: (result.rc == 0 or "not found" in result.stderr)
+  - debug:
+      msg: Result is {{ result }}
+
+  - name: Copy Ingress Service External IP address to a temporary file
+    copy:
+      force: yes
+      content: "{{ result.stdout }}"
+      dest: "/tmp/ingress_external_ip.txt"
+    when: result.rc == 0
+
+  # purge the installed ingress controller
+  - set_fact:
+      ingressctrl_action: purge
+  - name: Purge ingress-controller-{{ installed_ingress_controller }}
+    include_role:
+      name: ingress-controller-{{ installed_ingress_controller }}
+
+  # deploy the default ingress controller
+  - set_fact:
+      ingressctrl_action: deploy
+  - name: Deploy ingress-controller-{{ default_ingress_controller }}
+    include_role:
+      name: ingress-controller-{{ default_ingress_controller }}
+
+  # When it is nginx upgrade update affected CCD ingress manifests
+  - include_role:
+      name: kube-api-ingress
+      tasks_from: upgrade.yml
+    when:
+      - default_ingress_controller == "nginx"
+      - deploy_kube_api_ingress | default(true) | bool
+      - kube_api_ingress_host is defined
+
+  # Install ingress
+  - name: Ensure default ingress controller namespace and service name are set during deploy
+    assert: { that: ["{{ item }} is defined", "{{ item }} != None", "{{ item }} | length > 0"] }
+    with_items:
+      - default_ingress_service
+      - default_ingress_namespace
+
+  - name: Deploy the ingress for {{ default_ingress_controller }} ingress controller service
+    import_tasks: roles/ingress-controller-common/tasks/controller_ingress.yml
+    vars:
+      - kube_namespace: "{{ default_ingress_namespace }}"
+      - ingress_class: "{{ default_ingress_controller }}"
+      - ingress_service: "{{ default_ingress_service }}"
+
+  - name: Update CoreDNS with registry rewrite rules
+    block:
+      - name: create temp folder
+        shell: mktemp -d /tmp/coredns-configmap-XXXXXX
+        register: mktemp
+        changed_when: False
+
+      - name: Fetch the coredns configmap
+        shell: "{{ kubectl }} get cm coredns -n kube-system -o yaml > {{ mktemp.stdout }}/coredns_configmap.yaml"
+        become: yes
+
+      - name: Remove existing rewite lines
+        lineinfile:
+          dest: "{{ mktemp.stdout }}/coredns_configmap.yaml"
+          regexp: "^(\\s+)rewrite "
+          state: absent
+
+      - name: Add the rewrite cr_hostname to coredns
+        lineinfile:
+          dest: "{{ mktemp.stdout }}/coredns_configmap.yaml"
+          line: "        rewrite name {{ cr_hostname }}  {{ installed_ingress_controller_service_name }}.{{ installed_ingress_controller_namespace }}.svc.cluster.local"
+          insertbefore: loop
+          state: present
+          firstmatch: yes
+        when: cr_hostname is defined and cr_hostname | length > 0
+
+      - name: Add the rewrite kube_api_ingress_host to coredns configmap
+        lineinfile:
+          dest: "{{ mktemp.stdout }}/coredns_configmap.yaml"
+          line: "        rewrite name {{ kube_api_ingress_host }} {{ installed_ingress_controller_service_name }}.{{ installed_ingress_controller_namespace }}.svc.cluster.local"
+          insertbefore: loop
+          state: present
+          firstmatch: yes
+        when: kube_api_ingress_host is defined
+
+      - name: Add the rewrite k8s-registry.eccd.local to coredns configmap
+        lineinfile:
+          dest: "{{ mktemp.stdout }}/coredns_configmap.yaml"
+          line: "        rewrite name k8s-registry.eccd.local {{ installed_ingress_controller_service_name }}.{{ installed_ingress_controller_namespace }}.svc.cluster.local"
+          insertbefore: loop
+          state: present
+          firstmatch: yes
+
+      - name: Add the rewrite dex_ingress_host  to coredns configmap
+        lineinfile:
+          dest: "{{ mktemp.stdout }}/coredns_configmap.yaml"
+          line: "        rewrite name {{ dex_ingress_host }} {{ installed_ingress_controller_service_name }}.{{ installed_ingress_controller_namespace }}.svc.cluster.local"
+          insertbefore: loop
+          state: present
+          firstmatch: yes
+        when: dex_ingress_host is defined
+
+      - name: Apply the coredns configmap rewrite rules
+        shell: "{{ kubectl }} apply -f {{ mktemp.stdout }}/coredns_configmap.yaml"
+        become: yes
+
+      - name: Delete temp directory
+        file:
+          name: "{{ mktemp.stdout }}"
+          state: absent
+        become: yes
+
+    when: inventory_hostname == first_master
+

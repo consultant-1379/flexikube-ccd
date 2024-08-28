@@ -1,0 +1,23 @@
+---
+- block:
+  - name: Kubeadm reset
+    shell: /usr/local/bin/kubeadm reset
+
+  - name: Uninstall erikube   
+    shell: "docker run --privileged -v /usr/local:/target {{ erikube_installer_image }} uninstall"
+
+  - name: Reset services
+    script: reset-services.sh
+
+  - name: Reset docker
+    script: reset-docker.sh
+
+  - name: Cleanup dirs and files
+    script: cleanup-dirs.sh
+  when: not is_controller
+  ignore_errors: true
+  become: yes
+
+- name: Reset network and iptables
+  script: reset-network.sh
+  become: yes

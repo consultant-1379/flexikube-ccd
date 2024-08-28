@@ -1,0 +1,160 @@
+{% if (whereabouts_log_level is not defined or
+        (whereabouts_log_level != 'panic' and
+        whereabouts_log_level != 'error' and
+        whereabouts_log_level != 'debug') ) %}
+    {% set whereabouts_log_level = "debug" %}
+{% endif %}
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: whereabouts
+  namespace: kube-system
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: whereabouts
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: whereabouts-cni
+subjects:
+- kind: ServiceAccount
+  name: whereabouts
+  namespace: kube-system
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: whereabouts-cni
+rules:
+- apiGroups:
+  - whereabouts.cni.cncf.io
+  resources:
+  - ippools
+  - overlappingrangeipreservations
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - '*'
+- apiGroups: [""]
+  resources:
+  - pods
+  verbs:
+  - list
+  - watch
+- apiGroups: [""]
+  resources:
+  - nodes
+  verbs:
+  - get
+- apiGroups: ["k8s.cni.cncf.io"]
+  resources:
+    - network-attachment-definitions
+  verbs:
+    - get
+    - list
+    - watch
+- apiGroups:
+  - ""
+  - events.k8s.io
+  resources:
+    - events
+  verbs:
+  - create
+  - patch
+  - update
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: whereabouts
+  namespace: kube-system
+  labels:
+    tier: node
+    app: whereabouts
+spec:
+  selector:
+    matchLabels:
+      name: whereabouts
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        tier: node
+        app: whereabouts
+        name: whereabouts
+    spec:
+      hostNetwork: true
+      priorityClassName: system-cluster-critical
+      serviceAccountName: whereabouts
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      tolerations:
+      - operator: Exists
+        effect: NoSchedule
+      - effect: NoExecute
+        operator: Exists
+      imagePullSecrets:
+      - name: local-registry-secret
+      containers:
+      - name: whereabouts
+        command: [ "/bin/sh" ]
+        args:
+          - -c
+          - >
+            SLEEP=false /install-cni.sh &&
+            /ip-control-loop -log-level debug
+        image: {{ image_whereabouts_ipam }}
+        env:
+        - name: NODENAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: spec.nodeName
+        - name: WHEREABOUTS_RECONCILER_CRON
+          value: "*/5 * * * *"
+        - name: WHEREABOUTS_LOG_LEVEL
+          value: {{ whereabouts_log_level }}
+        - name: WHEREABOUTS_LOG_FILE
+          value: /var/log/whereabouts.log
+        - name: WHEREABOUTS_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "100Mi"
+          limits:
+            cpu: "100m"
+            memory: "100Mi"
+        securityContext:
+          capabilities:
+            drop:
+            - all
+        volumeMounts:
+        - name: cnibin
+          mountPath: /host/opt/cni/bin
+        - name: cni-net-dir
+          mountPath: /host/etc/cni/net.d
+      volumes:
+        - name: cnibin
+          hostPath:
+            path: /opt/cni/bin
+        - name: cni-net-dir
+          hostPath:
+            path: /etc/cni/net.d

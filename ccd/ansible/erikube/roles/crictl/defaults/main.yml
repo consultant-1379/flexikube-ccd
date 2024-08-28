@@ -1,0 +1,12 @@
+crictl_version: "v1.20.0"
+crictl_install_path: "/usr/local/bin"
+crictl_runtime: "containerd"
+crictl_cmd: "{{ crictl_install_path }}/crictl"
+
+#crictl command
+crictl_cmd: /usr/local/bin/crictl
+
+# default sleep value after container restart
+# can be increased per container restart if container
+# requires more time for stabilizing
+container_sleep_after_restart: 1

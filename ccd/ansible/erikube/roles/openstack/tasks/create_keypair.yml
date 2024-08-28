@@ -1,0 +1,36 @@
+---
+- name: "Remove keypair: {{ os_ssh_key_name }} if already exist"
+  os_keypair:
+    auth:
+     auth_url: '{{ os_auth_url }}'
+     username: '{{ os_username }}'
+     password: '{{ os_password }}'
+     project_name: '{{ os_project_name }}'
+     user_domain_name: '{{ os_user_domain_name }}'
+     project_domain_name: '{{ os_user_domain_name }}'
+    state: absent
+    name: "{{ os_ssh_key_name }}"
+
+- block:
+  - name: Generate public key file if public key content is given
+    copy:
+      content: "{{ os_public_key_string }}"
+      dest: "/tmp/given_ssh_publick_key.pub"
+
+  - name: "Use generated public key file as {{ os_public_key_file }}"
+    set_fact:
+      os_public_key_file: "/tmp/given_ssh_publick_key.pub"
+  when: os_public_key_string is defined and os_public_key_string | trim != ""
+
+- name: "Generate keypair: {{ os_ssh_key_name }} by given public key file {{ os_public_key_file }}"
+  os_keypair:
+    auth:
+     auth_url: '{{ os_auth_url }}'
+     username: '{{ os_username }}'
+     password: '{{ os_password }}'
+     project_name: '{{ os_project_name }}'
+     user_domain_name: '{{ os_user_domain_name }}'
+     project_domain_name: '{{ os_user_domain_name }}'
+    state: present
+    name: "{{ os_ssh_key_name }}"
+    public_key_file: "{{ os_public_key_file }}"

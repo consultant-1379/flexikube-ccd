@@ -1,0 +1,55 @@
+---
+- name: Renew certs
+  shell: "{{ kubeadm_cmd }} certs renew all"
+  become: yes
+
+- name: Restart API server
+  vars:
+    target_container_id_name: "kube-apiserver"
+  include_role:
+    name: crictl
+    tasks_from: restart-cri-container
+
+- name: Restart Kube Controller
+  vars:
+    target_container_id_name: "kube-controller-manager"
+  include_role:
+    name: crictl
+    tasks_from: restart-cri-container
+
+- name: Restart Kube Scheduler
+  vars:
+    target_container_id_name: "kube-scheduler"
+  include_role:
+    name: crictl
+    tasks_from: restart-cri-container
+
+- name: Restart Openstack Cloud Controller
+  vars:
+    target_container_id_name: "openstack-cloud-controller-manager"
+  include_role:
+    name: crictl
+    tasks_from: restart-cri-container
+
+- name: Restart Calico Kube Controller
+  vars:
+    target_container_id_name: "calico-kube-controllers"
+  include_role:
+    name: crictl
+    tasks_from: restart-cri-container
+
+- name: Restart Calicoctl
+  vars:
+    target_container_id_name: "calicoctl"
+  include_role:
+    name: crictl
+    tasks_from: restart-cri-container
+
+- name: Restart kubelet service
+  systemd:
+    name: kubelet
+    state: restarted
+
+- name: pause for 60 seconds
+  pause:
+    seconds: 60

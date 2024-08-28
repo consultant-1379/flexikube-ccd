@@ -1,0 +1,127 @@
+---
+- name: Check IPv4 forwarding is enabled
+  hosts: all
+  become: true
+  tasks:
+    - block:
+        - name: Get IPv4 forwarding value
+          command: sysctl net.ipv4.ip_forward
+          register: ipv4_value
+          changed_when: false
+
+        - name: Display if IPv4 forwarding is disabled
+          assert:
+            that: ipv4_value.stdout.split('=')[1] == " 1"
+            fail_msg: Please enable IPv4 forwarding on {{ansible_hostname}}
+            quiet: true
+
+- name: Check br_netfilter module is installed
+  hosts: all
+  become: true
+  tasks:
+    - block:
+        - name: Get br_netfilter
+          shell: lsmod | grep br_netfilter
+          register: br_netfilter_res
+          ignore_errors: True
+          failed_when: false
+          changed_when: false
+
+        - name: Display if br_netfilter module needs to be installed
+          assert:
+            that: br_netfilter_res.rc == 0
+            fail_msg: Please install br_netfilter module on {{ansible_hostname}}
+            quiet: true
+
+- name: Check bridged packets are enabled
+  hosts: all
+  become: true
+  tasks:
+    - block:
+        - name: Get bridged packets value
+          command: sysctl net.bridge.bridge-nf-call-iptables
+          register: bridged_value
+          changed_when: false
+
+        - name: Display if bridged packets is disabled
+          assert:
+            that: bridged_value.stdout.split('=')[1] == " 1"
+            fail_msg: Please enable bridged packets on {{ansible_hostname}}
+            quiet: true
+
+- name: Check rp_filter is enabled
+  hosts: all
+  become: true
+  tasks:
+    - block:
+        - name: Get rp_filter value
+          command: sysctl net.ipv4.conf.all.rp_filter
+          register: rp_filter_value
+          changed_when: false
+
+        - name: Display if rp_filter is disabled
+          assert:
+            that: rp_filter_value.stdout.split('=')[1] == " 1"
+            fail_msg: Please enable rp_filter on {{ansible_hostname}}
+            quiet: true
+
+- name: Check IANA port range is 49152 65535
+  hosts: all
+  become: true
+  vars:
+    separator: "\t"
+  tasks:
+    - block:
+        - name: Get IANA port range
+          command: sysctl net.ipv4.ip_local_port_range
+          register: iana_value
+          changed_when: false
+
+        - set_fact:
+            start_value: '{{iana_value.stdout.split("=")[1].split(separator)[0]}}'
+            end_value: '{{iana_value.stdout.split("=")[1].split(separator)[1]}}'
+
+        - name: Display if IANA port range is incorrect
+          assert:
+            that: start_value == " 49152" and end_value == "65535"
+            fail_msg: Please change IANA port range on {{ansible_hostname}} to 49152 65535
+            quiet: true
+
+- name: Check IPv6 forwarding is enabled
+  hosts: all
+  gather_facts: true
+  become: true
+  tasks:
+    - block:
+        - name: Get IPv6 forwarding value
+          command: sysctl net.ipv6.conf.all.forwarding
+          register: ipv6_value
+          changed_when: false
+
+        - name: Display if IPv6 forwarding is disabled
+          assert:
+            that: ipv6_value.stdout.split('=')[1] == " 1"
+            fail_msg: Please enable IPv6 forwarding on {{ansible_hostname}}
+            quiet: true
+
+    - block:
+        - name: Get Modprobe IP6Tables modules
+          shell: lsmod | grep {{item}}
+          register: module_res
+          ignore_errors: True
+          failed_when: false
+          changed_when: false
+          with_items:
+            - ip6_tables
+            - ip6table_filter
+            - ip6table_nat
+            - ip6table_raw
+
+        - name: Displaying modules which needs to be installed
+          assert:
+            that: item.rc == 0
+            fail_msg: "Please install the {{item.item}} module in {{ansible_hostname}}"
+            quiet: true
+          loop: "{{module_res.results}}"
+          loop_control:
+            label: "{{item.item}}"

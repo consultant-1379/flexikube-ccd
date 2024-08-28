@@ -1,0 +1,12 @@
+---
+crio_version: 1.7.0
+
+crio_config_dir: /etc/crio
+
+crio_conf_d_dir: /etc/crio/crio.conf.d
+
+oci_hooks_d_dir: /usr/local/share/containers/oci/hooks.d
+
+oci_umount_d_dir: /usr/local/share/oci-umount/oci-umount.d
+
+var_lib_eccd_dir: /var/lib/eccd

@@ -1,0 +1,39 @@
+---
+- name: Rotate Calico client cert for ETCD
+  hosts: master[0]
+  vars:
+     etcd_ca_host: "{{ groups.etcd.0 }}"
+  tasks:
+    - include_role:
+        name: erikube-defaults
+    - include_role:
+        name: network_plugin/calico
+        tasks_from: rotate-etcd-certs.yml
+      when: kube_network_plugin is not defined or kube_network_plugin == 'calico'
+
+- name: Preload container images
+  hosts: master, worker
+  become: true
+  max_fail_percentage: 0
+  tasks:
+  - include_role:
+      name: network_plugin
+    vars:
+      plugin_action: preload
+
+# install will update all manifests and k8s will update running compents to comply
+- name: Update calico and configured network backends (e.g. multus) version
+  hosts: master[0], etcd
+  vars:
+    etcd_peers: "{{ groups.etcd | default([], true) }}"
+    etcd_ca_host: "{{ groups.etcd.0 }}"
+  pre_tasks:
+    - include_vars: roles/etcd/defaults/main.yml
+  tasks:
+    - name: Erikube defaults for all hosts
+      include_role:
+        name: erikube-defaults
+    - name: Install network plugins on first master
+      include_role:
+        name: network_plugin
+      when: inventory_hostname == groups.master.0

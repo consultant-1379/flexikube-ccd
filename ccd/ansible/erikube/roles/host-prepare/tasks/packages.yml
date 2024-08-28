@@ -1,0 +1,23 @@
+---
+- name: Remove OS specific packages
+  package:
+    name: "{{ item }}"
+    state: absent
+    update_cache: yes
+  with_items:
+    - "{{ host_remove_packages | default([]) }}"
+
+- name: Setup packages for Atomic
+  include_tasks: atomic-pkg.yml
+  when: is_atomic
+
+- name: Install OS specific packages
+  package:
+    name: "{{ host_prepare_packages | default([]) }}"
+    state: present
+    update_cache: yes
+  register: result
+  until: result is success
+  retries: "{{ install_os_packages_retries if (install_os_packages_retries is defined) else 0 }}"
+  delay: "{{ install_os_packages_delay if (install_os_packages_delay is defined) else 5 }}"
+  ignore_errors: yes

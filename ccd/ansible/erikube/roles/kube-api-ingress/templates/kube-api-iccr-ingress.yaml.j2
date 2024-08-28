@@ -1,0 +1,17 @@
+---
+apiVersion: projectcontour.io/v1
+kind: HTTPProxy
+metadata:
+  name: kubernetes-api
+  namespace: kube-system
+  annotations:
+    kubernetes.io/ingress.class: iccr
+spec:
+  virtualhost:
+    fqdn: {{ kube_api_ingress_host }}
+    tls:
+      passthrough: true
+  tcpproxy:
+    services:
+      - name: kube-api
+        port: {{ kube_apiserver_port }}

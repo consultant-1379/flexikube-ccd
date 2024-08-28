@@ -1,0 +1,11 @@
+---
+- name: Fix Kubernetes Version Disclosure
+  hosts: master[0]
+  tasks:
+  - name: Modify system:public-info-viewer clusterrole to forbid /version access to unauthorized users
+    command: >
+      kubectl patch clusterrole system:public-info-viewer --patch
+      '{"metadata":{"annotations":{"rbac.authorization.kubernetes.io/autoupdate":"false"}},
+      "rules":[{"nonResourceURLs":["/healthz","/livez","/readyz"],"verbs":["get"]}]}'
+    register: patchres
+    changed_when: "'clusterrole.rbac.authorization.k8s.io/system:public-info-viewer patched' in patchres.stdout"

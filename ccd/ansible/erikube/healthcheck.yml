@@ -1,0 +1,187 @@
+---
+# Checks reachable master and etcd nodes to perform healthcheck
+# on reachable node in case of HA Setup
+- import_playbook: playbooks/check-reachable-nodes.yml
+
+- name: Host Key Checking
+  hosts: localhost
+  roles:
+  - erikube-defaults
+  vars:
+    kubectl: "/usr/local/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf"
+  tasks:
+  - name: Retrieve the IP address of all master and worker nodes
+    shell: >-
+      {{ kubectl }} get nodes -o wide | grep Ready | awk '{print $6}'
+    register: master_worker_ip_address
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: (master_worker_ip_address.rc == 0 or "not found" in master_worker_ip_address.stderr)
+
+  - name: Update Missing Master And Worker Host Key
+    connection: local
+    become: yes
+    shell: ssh-keygen -F "{{ item }}" || ssh-keyscan -H "{{ item }}" >> ~/.ssh/known_hosts
+    with_items: "{{ master_worker_ip_address.stdout.split('\n') }}"
+    ignore_errors: yes
+
+- name: Prepare Ansible inventory with IBD
+  hosts: localhost
+  become: yes
+  tasks:
+   - name: Worker inventory creation
+     include_role:
+       name: roles/erikube-defaults
+       tasks_from: create_worker_inventory
+     when: image_based_deployment | default(false) | bool
+
+- import_playbook: playbooks/ansible-check.yml
+
+- name: Gather facts as non root
+  hosts: reachable_master, worker, reachable_etcd
+  gather_facts: yes
+  tasks:
+    - name: "Define fact for collecting list of failed tasks"
+      set_fact:
+        health_checks_list: []
+
+- name: Gather facts as non root
+  hosts: reachable_etcd
+  gather_facts: yes
+
+- name: Include vars from erikube-defaults
+  hosts: reachable_master[0]
+  pre_tasks:
+    - include_vars: roles/erikube-defaults/defaults/main.yml
+
+- name: Check time synchronization (NTP)
+  hosts: reachable_master, worker
+  tasks:
+    - block:
+      - name: "NTP should be synchronized"
+        shell: timedatectl  | grep 'NTP synchronized'
+        register: synchronized
+        changed_when: false
+        failed_when: "'yes' not in synchronized.stdout"
+      - set_fact:
+          health_checks_list: "{{ health_checks_list }} + ['Check time synchronization (NTP) [PASS]']"
+      rescue:
+      - set_fact:
+          health_checks_list: "{{ health_checks_list }} + ['Check time synchronization (NTP) [FAIL]']"
+      when: (ansible_os_family != 'Debian') and (ansible_os_family != 'Suse')
+
+- name: Check time synchronization (NTP)
+  hosts: reachable_master, worker
+  tasks:
+    - block:
+      - name: "NTP should be synchronized"
+        shell: timedatectl  | grep 'System clock synchronized'
+        register: synchronized
+        changed_when: false
+        failed_when: "'yes' not in synchronized.stdout"
+      - set_fact:
+          health_checks_list: "{{ health_checks_list }} + ['Check time synchronization (NTP) [PASS]']"
+      rescue:
+      - set_fact:
+          health_checks_list: "{{ health_checks_list }} + ['Check time synchronization (NTP) [FAIL]']"
+      when: (ansible_os_family == 'Debian') or (ansible_os_family == 'Suse')
+
+- name: Check time synchronization on etcd (NTP)
+  hosts: reachable_etcd
+  tasks:
+    - block:
+      - name: "NTP should be synchronized on etcd"
+        shell: timedatectl  | grep 'NTP synchronized'
+        register: synchronized
+        changed_when: false
+        failed_when: "'yes' not in synchronized.stdout"
+      - set_fact:
+          health_checks_list: "{{ health_checks_list }} + ['Check time synchronization on etcd (NTP) [PASS]']"
+      rescue:
+      - set_fact:
+          health_checks_list: "{{ health_checks_list }} + ['Check time synchronization on etcd (NTP) [FAIL]']"
+      when: (ansible_os_family != 'Debian') and (ansible_os_family != 'Suse')
+
+- name: Check time synchronization on etcd (NTP)
+  hosts: reachable_etcd
+  tasks:
+    - block:
+      - name: "NTP should be synchronized on etcd"
+        shell: timedatectl  | grep 'System clock synchronized'
+        register: synchronized
+        changed_when: false
+        failed_when: "'yes' not in synchronized.stdout"
+      - set_fact:
+          health_checks_list: "{{ health_checks_list }} + ['Check time synchronization on etcd (NTP) [PASS]']"
+      rescue:
+      - set_fact:
+          health_checks_list: "{{ health_checks_list }} + ['Check time synchronization on etcd (NTP) [FAIL]']"
+      when: (ansible_os_family == 'Debian') or (ansible_os_family == 'Suse')
+
+- import_playbook: playbooks/etcd-health.yml
+- import_playbook: playbooks/kube-health.yml
+- import_playbook: playbooks/kube-alerts.yml
+  vars:
+    num_retries: 3
+    retry_delay: 60
+  when: pm_monitoring_enabled | default(true) | bool
+
+- name: Verify the configured cluster wide Pod Disruption Budget (PDB)
+  hosts: "{{ groups.reachable_master[0] | d(groups.master[0]) }}"
+  become: yes
+  roles:
+  - erikube-defaults
+  vars:
+    kubectl_get_pdb: "{{ kubectl }} get pdb --all-namespaces"
+    verify_pdb: "yes"
+  tasks:
+    - name: "Get total number of pdb objects"
+      shell: >-
+        {{ kubectl_get_pdb }} -o=jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | wc -l
+      register: pdb_items_len
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: (pdb_items_len.rc == 0 or "not found" in pdb_items_len.stderr)
+      changed_when: false
+    - debug:
+        msg: "Total PDB objects are {{ pdb_items_len.stdout }}"
+    - debug:
+        msg: "Check for errors in pdb_items_len.stderr_lines={{ pdb_items_len.stderr_lines }}"
+    - set_fact:
+        health_checks_list: "{{ health_checks_list }} + ['Check Pod Distribution Budget (PDB) [FAIL] , problem in fetching PDBs']"
+      when: ((pdb_items_len.stderr_lines | length) != 0) and ((pdb_items_len.stdout | int) == 0)
+    - block:
+      - name: "Get the PDBs disruption status in all namespaces"
+        shell: >-
+          {{ kubectl_get_pdb }} -o=jsonpath='{range .items[*]}status: {.status.conditions[?(@.type == "DisruptionAllowed")].status}, pdb: {.metadata.name}, namespace: {.metadata.namespace}{"\n"}{end}'
+        register: pdb_status
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: (pdb_status.rc == 0 or "not found" in pdb_status.stderr)
+        changed_when: false
+      - name: Fail, if the pod disruption status of one or more pdb is 'False'
+        ansible.builtin.fail:
+          msg: "**** In-appropriate Pod Distribution Budget (pdb) ({{ item }}) ****"
+        when: "'status: False' in item"
+        loop: "{{ pdb_status.stdout_lines}}"
+      - set_fact:
+          health_checks_list: "{{ health_checks_list }} + ['Check Pod Distribution Budget (PDB) [PASS]']"
+      when: (verify_pdb | lower == 'yes') and (pdb_items_len.stdout | int > 0)
+      rescue:
+      - set_fact:
+          health_checks_list: "{{ health_checks_list }} + ['Check Pod Distribution Budget (PDB) [FAIL] , problem in fetching PDBs or In-appropriate pod disruption for the Upgrade operation, please adjust PDBs before initiating the CCD Upgrade operation']"
+
+- name: Summarize Health Check Result
+  hosts: reachable_master, worker, reachable_etcd
+  tasks:
+    - name: "Health Check Summary Report"
+      debug: var=health_checks_list
+
+- name: Assert Health Check Result
+  hosts: reachable_master, worker, reachable_etcd
+  tasks:
+    - name: "Check for failures"
+      assert:
+        that:
+          - "'FAIL' not in item"
+      loop: "{{ health_checks_list }}"

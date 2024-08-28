@@ -1,0 +1,13 @@
+---
+- name: Gather facts as non root
+  hosts: [master, worker]
+  gather_facts: yes
+
+- hosts: [master, worker]
+  become: yes
+  tasks:
+  - name: default vars
+    include_vars:
+      file: roles/kube-common/defaults/main.yml
+  roles:
+    - kube-purge

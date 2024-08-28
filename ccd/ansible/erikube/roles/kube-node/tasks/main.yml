@@ -1,0 +1,81 @@
+---
+- name: Update etc/hosts file
+  include_tasks: "{{ role_path}}/../kube-common/tasks/update-etc-hosts.yml"
+
+- name: Update etc/resolv.conf file
+  include_tasks: "{{ role_path}}/../kube-common/tasks/update-etc-resolv.yml"
+
+- name: Check if kubeadm has already run
+  stat:
+    path: "{{ kube_config_dir }}/kubelet.conf"
+  register: kubelet_conf
+  become: yes
+
+- block:
+  - name: Create bootstrap token
+    shell: "{{ kubeadm_cmd }} token create --description erikube 2> /dev/null"
+    register: kubeadm_token
+
+  - name: Set fact kube_bootstrap_token
+    set_fact:
+      kube_bootstrap_token: "{{ kubeadm_token.stdout }}"
+
+  - name: Compute SHA256 digest for CA cert
+    shell: |
+      openssl x509 -pubkey -in {{ kube_cert_dir }}/ca.crt |
+        openssl rsa -pubin -outform der 2> /dev/null |
+        openssl dgst -sha256 | cut -d ' ' -f 2
+    register: pubkey_hash
+
+  - name: Set fact kube_discovery_token_ca_cert_hash
+    set_fact:
+      kube_discovery_token_ca_cert_hash: "{{ pubkey_hash.stdout }}"
+
+  become: yes
+  delegate_to: "{{ groups.master.0 }}"
+  run_once: true
+
+- block:
+  - name: Create kubernetes directories
+    file:
+      path: "{{ item }}"
+      state: directory
+      mode: "{{ file_default_mode }}"
+      owner: "{{ file_default_owner }}"
+      group: "{{ file_default_group }}"
+    with_items:
+      - "{{ kube_config_dir }}"
+      - "{{ kube_config_dir }}/pki"
+      - "{{ kube_manifest_dir }}"
+
+  - name: Create kubeadm config file
+    template:
+      src: "kubeadm-cfg.yml.j2"
+      dest: "{{ kube_config_dir }}/kubeadm-config.yaml"
+    become: yes
+    register: kubeadm_config
+
+  - name: Join the kubernetes cluster {{ kube_apiserver_ip | ipwrap }}:{{ kube_apiserver_port }}
+    command: >
+      {{ kubeadm_cmd }} join --config {{ kube_config_dir }}/kubeadm-config.yaml
+      --ignore-preflight-errors=FileExisting-crictl
+      --ignore-preflight-errors=Port-10250
+      --ignore-preflight-errors=HTTPProxy
+    register: kubeadm_join
+
+  - debug: { msg: "{{ kubeadm_join.stdout.split('\n') }}"}
+  - debug: { msg: "{{ kubeadm_join.stderr.split('\n') }}"}
+
+  become: yes
+  when: not kubelet_conf.stat.exists
+  environment:
+    PATH: /usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin:{{ ansible_env.PATH }}
+
+- name: Assign worker label for worker nodes
+  shell: "{{ kubectl }} label node {{ ansible_nodename }} node-role.kubernetes.io/worker='worker' --overwrite"
+  become: yes
+  delegate_to: "{{ groups.master.0 }}"
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0

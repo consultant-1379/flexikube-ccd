@@ -1,0 +1,30 @@
+- name: Create temp workspace directory
+  command: mktemp -d /tmp/scaler-k8s-XXXXXX
+  register: cloudprovidertemp
+  changed_when: False
+
+- name: Set fact cluster_autoscaler_image
+  set_fact:
+    cluster_autoscaler_image: "{{ kube_image_prefix }}{{ containers.erikube.cluster_autoscaler }}"
+
+- name: Generate autoscaler service yaml
+  template:
+    src: "{{ azure_enable_cloud_provider | default('false') | bool | ternary('azure', 'aws') }}-cluster-autoscaler.yml.j2"
+    dest: "{{ cloudprovidertemp.stdout }}/cluster-autoscaler.yaml"
+
+- name: Setup Azure secrets
+  import_tasks: pre-apply-azure.yml
+  when: azure_enable_cloud_provider | default('false') | bool
+
+- name: Apply cluster autoscaler files
+  shell: "{{ kubectl }} apply -f {{ cloudprovidertemp.stdout }}/cluster-autoscaler.yaml"
+  register: result
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: result.rc == 0
+
+- name: Delete temp directory
+  file:
+    name: "{{ cloudprovidertemp.stdout }}"
+    state: absent
+  changed_when: False

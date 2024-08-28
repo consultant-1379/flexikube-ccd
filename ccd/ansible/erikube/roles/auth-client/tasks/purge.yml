@@ -1,0 +1,17 @@
+---
+- name: Delete all resources
+  become: yes
+  command: "{{ kubectl }} -n kube-system delete {{ item }}"
+  register: delete
+  changed_when: delete.rc == 0 and '"deleted" in delete.stdout'
+  failed_when: false
+  retries: "{{ kubectl_retry_count }}"
+  delay: "{{ kubectl_retry_delay }}"
+  until: (delete.rc == 0 or "not found" in delete.stderr)
+  with_items:
+    - "ing/auth-client"
+    - "svc/auth-client"
+    - "deploy/auth-client"
+    - "secret/auth-client-tls"
+    - "secret/auth-client-ca"
+    - "cm/auth-client"

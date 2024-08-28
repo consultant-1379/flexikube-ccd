@@ -1,0 +1,113 @@
+---
+- name: Include etcd and lb variable defaults
+  include_vars: "{{ item }}"
+  with_items:
+  - roles/etcd/defaults/main.yml
+  - roles/ingress-lb/defaults/main.yml
+
+- name: Extract locally stored backup
+  include: local_restore.yml
+
+- name: Stop kubelet service
+  ignore_errors: true
+  systemd:
+    name: kubelet
+    state: stopped
+  when: inventory_hostname in kube_hosts
+
+- name: Stop etcd service
+  ignore_errors: true
+  systemd:
+    name: "{{ etcd_service }}"
+    state: stopped
+  when: inventory_hostname in etcd_hosts
+
+- name: Stop erikube-loadbalancer service
+  ignore_errors: true
+  systemd:
+    name: "{{ ingress_lb_service }}.service"
+    state: stopped
+  when: inventory_hostname in lb_host
+
+- name: Replace host dirs with backed up dirs
+  command: tar -xzvf /tmp/{{ ansible_hostname }}.tgz -C /
+
+- name: Delete temp host backup
+  file:
+    path: /tmp/{{ ansible_hostname }}.tgz
+    state: absent
+  changed_when: False
+
+- include: kubernetes.yml
+  when: inventory_hostname in kube_hosts
+
+- include: etcd.yml
+  when: inventory_hostname in etcd_hosts
+
+- name: Get group ID for ansible user
+  become: no
+  command: id -g
+  register: id_g
+  changed_when: false
+
+- set_fact:
+    gid: "{{ id_g.stdout }}"
+
+- name: Create {{ ansible_env.HOME }}/.kube directory
+  file:
+    path: "{{ ansible_env.HOME }}/.kube"
+    state: directory
+    mode: 0700
+    owner: "{{ ansible_env.USER }}"
+    group: "{{ gid }}"
+  when: inventory_hostname in master_hosts
+
+- name: Copy /etc/kubernetes/admin.conf to {{ ansible_env.HOME }}/.kube/config
+  copy:
+    src: /etc/kubernetes/admin.conf
+    dest: "{{ ansible_env.HOME }}/.kube/config"
+    remote_src: yes
+    owner: "{{ ansible_env.USER }}"
+    group: "{{ gid }}"
+    mode: 0600
+  when: inventory_hostname in master_hosts
+
+- name: Start etcd service
+  systemd:
+    name: "{{ etcd_service }}"
+    state: started
+    daemon_reload: yes
+  when: inventory_hostname in etcd_hosts
+
+- name: Start kubelet service
+  systemd:
+    name: kubelet
+    state: started
+    daemon_reload: yes
+  when: inventory_hostname in kube_hosts
+
+- block:
+  - name: Wait for PODs getting into stable state
+    shell: >
+      {{ kubectl }} get po --no-headers --all-namespaces |
+      awk '{print $4}' |
+      grep -v -e RESTARTS -e Running -e Succeeded -e Evicted -e Completed || true
+    register: running_pods
+    until: running_pods.stderr == "" and running_pods.stdout == ""
+    retries: 90
+    delay: 10
+    changed_when: false
+  rescue:
+    - name: Print stdout
+      debug: msg="{{ running_pods.stdout.split('\n') }}"
+
+    - name: Print stderr
+      debug: msg="{{ running_pods.stderr.split('\n') }}"
+  when: inventory_hostname == master_hosts[0]
+
+- name: Start erikube-loadbalancer service
+  ignore_errors: true
+  systemd:
+    name: "{{ ingress_lb_service }}.service"
+    state: started
+  when: groups['ingress_lb'] is defined and inventory_hostname in groups['ingress_lb']

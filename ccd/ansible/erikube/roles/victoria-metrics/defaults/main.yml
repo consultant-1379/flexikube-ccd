@@ -1,0 +1,13 @@
+---
+
+# Namespace for Victoria Metrics
+victoria_metrics_namespace: monitoring
+
+# Secret in above namespace for Victoria Metrics cert to Etcd
+victoria_metrics_secret_name: etcd-certs
+
+# Scrape interval to be configured else it will default to 30s.
+scrape_interval: 30s
+
+# threshold for NTP Last Offset alert
+pm_victoria_metrics_ntp_offset_threshold: 0.1

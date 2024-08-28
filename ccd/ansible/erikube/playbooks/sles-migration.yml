@@ -1,0 +1,92 @@
+---
+- name: Gather facts as non root
+  hosts: all
+  gather_facts: yes
+
+# prepare hosts without draining when drain_first condition isn't met
+- name: Prepare all hosts when drain is not needed
+  hosts: all
+  become: yes
+  tasks:
+    - block:
+        - name: Suse connect cleanup
+          command: "SUSEConnect --cleanup"
+          retries: 3
+          delay: 3
+          register: result
+          until: result.rc == 0
+          when: ansible_distribution == "SLES" and sles_rmt_server is defined
+
+        - name: Connect to SUSE Customer Center with Registration Code
+          command: "SUSEConnect -r {{ sles_reg_code }}"
+          retries: 3
+          delay: 3
+          register: result
+          until: result.rc == 0
+          when: ansible_distribution == "SLES" and sles_reg_code is defined and sles_reg_code | length > 0
+
+        - name: Dowload CA cert to connect to Ericsson RMT server
+          command: "curl http://10.117.56.7/certs/rmt-ca.crt --output /etc/pki/trust/anchors/rmt-ca.crt"
+          retries: 3
+          delay: 3
+          register: result
+          until: result.rc == 0
+          when: ansible_distribution == "SLES" and sles_rmt_server is defined
+
+        - name: Connect to Ericsson RMT Server
+          command: "SUSEConnect --write-config --url https://10.117.56.7"
+          retries: 3
+          delay: 10
+          register: result
+          until: result.rc == 0
+          when: ansible_distribution == "SLES" and sles_rmt_server is defined
+
+        - name: Activate extra product modules
+          command: "SUSEConnect -p {{ item }}"
+          retries: 3
+          delay: 5
+          register: result
+          until: result.rc == 0
+          loop: "{{ upgrading | ternary(old_extra_product_modules, extra_product_modules) }}"
+          when: ansible_distribution == "SLES" and ((sles_reg_code is defined and sles_reg_code | length > 0) or sles_rmt_server is defined )
+
+        - name: zypper refresh
+          command: "zypper refresh"
+          when: ansible_distribution == "SLES" and sles_rmt_server is defined
+
+        - name: Install zypper migration plugin
+          command: "zypper -n in zypper-migration-plugin"
+
+        - name: Start to upgrade OS with zypper
+          shell: "zypper migration -l -n  $(zypper migration --query | awk '/SUSE Linux Enterprise Server 15 SP5 x86_64/ {print $1}')"
+
+        - name: Deregistered SLES repos
+          command: "SUSEConnect -d"
+          retries: 3
+          delay: 3
+          register: result
+          until: result.rc == 0
+          ignore_errors: yes
+          when: ansible_distribution == "SLES" and ((sles_reg_code is defined and sles_reg_code | length > 0) or sles_rmt_server is defined )
+
+          # Need to ignore error due to: https://github.com/ansible/ansible/issues/43385
+        - name: Reboot the machine in order to take new kernel-default and patches into use
+          reboot:
+
+        - name: Wait for the reboot to complete
+          wait_for_connection:
+            connect_timeout: 20
+            sleep: 5
+            delay: 5
+
+      when: ansible_distribution == "SLES"
+
+      always:
+        - name: Deregistered SLES repos
+          command: "SUSEConnect -d"
+          retries: 3
+          delay: 3
+          register: result
+          until: result.rc == 0
+          ignore_errors: yes
+          when: ansible_distribution == "SLES" and ((sles_reg_code is defined and sles_reg_code | length > 0) or sles_rmt_server is defined )

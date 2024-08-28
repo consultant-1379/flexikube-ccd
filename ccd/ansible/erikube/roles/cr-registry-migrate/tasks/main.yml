@@ -1,0 +1,65 @@
+- name: Wait registry to be ready for migration
+  block:
+    - name: Wait registry to be ready.
+      shell: "{{ kubectl }} -n kube-system get po -l app=eric-lcm-container-registry -o json| jq '.items|.[]|.status.phase'"
+      register: cr_registry_status
+      until: (cr_registry_status.stdout_lines | length == 1) and (cr_registry_status.stdout.find("Running") != -1)
+      retries: 480
+      delay: 15
+  when: old_pvc_exists
+
+- name: Migrate if old PVC is found
+  block:
+    - name: Create temp workspace directory
+      command: mktemp -d /tmp/erikube-k8s-XXXXXX
+      register: mktemp_migrate
+      changed_when: False
+
+    - name: Create Migrate job file
+      template:
+        src: "migrate-job.yaml.j2"
+        dest: "{{ mktemp_migrate.stdout }}/migrate-job.yaml"
+
+    - name: Delete old migration pod if found
+      shell: "{{ kubectl }} delete -f {{ mktemp_migrate.stdout }}/migrate-job.yaml"
+      ignore_errors: yes
+      register: result
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: (result.rc == 0 or "not found" in result.stderr)
+
+    - name: Apply migrate job
+      shell: "{{ kubectl }} apply -f {{ mktemp_migrate.stdout }}/migrate-job.yaml"
+      register: result
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: result.rc == 0
+
+    - name: Wait migration (max 120min)s
+      shell: "{{ kubectl }} -n kube-system get po | grep k8s-cr-registry-migration"
+      register: migrate_pod_status
+      until: migrate_pod_status.stdout.find("Completed") != -1
+      retries: 480
+      delay: 15
+
+    - name: Clean migrate job
+      shell: "{{ kubectl }} delete -f {{ mktemp_migrate.stdout }}/migrate-job.yaml"
+      register: result
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: (result.rc == 0 or "not found" in result.stderr)
+
+    - name: Delete old pvc
+      shell: "{{ kubectl }} -n kube-system delete pvc {{ cr_pvc_name }}"
+      ignore_errors: yes
+      register: result
+      retries: "{{ kubectl_retry_count }}"
+      delay: "{{ kubectl_retry_delay }}"
+      until: (result.rc == 0 or "not found" in result.stderr)
+
+    - name: Delete temp directory
+      file:
+        name: "{{ mktemp_migrate.stdout }}"
+        state: absent
+      changed_when: False
+  when: old_pvc_exists

@@ -1,0 +1,37 @@
+
+- set_fact:
+    keylist: []
+
+- block:
+  - name: Slurp existing crypto cfg
+    slurp:
+      src: "{{ kube_cryptprov_cfg_file }}"
+    register: cryptprov_conf
+
+  - name: parse existing config
+    set_fact:
+      existing_crypt_cfg: "{{ cryptprov_conf['content'] | b64decode | from_yaml }}"
+
+  - name: get existing keys
+    set_fact:
+      keylist: "{{ existing_crypt_cfg['resources'][0].providers[0].aescbc['keys'] }}"
+
+  when: conf_file_exists
+
+- name: Generate new secrets key
+  set_fact:
+    newkeystruct:
+      name: "key-{{ ansible_date_time.iso8601_basic_short }}"
+      secret: "{{ lookup('keygen', 32) }}"
+
+- name: Put new key at start of key list
+  set_fact:
+    keylist: "{{ [ newkeystruct ] + keylist  }}"
+  when: first_key == "newkey"
+
+- name: Append new key to end of key list
+  set_fact:
+    keylist: "{{ keylist + [ newkeystruct ] }}"
+  when: not first_key == "newkey"
+
+

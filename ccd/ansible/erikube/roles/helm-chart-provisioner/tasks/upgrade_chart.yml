@@ -1,0 +1,206 @@
+---
+
+- name: Authorize local registry access before helm
+  shell: "{{ docker_cmd }} login -u {{ local_registry_user }} -p {{ local_registry_password }} registry.eccd.local:5000"
+  ignore_errors: true
+  when: local_registry_user is defined and local_registry_user != ""
+
+- name: Get helm3 status
+  shell: "{{ erikube_client_context }} {{ erikube_client_image }} helm status {{ chart_name }} --namespace {{ kube_namespace | default('default') }}"
+  register: chart3_status
+  ignore_errors: true
+
+- name: Upgrade helm3 chart
+  when: chart3_status.rc == 0
+  block:
+
+  - name: Delete chart if already there when update-installed
+    when: state == 'update-installed'
+    file:
+      state: absent
+      path: "{{ k8s_helm_file_loc }}/{{ chart_name }}"
+
+  - name: Get helm3 chart manifest
+    shell: "{{ helm }} get manifest {{ chart_name }} --namespace {{ kube_namespace | default('default') }}"
+    register: helm3_chart_manifest
+
+  - name: Set required helm3 related annotaties and label if not exist for deployment resource
+    block:
+
+      - name: Get the names of the deployments
+        shell: "{{ kubectl }} get deployment -l release={{ chart_name }} -A -o name | cut -d '/' -f2"
+        register: helm3_chart_deployment_names
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: (helm3_chart_deployment_names.rc == 0 or "not found" in helm3_chart_deployment_names.stderr)
+
+      - name: Set meta.helm.sh/release annotate
+        shell: "{{ kubectl }} annotate --overwrite deployment {{ item }} --namespace {{ kube_namespace | default('default') }} meta.helm.sh/release-name={{ chart_name }}"
+        with_items: "{{ helm3_chart_deployment_names.stdout_lines }}"
+        register: result
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: result.rc == 0
+
+      - name: Set meta.helm.sh/release-namespace annotate
+        shell: "{{ kubectl }} annotate --overwrite deployment {{ item }} --namespace {{ kube_namespace | default('default') }} meta.helm.sh/release-namespace={{ kube_namespace | default('default') }}"
+        with_items: "{{ helm3_chart_deployment_names.stdout_lines }}"
+        register: result
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: result.rc == 0
+
+      - name: Set Helm label
+        shell: "{{ kubectl }} label --overwrite deployment {{ item }} --namespace {{ kube_namespace | default('default') }} app.kubernetes.io/managed-by=Helm"
+        with_items: "{{ helm3_chart_deployment_names.stdout_lines }}"
+        register: result
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: result.rc == 0
+
+    when: '"kind: Deployment" in helm3_chart_manifest.stdout'
+
+  - name: Set required helm3 related annotaties and label if not exist for Statefulset resource
+    block:
+
+      - name: Get the names of the Statefulsets
+        shell: "{{ kubectl }} get statefulset -l release={{ chart_name }} -A -o name | cut -d '/' -f2"
+        register: helm3_chart_statefulset_names
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: (helm3_chart_statefulset_names.rc == 0 or "not found" in helm3_chart_statefulset_names.stderr)
+
+      - name: Set meta.helm.sh/release annotate
+        shell: "{{ kubectl }} annotate --overwrite statefulset {{ item }} --namespace {{ kube_namespace | default('default') }} meta.helm.sh/release-name={{ chart_name }}"
+        with_items: "{{ helm3_chart_statefulset_names.stdout_lines }}"
+        register: result
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: result.rc == 0
+
+      - name: Set meta.helm.sh/release-namespace annotate
+        shell: "{{ kubectl }} annotate --overwrite statefulset {{ item }} --namespace {{ kube_namespace | default('default') }} meta.helm.sh/release-namespace={{ kube_namespace | default('default') }}"
+        with_items: "{{ helm3_chart_statefulset_names.stdout_lines }}"
+        register: result
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: result.rc == 0
+
+      - name: Set Helm label
+        shell: "{{ kubectl }} label --overwrite statefulset {{ item }} --namespace {{ kube_namespace | default('default') }} app.kubernetes.io/managed-by=Helm"
+        with_items: "{{ helm3_chart_statefulset_names.stdout_lines }}"
+        register: result
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: result.rc == 0
+
+    when: '"kind: StatefulSet" in helm3_chart_manifest.stdout'
+
+  - name: Set required helm3 related annotaties and label if not exist for DaemonSet resource
+    block:
+
+      - name: Get the names of the DaemonSets
+        shell: "{{ kubectl }} get daemonset -l release={{ chart_name }} -A -o name | cut -d '/' -f2"
+        register: helm3_chart_daemonset_names
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: (helm3_chart_daemonset_names.rc == 0 or "not found" in helm3_chart_daemonset_names.stderr)
+
+      - name: Set meta.helm.sh/release annotate
+        shell: "{{ kubectl }} annotate --overwrite daemonset {{ item }} --namespace {{ kube_namespace | default('default') }} meta.helm.sh/release-name={{ chart_name }}"
+        with_items: "{{ helm3_chart_daemonset_names.stdout_lines }}"
+        register: result
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: result.rc == 0
+
+      - name: Set meta.helm.sh/release-namespace annotate
+        shell: "{{ kubectl }} annotate --overwrite daemonset {{ item }} --namespace {{ kube_namespace | default('default') }} meta.helm.sh/release-namespace={{ kube_namespace | default('default') }}"
+        with_items: "{{ helm3_chart_daemonset_names.stdout_lines }}"
+        register: result
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: result.rc == 0
+
+      - name: Set Helm label
+        shell: "{{ kubectl }} label --overwrite daemonset {{ item }} --namespace {{ kube_namespace | default('default') }} app.kubernetes.io/managed-by=Helm"
+        with_items: "{{ helm3_chart_daemonset_names.stdout_lines }}"
+        register: result
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: result.rc == 0
+
+    when: '"kind: DaemonSet" in helm3_chart_manifest.stdout'
+
+  - name: Set required helm3 related annotaties and label if not exist for Ingress resource
+    block:
+
+      - name: Get the names of the Ingress
+        shell: "{{ kubectl }} get ingress -l release={{ chart_name }} -A -o name | cut -d '/' -f2"
+        register: helm3_chart_ingress_names
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: (helm3_chart_ingress_names.rc == 0 or "not found" in helm3_chart_ingress_names.stderr)
+
+      - name: Set meta.helm.sh/release annotate
+        shell: "{{ kubectl }} annotate --overwrite ingress {{ item }} --namespace {{ kube_namespace | default('default') }} meta.helm.sh/release-name={{ chart_name }}"
+        with_items: "{{ helm3_chart_ingress_names.stdout_lines }}"
+        register: result
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: result.rc == 0
+
+      - name: Set meta.helm.sh/release-namespace annotate
+        shell: "{{ kubectl }} annotate --overwrite ingress {{ item }} --namespace {{ kube_namespace | default('default') }} meta.helm.sh/release-namespace={{ kube_namespace | default('default') }}"
+        with_items: "{{ helm3_chart_ingress_names.stdout_lines }}"
+        register: result
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: result.rc == 0
+
+      - name: Set Helm label
+        shell: "{{ kubectl }} label --overwrite ingress {{ item }} --namespace {{ kube_namespace | default('default') }} app.kubernetes.io/managed-by=Helm"
+        with_items: "{{ helm3_chart_ingress_names.stdout_lines }}"
+        register: result
+        retries: "{{ kubectl_retry_count }}"
+        delay: "{{ kubectl_retry_delay }}"
+        until: result.rc == 0
+    when: '"kind: Ingress" in helm3_chart_manifest.stdout'
+
+  - name: wget {{ chart_name }} chart
+    get_url: >
+      url="{{ tarball }}"
+      dest="{{ k8s_helm_file_loc }}/{{ chart_name }}"
+      timeout=20
+    when: '"https://" in tarball'
+
+  - name: copy {{ chart_name }} chart
+    copy: >
+      src="{{ tarball }}"
+      dest="{{ k8s_helm_file_loc }}/{{ chart_name }}"
+    when: '"https://" not in tarball'
+
+  - include: update_product_info.yml
+    when: productInfo is defined
+
+  - name: configure values of {{ chart_name }} chart
+    when: values is defined
+    copy:
+      content: "{{ values }}"
+      dest: "{{ k8s_helm_file_loc }}/values_{{ chart_name }}.yaml"
+
+  - name:  update {{ chart_name }} chart with custom values
+    shell: |
+      {{ helm }} upgrade {{ chart_name }} -f /charts/values_{{ chart_name }}.yaml \
+      /charts/{{ chart_name }} {{ extra_params | default('') }} --namespace {{ kube_namespace | default('default') }} \
+      --timeout {{ helm_install_timeout }} --debug --wait
+    when: values is defined
+
+  - name:  update {{ chart_name }} chart
+    shell: |
+      {{ helm }} upgrade {{ chart_name }} /charts/{{ chart_name }} {{ extra_params | default('') }} \
+      --namespace {{ kube_namespace | default('default') }}  --timeout {{ helm_install_timeout }} --debug --wait
+    when: values is not defined
+
+- when: chart3_status.rc != 0
+  include_tasks: install_chart.yml

@@ -1,0 +1,5 @@
+---
+# Defaults
+node_csr: ""
+times: 0
+reattempt: 30

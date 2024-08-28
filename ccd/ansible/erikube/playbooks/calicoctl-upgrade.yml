@@ -1,0 +1,14 @@
+
+---
+- name: Update calicoctl
+  hosts: master[0]
+  pre_tasks:
+  - include_vars: ../../common/container-list.json
+  vars:
+  - kube_image_prefix: "{{ docker_registry_host | default(default_registry) }}/"
+  - image: "{{ kube_image_prefix }}{{ containers.calico.ctl }}"
+  - calicoctl_image: "{{ calicoctl_ext_image | default(image) }}"
+  - calicoctl_action: update
+  roles:
+  - role: erikube-defaults
+  - role: calicoctl

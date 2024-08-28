@@ -1,0 +1,33 @@
+- name: Create tmp directory
+  file: path="{{ os_cacert_tmp_dir }}" state=directory
+
+- block:
+  - name: Create tmp directory
+    file: path="{{ os_cacert_tmp_dir }}" state=directory
+
+  - name: Create OS CA cert
+    copy:
+      content: "{{ openstack_ca_cert }}"
+      dest: "{{ os_cacert_tmp_dir }}/os_cacert"
+
+  - name: Delete secret os_cacert if exists
+    shell: "{{ kubectl }} delete secret openstack-ca-cert -n kube-system"
+    ignore_errors: yes
+    register: result
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: (result.rc == 0 or "not found" in result.stderr)
+
+  - name: Create secret os_cacert to kube-system namespace
+    shell: "{{ kubectl }} create secret generic openstack-ca-cert --from-file={{ os_cacert_tmp_dir }}/os_cacert -n kube-system"
+    register: result
+    retries: "{{ kubectl_retry_count }}"
+    delay: "{{ kubectl_retry_delay }}"
+    until: result.rc == 0
+  when:
+    - openstack_ca_cert is defined
+    - openstack_ca_cert != ""
+    - rotate_os_cacert is defined
+
+- name: Delete tmp directory
+  file: path="{{ os_cacert_tmp_dir }}" state=absent

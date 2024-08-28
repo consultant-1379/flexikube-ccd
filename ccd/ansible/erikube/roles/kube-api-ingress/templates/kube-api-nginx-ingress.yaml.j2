@@ -1,0 +1,33 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+{% if ingress_class | default("") != "" %}
+    kubernetes.io/ingress.class: {{ ingress_class }}
+{% endif %}
+{% if ingress_class is defined and ingress_class == "nginx" %}
+    nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+{% else %}
+    ingress.kubernetes.io/ssl-passthrough: "true"
+{% endif %}
+{% if ingress_class is defined and ingress_class == "nginx" %}
+    nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+{% endif %}
+  name: kubernetes-api
+  namespace: kube-system
+spec:
+  rules:
+  - host: {{ kube_api_ingress_host }}
+    http:
+      paths:
+      - backend:
+          service:
+            name: kube-api
+            port:
+              number: {{ kube_apiserver_port }}
+        path: /
+        pathType: ImplementationSpecific
+  tls:
+  - hosts:
+    - {{ kube_api_ingress_host }}

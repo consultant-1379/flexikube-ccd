@@ -1,0 +1,12 @@
+
+- name: Upgrade Openstack Cloud Provider
+  hosts: master[0]
+  pre_tasks:
+    - include_vars: ../../common/container-list.json
+  roles:
+    - erikube-defaults
+  tasks:
+  - include_role:
+      name: openstack-cloud-provider
+    vars:
+      ansible_become: yes

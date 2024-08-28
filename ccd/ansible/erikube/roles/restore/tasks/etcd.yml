@@ -1,0 +1,33 @@
+---
+- name: Include etcd variable defaults
+  include_vars: roles/etcd/defaults/main.yml
+
+- block:
+  - name: Purge current etcd database
+    file:
+      path: "{{ etcd_data_dir }}"
+      state: absent
+
+  - name: Restore etcd binaries
+    command: tar -xzvf /tmp/etcd-bins.tgz -C /
+
+  - name: Restore etcd database from snapshot
+    shell: >
+      source {{ etcd_conf_file }} && ETCDCTL_API=3 /usr/local/bin/etcdctl
+      snapshot restore /tmp/{{ etcd_snapshot_name }}
+      --cacert="{{ etcd_peer_ca_file }}" --cert="{{ etcd_peer_cert_file }}"
+      --key="{{ etcd_peer_key_file }}" --endpoints="https://{{ etcd_ip }}:{{ etcd_client_port }}"
+      --name="$ETCD_NAME" --initial-cluster="$ETCD_INITIAL_CLUSTER"
+      --initial-cluster-token="$ETCD_INITIAL_CLUSTER_TOKEN"
+      --initial-advertise-peer-urls="$ETCD_INITIAL_ADVERTISE_PEER_URLS"
+      --data-dir="$ETCD_DATA_DIR"
+    args:
+      executable: /bin/bash
+  always:
+    - name: Delete temorary files
+      file:
+        path: "{{ item }}"
+        state: absent
+      with_items:
+      - /tmp/{{ etcd_snapshot_name }}
+      - /tmp/etcd-bins.tgz

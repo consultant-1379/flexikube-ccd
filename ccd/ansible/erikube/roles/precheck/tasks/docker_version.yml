@@ -1,0 +1,18 @@
+---
+- name: Check for supported version of Docker (Non-Debian/Suse)
+  shell: docker --version | awk '{print $3}' | cut -d ',' -f1
+  register: installed_docker_version
+  failed_when: installed_docker_version.stdout not in supported_docker_versions
+  when: ansible_os_family != 'Debian' and ansible_os_family != 'Suse'
+
+- name: Check the major release version of Docker (Debian & Suse)
+  shell: docker --version | awk '{print $3}' | cut -d '.' -f1
+  register: installed_major_docker_version
+  when: ansible_os_family == 'Debian' or ansible_os_family == 'Suse'
+
+- name: Verify the installed docker version is greater than {{ minimum_major_docker_version }} (Debian & Suse)
+  assert:
+    that:
+      - "{{ installed_major_docker_version.stdout | int }} >= {{ minimum_major_docker_version | int }}"
+    msg: "Installed docker version is {{ installed_major_docker_version.stdout | int }}, requirement is version {{ minimum_major_docker_version | int }} or newer"
+  when: ansible_os_family == 'Debian' or ansible_os_family == 'Suse'

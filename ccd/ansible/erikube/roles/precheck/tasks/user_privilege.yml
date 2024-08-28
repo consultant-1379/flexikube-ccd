@@ -1,0 +1,5 @@
+---
+- name: Check user privilege
+  assert:
+    that: ansible_user_uid != "0"
+    msg: "Please use non-root user for cluster deployment"

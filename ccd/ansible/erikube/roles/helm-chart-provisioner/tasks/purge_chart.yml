@@ -1,0 +1,25 @@
+---
+- name: Get helm status
+  shell: "{{ get_helm_status }}"
+  register: chart_status
+  failed_when: false == true
+
+- when: chart_status.rc == 0
+  block:
+  - name: delete {{ chart_name }} with helm
+    shell: "{{ helm }} delete {{ chart_name }} --namespace {{ kube_namespace | default('default') }} --debug"
+    failed_when: false == true
+
+  - name: Check the status of helm chart after deletion
+    shell: "{{ get_helm_status }}"
+    register: result
+    until: '"Error: release: not found" in result.stderr'
+    retries: 5
+    delay: 10
+    ignore_errors: true
+
+  - name: Check that chart is removed
+    assert:
+      that:
+        - '"Error: release: not found" in result.stderr'
+      msg: "'Release still exist!"

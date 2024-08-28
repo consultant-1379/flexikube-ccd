@@ -1,0 +1,18 @@
+[Unit]
+Description=erikube ingress load balancer container
+After={{ docker_cmd }}.service
+Requires={{ docker_cmd }}.service
+PartOf={{ docker_cmd }}.service
+
+[Service]
+ExecStartPre=-/usr/bin/{{ docker_cmd }} rm -f {{ ingress_lb_service }}
+ExecStart=/usr/bin/{{ docker_cmd }} run --name {{ ingress_lb_service }} --rm -v {{ ingress_lb_data_dir }}:/etc/kube \
+   --net=host  --cap-add=NET_ADMIN {{ ingress_lb_image }} \
+   /usr/local/bin/extLB_monitor.sh {{ lb_external_ip }} {{ lb_internal_ip }}
+ExecStop=/usr/bin/{{ docker_cmd }} stop {{ ingress_lb_service }}
+SyslogIdentifier=ingress_lb_container
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy={{ docker_cmd }}.service
